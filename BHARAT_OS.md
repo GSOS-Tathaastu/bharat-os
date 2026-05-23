@@ -881,6 +881,44 @@ ONDC is still useful, but only as a **bridge**, not the substrate:
 This is the same posture Bharat OS takes toward MOSIP / UPI in §13C — adopt
 the open protocols, but own the OS-level integration.
 
+### A third mode: app handoff (the user's already-installed app)
+
+A real user may already have Uber, Ola, Rapido, Namma Yatri, MakeMyTrip,
+OYO, IRCTC, Swiggy, Zomato, BigBasket, or Blinkit installed. Forcing them
+to switch is disrespectful and unrealistic. Bharat OS does the
+**vernacular voice intent** part and **hands off** the transaction to
+their preferred app via Android intent / deep link, with the route or
+order pre-filled.
+
+This is **not** the "wrap Uber" pattern rejected above. The distinction:
+
+| Mode | Bharat OS captures customer? | Bharat OS transacts? | Aggregator-licensing exposure | Pattern |
+|---|---|---|---|---|
+| Wrap (rejected) | Yes — pretends to be the marketplace | Yes — brokers booking via Uber's API | Yes (MV Aggregator Guidelines, hospitality, etc.) | What AGI Inc. attempts; reliability ceiling |
+| **Handoff (allowed)** | No — transparent: *"opening Uber for you"* | No — user pays in their own app | No — Bharat OS is a launcher, not an aggregator | `uber://`, `olacabs://`, `mmyt://`, `irctc://`, `swiggy://`, web fallback |
+| Native marketplace | Yes | Yes (UPI escrow) | Bharat OS is the regulated entity | The §9B substrate |
+| ONDC bridge | Buyer-app only | Buyer-app only | Buyer-app, not aggregator | Beckn protocol |
+
+The L6 service marketplace tool returns **all three** in the receipt:
+- `chosen.providerName` + `payment.uri` (the native or ONDC-bridge booking)
+- `appHandoffs[]` (a list of deep links + web fallbacks for known apps)
+
+The shell renders the native booking *first* (because §15 substrate-
+ownership), then below it: *"Or open in your app: Uber · Ola · Namma
+Yatri · …"*. User picks. Bharat OS is respectful of pre-existing user
+loyalty without giving up the substrate-ownership thesis.
+
+**User preference is the routing signal.** Once the user picks Ola for
+cabs three times, Bharat OS records the preference in L5 memory and
+the next *"book a cab"* intent ranks Ola's handoff first. The native
+marketplace and ONDC bridge stay one tap away.
+
+Why this matters strategically: the most common investor question is
+*"what if I already use Uber?"* — *"we hand off to Uber on your phone
+and don't take a cut, but the same voice intent also surfaces a 0%-
+commission native driver and an ONDC option so the choice is yours"* is
+a much better answer than *"we'll make you switch."*
+
 ### Phase B: native marketplace is the default
 
 In steady state, providers (drivers, hotels, professionals, contractors) run

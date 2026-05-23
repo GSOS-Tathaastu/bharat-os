@@ -501,6 +501,42 @@ body {
   gap: 8px;
 }
 
+.handoff-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.handoff-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-right: 4px;
+  width: 100%;
+}
+
+.handoff-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.handoff-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .capture-card {
   background: var(--surface);
   border: 1px solid var(--border);

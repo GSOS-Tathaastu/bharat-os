@@ -548,6 +548,19 @@ function renderActionDetail(actionType, receipt, orchestration) {
     const paymentAction = payment.uri
       ? `<a class="pay-action" href="${escapeHtml(payment.uri)}" aria-label="Pay ${escapeHtml(fare)} with UPI">Pay with UPI</a>`
       : '';
+    const handoffs = Array.isArray(receipt.appHandoffs) ? receipt.appHandoffs : [];
+    const handoffActions = handoffs.length > 0
+      ? `<div class="handoff-row">
+          <span class="handoff-label">Or open in your app:</span>
+          ${handoffs.map((h) => `
+            <a class="handoff-action"
+               href="${escapeHtml(h.uri)}"
+               data-fallback="${escapeHtml(h.webFallback)}"
+               data-app="${escapeHtml(h.app)}"
+               rel="noopener">${escapeHtml(h.label)}</a>
+          `).join('')}
+        </div>`
+      : '';
     return `
       <dl class="result-detail-grid">
         <dt>Provider</dt><dd>${escapeHtml(chosen.providerName ?? '--')} (${escapeHtml(chosen.source ?? '--')})</dd>
@@ -559,6 +572,7 @@ function renderActionDetail(actionType, receipt, orchestration) {
         <dt>Booking ref</dt><dd>${escapeHtml(shortId(receipt.bookingRef ?? ''))}</dd>
       </dl>
       ${paymentAction}
+      ${handoffActions}
     `;
   }
   if (actionType === 'labor_match_post') {
@@ -1327,6 +1341,28 @@ function renderDiagnostics() {
 renderDiagnostics();
 
 $('flagReportSubmit').addEventListener('click', submitFlagReport);
+
+// App handoff fallback: if the deep link doesn't open the installed app
+// within a short window, navigate to the web fallback URL. This is a
+// best-effort heuristic — there's no reliable API to detect "app opened"
+// cross-browser, but the page-visibility trick covers most cases.
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('a.handoff-action');
+  if (!link) return;
+  const fallback = link.dataset.fallback;
+  if (!fallback) return;
+  let didOpen = false;
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') didOpen = true;
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', onVisibility);
+    if (!didOpen) {
+      window.location.href = fallback;
+    }
+  }, 1500);
+});
 
 setupVoice();
 loadIdentities().catch((error) => {

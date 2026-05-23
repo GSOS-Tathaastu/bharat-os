@@ -144,6 +144,14 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.10 third §9B booking mode — **app handoff** to the user's
+  already-installed Uber / Ola / Rapido / Namma Yatri / MakeMyTrip / OYO /
+  Booking / IRCTC / Swiggy / Zomato / BigBasket / Blinkit / Urban Company.
+  Service-booking receipts now carry an `appHandoffs[]` list (deep-link URI
+  + web fallback per app) alongside the native booking + payment URI.
+  Bharat OS does not transact when the user picks a handoff — the user pays
+  in their own app. Shell renders the handoff row below the native action;
+  `metadata.preferredApps` filters the list to user preference. ADR 0059.
 - Phase 2a.9 §9A safeguard escalation — signed flag reports
   (`src/phase1/flag-report.mjs`), `policy.report.flag_review_threshold` that
   auto-blocks subjects with 3+ open high-severity flags, store persistence

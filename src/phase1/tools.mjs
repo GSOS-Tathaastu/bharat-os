@@ -105,6 +105,160 @@ export function createUpiDeepLink({
   return `upi://pay?${params.toString()}`;
 }
 
+// §9B mode 3: app handoff. When the user has Uber / Ola / Rapido / Namma
+// Yatri / Swiggy / IRCTC etc. already installed, the most respectful flow is
+// to hand off the intent to *their* app rather than try to broker the
+// booking ourselves. Bharat OS doesn't transact — no money flows through us,
+// no aggregator-licensing exposure (Motor Vehicle Aggregator Guidelines etc.).
+//
+// Each entry: app key (matches `metadata.preferredApps[]`), the deep-link
+// URI template (best-effort — exact schemes vary by app version / OS, so we
+// always pair with a web fallback that works in any browser), and a label.
+// The shell renders one button per entry. Patterns use URLSearchParams so
+// they're URL-safe.
+const APP_HANDOFF_REGISTRY = {
+  cab: [
+    {
+      app: 'uber',
+      label: 'Uber',
+      // Uber documents `uber://` for setPickup; lat/lng are optional.
+      buildUri: ({ from, to }) => {
+        const params = new URLSearchParams({ action: 'setPickup' });
+        if (from) params.set('pickup[nickname]', from);
+        if (to) params.set('dropoff[nickname]', to);
+        return `uber://?${params.toString()}`;
+      },
+      webFallback: ({ from, to }) =>
+        `https://m.uber.com/looking?${new URLSearchParams({
+          drop: to ?? '',
+          pickup: from ?? ''
+        }).toString()}`
+    },
+    {
+      app: 'ola',
+      label: 'Ola',
+      buildUri: ({ from, to }) => {
+        const params = new URLSearchParams({
+          utm_source: 'bharat_os',
+          pickup_text: from ?? '',
+          drop_text: to ?? ''
+        });
+        return `olacabs://app/launch?${params.toString()}`;
+      },
+      webFallback: () => 'https://book.olacabs.com/'
+    },
+    {
+      app: 'rapido',
+      label: 'Rapido',
+      buildUri: () => 'rapido://',
+      webFallback: () => 'https://onelink.to/rapido'
+    },
+    {
+      app: 'namma_yatri',
+      label: 'Namma Yatri',
+      buildUri: () => 'nammayatri://',
+      webFallback: () => 'https://nammayatri.in/'
+    }
+  ],
+  hotel: [
+    {
+      app: 'makemytrip',
+      label: 'MakeMyTrip',
+      buildUri: ({ to }) =>
+        `mmyt://hotel/${encodeURIComponent(to ?? 'in')}`,
+      webFallback: ({ to }) =>
+        `https://www.makemytrip.com/hotels/${encodeURIComponent((to ?? 'in').toLowerCase())}-hotels/`
+    },
+    {
+      app: 'oyo',
+      label: 'OYO',
+      buildUri: () => 'oyorooms://',
+      webFallback: ({ to }) =>
+        `https://www.oyorooms.com/search?location=${encodeURIComponent(to ?? '')}`
+    },
+    {
+      app: 'booking',
+      label: 'Booking.com',
+      buildUri: () => 'booking://',
+      webFallback: ({ to }) =>
+        `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(to ?? '')}`
+    }
+  ],
+  ticket: [
+    {
+      app: 'irctc',
+      label: 'IRCTC Rail',
+      buildUri: () => 'irctc-rail-connect://',
+      webFallback: () => 'https://www.irctc.co.in/'
+    },
+    {
+      app: 'makemytrip',
+      label: 'MakeMyTrip',
+      buildUri: () => 'mmyt://',
+      webFallback: ({ from, to }) =>
+        `https://www.makemytrip.com/railways/?fromCity=${encodeURIComponent(from ?? '')}&toCity=${encodeURIComponent(to ?? '')}`
+    }
+  ],
+  food: [
+    {
+      app: 'swiggy',
+      label: 'Swiggy',
+      buildUri: () => 'swiggy://',
+      webFallback: () => 'https://www.swiggy.com/'
+    },
+    {
+      app: 'zomato',
+      label: 'Zomato',
+      buildUri: () => 'zomato://',
+      webFallback: () => 'https://www.zomato.com/'
+    }
+  ],
+  grocery: [
+    {
+      app: 'bigbasket',
+      label: 'BigBasket',
+      buildUri: () => 'bigbasket://',
+      webFallback: () => 'https://www.bigbasket.com/'
+    },
+    {
+      app: 'blinkit',
+      label: 'Blinkit',
+      buildUri: () => 'blinkit://',
+      webFallback: () => 'https://blinkit.com/'
+    }
+  ],
+  services: [
+    {
+      app: 'urbancompany',
+      label: 'Urban Company',
+      buildUri: () => 'urbanclap://',
+      webFallback: () => 'https://www.urbancompany.com/'
+    }
+  ]
+};
+
+function buildAppHandoffs(vertical, request) {
+  const apps = APP_HANDOFF_REGISTRY[vertical] ?? [];
+  if (apps.length === 0) return [];
+  const preferred = Array.isArray(request.metadata?.preferredApps)
+    ? request.metadata.preferredApps.map((value) => String(value).toLowerCase())
+    : [];
+  const filtered = preferred.length > 0
+    ? apps.filter((entry) => preferred.includes(entry.app))
+    : apps;
+  const quote = {
+    from: request.metadata?.from ?? null,
+    to: request.metadata?.to ?? null
+  };
+  return filtered.map((entry) => ({
+    app: entry.app,
+    label: entry.label,
+    uri: entry.buildUri(quote),
+    webFallback: entry.webFallback(quote),
+    transactsThroughBharatOS: false
+  }));
+}
+
 function serviceBookingPayment(request, { bookingRef, providerName, vertical, defaultPayeeAddress }) {
   const money = safeAmount(request.money);
   const payeeAddress = request.metadata?.payeeVpa ?? defaultPayeeAddress;
@@ -290,6 +444,7 @@ function ondcBeckn(request) {
       vertical,
       defaultPayeeAddress: 'ondc.provider@upi'
     }),
+    appHandoffs: buildAppHandoffs(vertical, request),
     quote: {
       from: request.metadata?.from ?? null,
       to: request.metadata?.to ?? null,
@@ -371,6 +526,7 @@ function bharatMarketplace(request) {
       vertical,
       defaultPayeeAddress: 'bharatos.marketplace@upi'
     }),
+    appHandoffs: buildAppHandoffs(vertical, request),
     quote: {
       from: request.metadata?.from ?? null,
       to: request.metadata?.to ?? null,
