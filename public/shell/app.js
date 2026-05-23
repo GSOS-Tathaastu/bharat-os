@@ -1875,6 +1875,94 @@ $('trustPassportRefresh')?.addEventListener('click', () => {
 $('trustPassportPreview')?.addEventListener('click', previewVerifierView);
 
 // ─── §7c device pairing — WebRTC handshake UI ──────────────────────────────
+
+// QR payload shape — versioned so future fields don't break older
+// scanners. Keep small so the QR stays low-density and readable.
+const QR_PAYLOAD_VERSION = 'bos.qr.v1';
+
+function makeQrPayload({ claimCode, phrase }) {
+  return JSON.stringify({ v: QR_PAYLOAD_VERSION, code: claimCode, phrase });
+}
+
+function parseQrPayload(text) {
+  try {
+    const obj = JSON.parse(text);
+    if (obj?.v !== QR_PAYLOAD_VERSION) return null;
+    if (!/^\d{6}$/.test(obj.code ?? '')) return null;
+    return { claimCode: String(obj.code), phrase: String(obj.phrase ?? '') };
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Lazy-load the qrcode library from a CDN the same way the SLM and
+// Tesseract loaders do. Bundle is tiny (~10 KB gzipped) so first
+// pairing has a 100ms delay only on cold cache.
+let qrLibPromise = null;
+async function loadQrLib() {
+  if (!qrLibPromise) {
+    qrLibPromise = import('https://esm.sh/qrcode@1.5.3?bundle');
+  }
+  return qrLibPromise;
+}
+
+async function renderQrInto(target, text) {
+  try {
+    const lib = await loadQrLib();
+    const QR = lib.default ?? lib;
+    const svg = await QR.toString(text, {
+      type: 'svg',
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      color: { dark: '#0c1018', light: '#ffffff' }
+    });
+    target.hidden = false;
+    target.innerHTML = svg;
+  } catch (error) {
+    target.hidden = false;
+    target.innerHTML = `<div class="diagnostics-note">QR render failed (${escapeHtml(error.message)}). Use the 6-digit code below.</div>`;
+  }
+}
+
+async function scanQrFromCamera({ onProgress } = {}) {
+  if (!('BarcodeDetector' in window)) {
+    throw new Error('BarcodeDetector API not available on this browser. Use "Paste QR text" instead.');
+  }
+  const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+  const video = $('pairingScanVideo');
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
+    });
+  } catch (_error) {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  }
+  video.srcObject = stream;
+  video.hidden = false;
+  await video.play().catch(() => null);
+  onProgress?.({ phase: 'scanning' });
+
+  const startMs = Date.now();
+  try {
+    while (Date.now() - startMs < 30_000) {
+      const barcodes = await detector.detect(video).catch(() => []);
+      const qr = barcodes.find((b) => b.format === 'qr_code');
+      if (qr?.rawValue) {
+        const parsed = parseQrPayload(qr.rawValue);
+        if (parsed) return parsed;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error('No QR scanned in 30s.');
+  } finally {
+    video.pause?.();
+    video.srcObject = null;
+    video.hidden = true;
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
 function setPairingStatus(text, { tone } = {}) {
   $('pairingStatus').textContent = text;
   $('pairingStatus').dataset.tone = tone ?? '';
@@ -1932,6 +2020,12 @@ async function startPairingInitiator() {
             <div class="pairing-phrase">Recovery phrase (read to the new device):</div>
             <div class="pairing-phrase-value">${escapeHtml(recoveryPhrase)}</div>
           `;
+          // QR encodes both the claim code and the recovery phrase so
+          // the receiver scans once instead of typing two things.
+          renderQrInto(
+            $('pairingQrDisplay'),
+            makeQrPayload({ claimCode: event.session.claimCode, phrase: recoveryPhrase })
+          ).catch((err) => console.warn('QR render', err));
           setPairingStatus('Waiting for new device to claim…');
         } else if (event.phase === 'fetching_vault_snapshot') {
           setPairingStatus('Sealing vault under recovery phrase…', { tone: 'good' });
@@ -1950,6 +2044,7 @@ async function startPairingInitiator() {
       ['Server saw', 'SDP only (zero identity bytes — §15)']
     ], { tone: 'good' });
     $('pairingCodeDisplay').hidden = true;
+    $('pairingQrDisplay').hidden = true;
   } catch (error) {
     setPairingStatus('Pairing failed', { tone: 'bad' });
     renderPairingResult('Pairing did not complete', [['Reason', error.message]], { tone: 'bad' });
@@ -1958,7 +2053,10 @@ async function startPairingInitiator() {
   }
 }
 
-async function claimPairingFromCode() {
+// `prefilledPhrase`: when the user arrives via a QR scan / paste,
+// the phrase is already known and the prompt is skipped. Manual code
+// entry still falls back to window.prompt for the phrase.
+async function claimPairingFromCode({ prefilledPhrase = null } = {}) {
   if (!sanityCheckActor()) return;
   const code = $('pairingClaimInput').value.trim();
   if (!/^\d{6}$/.test(code)) {
@@ -1972,10 +2070,17 @@ async function claimPairingFromCode() {
 
   try {
     const receiverFingerprint = await hashString(state.activeIdentity.id);
+    let usedPrefilled = false;
     const result = await pairing.startReceiver({
       claimCode: code,
       receiverFingerprint,
       promptForRecoveryPhrase: async ({ attempt, lastError }) => {
+        // QR scan / paste already supplied the phrase — try once
+        // before falling back to the manual prompt on rejection.
+        if (prefilledPhrase && !usedPrefilled) {
+          usedPrefilled = true;
+          return prefilledPhrase;
+        }
         const lead =
           attempt === 0
             ? 'Recovery phrase from the old device (12 words separated by spaces):'
@@ -2039,7 +2144,52 @@ async function hashString(value) {
 }
 
 $('pairingInitiateButton').addEventListener('click', startPairingInitiator);
-$('pairingClaimButton').addEventListener('click', claimPairingFromCode);
+$('pairingClaimButton').addEventListener('click', () => claimPairingFromCode());
+
+async function claimFromQrPayload(parsed, { source }) {
+  if (!parsed) {
+    showToast('That QR did not look like a Bharat OS pairing code.');
+    return;
+  }
+  $('pairingClaimInput').value = parsed.claimCode;
+  setPairingStatus(`Got code + phrase from ${source} — claiming…`, { tone: 'good' });
+  await claimPairingFromCode({ prefilledPhrase: parsed.phrase });
+}
+
+$('pairingScanButton')?.addEventListener('click', async () => {
+  setPairingStatus('Starting camera scan…');
+  try {
+    const parsed = await scanQrFromCamera({
+      onProgress: () => setPairingStatus('Scanning for QR…')
+    });
+    await claimFromQrPayload(parsed, { source: 'QR scan' });
+  } catch (error) {
+    setPairingStatus('Scan failed', { tone: 'bad' });
+    showToast(error.message);
+  }
+});
+
+$('pairingPasteButton')?.addEventListener('click', async () => {
+  const text = window.prompt(
+    'Paste the QR payload text (or just the 6-digit code if you only have that):',
+    ''
+  );
+  if (!text) return;
+  const trimmed = text.trim();
+  // First try JSON QR payload; fall back to a raw 6-digit code that
+  // claims without a prefilled phrase (existing prompt flow).
+  const parsed = parseQrPayload(trimmed);
+  if (parsed) {
+    await claimFromQrPayload(parsed, { source: 'paste' });
+    return;
+  }
+  if (/^\d{6}$/.test(trimmed)) {
+    $('pairingClaimInput').value = trimmed;
+    await claimPairingFromCode();
+    return;
+  }
+  showToast('Could not parse that as a pairing code or QR payload.');
+});
 
 
 // App handoff fallback: if the deep link doesn't open the installed app

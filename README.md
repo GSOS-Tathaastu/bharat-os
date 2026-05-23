@@ -144,6 +144,17 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.21 **QR-code pairing** — collapses the §7c receiver flow
+  from *"type 6-digit code + read 12 words aloud + type 12 words"*
+  into one scan. Initiator renders a QR (`{ v: 'bos.qr.v1', code, phrase }`)
+  next to the code + phrase display via lazy-loaded `qrcode` lib
+  from esm.sh. Receiver gets three claim paths in priority order:
+  📷 Scan QR (native `BarcodeDetector` + rear-camera `getUserMedia`),
+  📋 Paste QR text, and the existing typed-code path with the
+  manual-phrase prompt. `claimPairingFromCode({ prefilledPhrase })`
+  skips the prompt on QR-supplied phrases and falls back on
+  rejection. Backward-compatible. 230/230 tests. SW cache to v17.
+  ADR 0070.
 - Phase 2a.20 **Trust Passport shell card** — `/shell/` gains a
   *"🛡️ Trust Passport — what a verifier would see"* card with four
   tiles (attestations, active consents, NCS class, §9A flags) above

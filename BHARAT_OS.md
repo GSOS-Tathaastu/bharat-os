@@ -2144,6 +2144,9 @@ Closed in Phase 2a.19 (ADR 0068):
 Closed in Phase 2a.20 (ADR 0069):
 1. ✅ **Trust Passport shell card** — new *"🛡️ Trust Passport — what a verifier would see"* card sits above-the-fold with four tiles (attestations, active consents, NCS class, §9A flags) and a *"Show me what a landlord would see"* preview that renders the band-or-boolean selective-disclosure envelope inline before any attestation is minted. `createTrustPassport` artifact gains a `flagReports` block (`total / open / openHighSeverity / resolved / dismissed`) so the §9A safeguard escalation (ADR 0058) is finally user-visible in the passport itself. `trustPassportContext` threads `flagReports` from the store; `canonicalTrustPassportPayload` includes the block so signed snapshots cover it. 230 / 230 tests (+2 new). SW cache to v16.
 
+Closed in Phase 2a.21 (ADR 0070):
+1. ✅ **QR-code pairing** — collapses the §7c receiver flow from *"type 6-digit code + read 12 words aloud + type 12 words"* into a single scan. Initiator renders a QR encoding `{ v: 'bos.qr.v1', code: '<6 digits>', phrase: '<12 words>' }` next to the existing code + phrase display (qrcode lib lazy-loaded from esm.sh same as transformers.js / tesseract). Receiver gets three claim paths in priority order: 📷 Scan QR (native `BarcodeDetector` API + rear-camera `getUserMedia`), 📋 Paste QR text (fallback for browsers without `BarcodeDetector`), and the existing typed-code path. `claimPairingFromCode({ prefilledPhrase })` uses the QR-supplied phrase on attempt 0 and falls back to the manual prompt on rejection. Backward-compatible: older initiators / receivers still work. 230 / 230 tests. SW cache to v17.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

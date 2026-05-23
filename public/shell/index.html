@@ -193,13 +193,19 @@
                 <strong>Old device → New device</strong>
                 <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
                 <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
+                <div id="pairingQrDisplay" class="pairing-qr" hidden></div>
               </div>
               <div class="pairing-half">
                 <strong>Claim on new device</strong>
                 <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
+                <div class="pairing-claim-actions">
+                  <button id="pairingScanButton" class="link-button" type="button">📷 Scan QR</button>
+                  <button id="pairingPasteButton" class="link-button" type="button">📋 Paste QR text</button>
+                </div>
                 <button id="pairingClaimButton" class="secondary-button" type="button">Claim & receive</button>
               </div>
             </div>
+            <video id="pairingScanVideo" class="pairing-scan-video" hidden playsinline></video>
             <div id="pairingResult" class="capture-result" hidden></div>
           </section>
 
