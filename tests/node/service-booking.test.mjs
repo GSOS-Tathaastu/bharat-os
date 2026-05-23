@@ -84,6 +84,19 @@ test('marketplace adapter returns a normalized receipt with native provider winn
   assert.match(execution.toolReceipt.bookingRef, /^bos:booking:/);
   assert.deepEqual(execution.toolReceipt.sources, ['native', 'ondc-bridge']);
   assert.equal(execution.toolReceipt.bridgeAvailable, true);
+  assert.equal(execution.toolReceipt.payment.rail, 'upi');
+  assert.equal(execution.toolReceipt.payment.mode, 'deep_link');
+  assert.equal(execution.toolReceipt.payment.partnerIntegrated, false);
+  assert.equal(execution.toolReceipt.payment.requiresUserApproval, true);
+  assert.equal(execution.toolReceipt.payment.payeeAddress, 'bharatos.marketplace@upi');
+  const paymentUrl = new URL(execution.toolReceipt.payment.uri);
+  assert.equal(paymentUrl.protocol, 'upi:');
+  assert.equal(paymentUrl.hostname, 'pay');
+  assert.equal(paymentUrl.searchParams.get('pa'), 'bharatos.marketplace@upi');
+  assert.equal(paymentUrl.searchParams.get('pn'), 'Bharat OS Driver (native)');
+  assert.equal(paymentUrl.searchParams.get('am'), '250.00');
+  assert.equal(paymentUrl.searchParams.get('cu'), 'INR');
+  assert.match(paymentUrl.searchParams.get('tn'), /Bharat OS cab booking/);
 });
 
 test('marketplace can run native-only (no ONDC bridge) when caller opts out', () => {
@@ -127,6 +140,8 @@ test('ONDC bridge is callable directly for Phase A scenarios but is not the subs
   assert.equal(execution.toolReceipt.toolId, 'ondc_beckn');
   assert.equal(execution.toolReceipt.source, 'ondc');
   assert.equal(execution.toolReceipt.protocol, 'beckn-2.0');
+  assert.equal(execution.toolReceipt.payment.payeeAddress, 'ondc.provider@upi');
+  assert.match(execution.toolReceipt.payment.uri, /^upi:\/\/pay\?/);
 });
 
 test('marketplace rejects unsupported verticals', () => {

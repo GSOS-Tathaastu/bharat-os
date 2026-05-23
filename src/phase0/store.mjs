@@ -47,6 +47,13 @@ export class BosStore {
     this.skillPreflightsPath = path.join(rootPath, 'skill-preflights');
     this.memoryRecordsPath = path.join(rootPath, 'memory-records');
     this.workerAuthorizationsPath = path.join(rootPath, 'worker-authorizations');
+    this.healthDocumentsPath = path.join(rootPath, 'health-documents');
+    this.profileCredentialsPath = path.join(rootPath, 'profile-credentials');
+    this.pushSubscriptionsPath = path.join(rootPath, 'push-subscriptions');
+    this.workerNotificationsPath = path.join(rootPath, 'worker-notifications');
+    this.voiceModelPacksPath = path.join(rootPath, 'voice-model-packs');
+    this.ttsModelPacksPath = path.join(rootPath, 'tts-model-packs');
+    this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -64,6 +71,13 @@ export class BosStore {
     await fs.mkdir(this.skillPreflightsPath, { recursive: true });
     await fs.mkdir(this.memoryRecordsPath, { recursive: true });
     await fs.mkdir(this.workerAuthorizationsPath, { recursive: true });
+    await fs.mkdir(this.healthDocumentsPath, { recursive: true });
+    await fs.mkdir(this.profileCredentialsPath, { recursive: true });
+    await fs.mkdir(this.pushSubscriptionsPath, { recursive: true });
+    await fs.mkdir(this.workerNotificationsPath, { recursive: true });
+    await fs.mkdir(this.voiceModelPacksPath, { recursive: true });
+    await fs.mkdir(this.ttsModelPacksPath, { recursive: true });
+    await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
     await fs.appendFile(this.ledgerPath, '');
   }
 
@@ -117,6 +131,34 @@ export class BosStore {
 
   workerAuthorizationFile(authorizationId) {
     return path.join(this.workerAuthorizationsPath, `${safeName(authorizationId)}.json`);
+  }
+
+  healthDocumentFile(captureId) {
+    return path.join(this.healthDocumentsPath, `${safeName(captureId)}.json`);
+  }
+
+  profileCredentialFile(profileCredentialId) {
+    return path.join(this.profileCredentialsPath, `${safeName(profileCredentialId)}.json`);
+  }
+
+  pushSubscriptionFile(subscriptionId) {
+    return path.join(this.pushSubscriptionsPath, `${safeName(subscriptionId)}.json`);
+  }
+
+  workerNotificationFile(notificationId) {
+    return path.join(this.workerNotificationsPath, `${safeName(notificationId)}.json`);
+  }
+
+  voiceModelPackFile(voiceModelPackId) {
+    return path.join(this.voiceModelPacksPath, `${safeName(voiceModelPackId)}.json`);
+  }
+
+  ttsModelPackFile(ttsModelPackId) {
+    return path.join(this.ttsModelPacksPath, `${safeName(ttsModelPackId)}.json`);
+  }
+
+  onDeviceModelPackFile(onDeviceModelPackId) {
+    return path.join(this.onDeviceModelPacksPath, `${safeName(onDeviceModelPackId)}.json`);
   }
 
   async appendLedger(event) {
@@ -413,11 +455,165 @@ export class BosStore {
     return listJson(this.workerAuthorizationsPath);
   }
 
+  async saveHealthDocumentCapture(capture) {
+    await this.init();
+    await writeJson(this.healthDocumentFile(capture.captureId), capture);
+    await this.appendLedger({
+      type: 'health_document_capture.saved',
+      captureId: capture.captureId,
+      actorId: capture.actorId,
+      documentType: capture.documentType,
+      uploadId: capture.abhaUpload?.uploadId,
+      status: capture.abhaUpload?.status ?? capture.status,
+      at: new Date().toISOString()
+    });
+    return capture;
+  }
+
+  async readHealthDocumentCapture(captureId) {
+    return readJson(this.healthDocumentFile(captureId));
+  }
+
+  async listHealthDocumentCaptures() {
+    return listJson(this.healthDocumentsPath);
+  }
+
+  async saveProfileCredential(credential) {
+    await this.init();
+    await writeJson(this.profileCredentialFile(credential.profileCredentialId), credential);
+    await this.appendLedger({
+      type: 'profile_credential.saved',
+      profileCredentialId: credential.profileCredentialId,
+      identityId: credential.identityId,
+      credentialIdHash: credential.credentialIdHash,
+      at: new Date().toISOString()
+    });
+    return credential;
+  }
+
+  async readProfileCredential(profileCredentialId) {
+    return readJson(this.profileCredentialFile(profileCredentialId));
+  }
+
+  async listProfileCredentials() {
+    return listJson(this.profileCredentialsPath);
+  }
+
   // Phase 1.40 — surface the §13B Net Contribution Score for an identity by
   // aggregating across the nodes they operate (supply side: storageBytes) and
   // the data they have stored on the mesh (demand side: memory-record sizes).
   // The fair-use lever in §13B reads from this: NCS ≥ 0 → producer (free
   // service + earning); NCS < 0 → consumer (pays on the progressive curve).
+  async savePushSubscription(subscription) {
+    await this.init();
+    await writeJson(this.pushSubscriptionFile(subscription.subscriptionId), subscription);
+    await this.appendLedger({
+      type: 'push_subscription.saved',
+      subscriptionId: subscription.subscriptionId,
+      identityId: subscription.identityId,
+      mode: subscription.mode,
+      endpointHost: subscription.endpointHost,
+      at: new Date().toISOString()
+    });
+    return subscription;
+  }
+
+  async readPushSubscription(subscriptionId) {
+    return readJson(this.pushSubscriptionFile(subscriptionId));
+  }
+
+  async listPushSubscriptions() {
+    return listJson(this.pushSubscriptionsPath);
+  }
+
+  async saveWorkerNotification(notification) {
+    await this.init();
+    await writeJson(this.workerNotificationFile(notification.notificationId), notification);
+    await this.appendLedger({
+      type: 'worker_notification.queued',
+      notificationId: notification.notificationId,
+      workerId: notification.workerId,
+      jobReference: notification.jobReference,
+      deliveryStatus: notification.delivery?.status,
+      at: new Date().toISOString()
+    });
+    return notification;
+  }
+
+  async readWorkerNotification(notificationId) {
+    return readJson(this.workerNotificationFile(notificationId));
+  }
+
+  async listWorkerNotifications() {
+    return listJson(this.workerNotificationsPath);
+  }
+
+  async saveVoiceModelPack(modelPack) {
+    await this.init();
+    await writeJson(this.voiceModelPackFile(modelPack.voiceModelPackId), modelPack);
+    await this.appendLedger({
+      type: 'voice_model_pack.saved',
+      voiceModelPackId: modelPack.voiceModelPackId,
+      locale: modelPack.locale,
+      engine: modelPack.engine,
+      bytes: modelPack.bytes,
+      at: new Date().toISOString()
+    });
+    return modelPack;
+  }
+
+  async readVoiceModelPack(voiceModelPackId) {
+    return readJson(this.voiceModelPackFile(voiceModelPackId));
+  }
+
+  async listVoiceModelPacks() {
+    return listJson(this.voiceModelPacksPath);
+  }
+
+  async saveTtsModelPack(modelPack) {
+    await this.init();
+    await writeJson(this.ttsModelPackFile(modelPack.ttsModelPackId), modelPack);
+    await this.appendLedger({
+      type: 'tts_model_pack.saved',
+      ttsModelPackId: modelPack.ttsModelPackId,
+      locale: modelPack.locale,
+      engine: modelPack.engine,
+      bytes: modelPack.bytes,
+      at: new Date().toISOString()
+    });
+    return modelPack;
+  }
+
+  async readTtsModelPack(ttsModelPackId) {
+    return readJson(this.ttsModelPackFile(ttsModelPackId));
+  }
+
+  async listTtsModelPacks() {
+    return listJson(this.ttsModelPacksPath);
+  }
+
+  async saveOnDeviceModelPack(modelPack) {
+    await this.init();
+    await writeJson(this.onDeviceModelPackFile(modelPack.onDeviceModelPackId), modelPack);
+    await this.appendLedger({
+      type: 'on_device_model_pack.saved',
+      onDeviceModelPackId: modelPack.onDeviceModelPackId,
+      modelId: modelPack.modelId,
+      runtime: modelPack.runtime,
+      bytes: modelPack.bytes,
+      at: new Date().toISOString()
+    });
+    return modelPack;
+  }
+
+  async readOnDeviceModelPack(onDeviceModelPackId) {
+    return readJson(this.onDeviceModelPackFile(onDeviceModelPackId));
+  }
+
+  async listOnDeviceModelPacks() {
+    return listJson(this.onDeviceModelPacksPath);
+  }
+
   async computeContribution(identityId) {
     const [nodes, memoryRecords] = await Promise.all([
       this.listNodes(),

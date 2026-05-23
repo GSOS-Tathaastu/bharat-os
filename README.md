@@ -114,6 +114,37 @@ Implemented pieces:
   cards, localized response rendering, recent activity, and a demo-safe device
   claim model that treats persona switching as device re-initialization.
   `/` now redirects to `/shell/`; `/console/` remains the operator surface.
+- Phase 2a.1 UPI deep-link for service bookings: `bharat_marketplace` and
+  `ondc_beckn` receipts now carry a `payment` artifact with a `upi://pay?...`
+  URI, and `/shell/` renders `Pay with UPI` on booking result cards. This is a
+  PWA handoff only; PSP callback and settlement reconciliation remain future
+  work.
+- Phase 2a.2 health document capture to mocked ABHA structured upload:
+  `health-document.mjs`, `bos:skill:abha-document-upload`,
+  `POST /api/health-documents`, and a `/shell/` capture card. Raw image and
+  full OCR text are not persisted; real Tesseract.js / IndicOCR image-to-text
+  remains the next hardening step.
+- Phase 2a.3 per-profile passkey binding scaffold: WebAuthn
+  register/verify challenges, profile credential persistence, ledger events,
+  `/api/profile-auth/*` routes, and `/shell/` passkey controls. Full FIDO2
+  attestation/assertion verification remains a hardening step.
+- Phase 2a.4 worker notification scaffold: push-subscription metadata,
+  worker-notification receipts, `/api/push/subscriptions`,
+  `/api/worker-notifications`, and `/shell/` Worker alerts controls backed by
+  service-worker local notifications. Real VAPID Web Push sending remains a
+  hardening step.
+- Phase 2a.5 Indic voice runtime scaffold: ASR model-pack metadata,
+  `/api/voice/runtime`, `/api/voice/model-packs`, and `/shell/` runtime
+  planning that prefers installed Indic Whisper WASM packs before falling back
+  to Web Speech or text input. Real WASM decoder/model integration remains a
+  hardening step.
+- Phase 2a.6 Indic TTS runtime scaffold: TTS model-pack metadata,
+  `/api/tts/runtime`, `/api/tts/model-packs`, and `/shell/` Listen controls for
+  localized responses via browser speech synthesis until IndicTTS-WASM is wired.
+- Phase 2a.7 on-device SLM runtime scaffold: local model-pack metadata,
+  `/api/on-device/runtime`, `/api/on-device/model-packs`, and shell
+  orchestration metadata that records whether a WebGPU/WASM local model is ready
+  before falling back to deterministic rules.
 
 ## Quickstart
 
@@ -121,7 +152,7 @@ Implemented pieces:
 powershell -ExecutionPolicy Bypass -File scripts/test.ps1
 ```
 
-## Run the user-facing demo (Phase 1.43)
+## Run the user-facing demo (Phase 2a.7)
 
 ```bash
 # 1. Seed a demo store with §9C vignettes (Sita / Ravi / Lakshmi / Aarav /
@@ -160,17 +191,20 @@ src/phase1/                          Phase 1 modules:
                                        policy.mjs, orchestrator.mjs, tools.mjs, skills.mjs,
                                        vernacular.mjs, memory.mjs, integrity.mjs,
                                        trust-passport.mjs, worker-authorization.mjs,
-                                       device-pairing.mjs, skill-trace.mjs
+                                       device-pairing.mjs, skill-trace.mjs,
+                                       health-document.mjs, profile-auth.mjs,
+                                       worker-notification.mjs, voice-runtime.mjs,
+                                       on-device-model.mjs
 bin/bos.mjs                          Comprehensive CLI (~30 commands; `node bin/bos.mjs help`)
 bin/bos-api.mjs                      Local HTTP API server entry
-public/shell/                        UI 2 — user-facing vernacular shell (Phase 1.43, PWA)
+public/shell/                        UI 2 — user-facing vernacular shell (Phase 2a.7, PWA)
 public/operator-console/             UI 0 — operator observability console (PWA)
 scripts/seed-demo.mjs                Seed a demo store with §9C vignettes
 scripts/test.ps1, bos.ps1, api.ps1   PowerShell wrappers (use portable Node in `.tools/`)
-tests/node/                          11 test files, 133 tests
+tests/node/                          20 test files, 162 tests
 docs/phase0/                         Phase 0 implementation notes
 docs/phase1/                         Phase 1 implementation notes
-docs/adr/                            Architecture decision records (49 ADRs)
+docs/adr/                            Architecture decision records (56 ADRs)
 docs/ui/                             UI roadmap
 ```
 

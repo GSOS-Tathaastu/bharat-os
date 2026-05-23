@@ -51,6 +51,29 @@ import {
   signWorkerAuthorization,
   verifyWorkerAuthorization
 } from '../phase1/worker-authorization.mjs';
+import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
+import {
+  createProfileAuthChallenge,
+  createProfileCredentialRecord,
+  verifyProfileCredentialAssertion
+} from '../phase1/profile-auth.mjs';
+import {
+  createPushSubscriptionRecord,
+  createWorkerNotification
+} from '../phase1/worker-notification.mjs';
+import {
+  createTtsModelPack,
+  createTtsRuntimePlan,
+  createVoiceModelPack,
+  createVoiceRuntimePlan,
+  INDIC_ASR_LOCALES,
+  INDIC_TTS_LOCALES
+} from '../phase1/voice-runtime.mjs';
+import {
+  createOnDeviceModelPack,
+  createOnDeviceRuntimePlan,
+  ON_DEVICE_TASKS
+} from '../phase1/on-device-model.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -487,6 +510,26 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/memory-records/:recordId',
             'GET /api/memory-records/:recordId/provenance',
             'POST /api/memory-records/:recordId/read',
+            'GET /api/health-documents',
+            'POST /api/health-documents',
+            'GET /api/health-documents/:captureId',
+            'POST /api/profile-auth/challenges',
+            'GET /api/profile-auth/credentials',
+            'POST /api/profile-auth/credentials',
+            'POST /api/profile-auth/assertions',
+            'GET /api/push/subscriptions',
+            'POST /api/push/subscriptions',
+            'GET /api/worker-notifications',
+            'POST /api/worker-notifications',
+            'GET /api/voice/runtime',
+            'GET /api/voice/model-packs',
+            'POST /api/voice/model-packs',
+            'GET /api/tts/runtime',
+            'GET /api/tts/model-packs',
+            'POST /api/tts/model-packs',
+            'GET /api/on-device/runtime',
+            'GET /api/on-device/model-packs',
+            'POST /api/on-device/model-packs',
             'POST /api/integrity/verify',
             'GET /api/ledger',
             'GET /api/ledger.ndjson',
@@ -870,6 +913,331 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           plaintext: result.plaintext
         });
         return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'health-documents' && parts.length === 2) {
+        if (request.method === 'GET') {
+          jsonResponse(response, 200, { captures: await store.listHealthDocumentCaptures() });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const capture = createHealthDocumentCapture(body);
+          const consents = await store.listConsents();
+          const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+          const skill = readSkill('bos:skill:abha-document-upload');
+          const preflight = evaluateSkillPreflight(
+            skill,
+            {
+              actorId: capture.actorId,
+              actionType: 'health_document_upload',
+              scopes: ['health.record.write', 'consent.record'],
+              piiHandling: 'summary',
+              identity: { aadhaarRequired: false, fallbackAvailable: true },
+              metadata: {
+                healthDocumentCapture: capture,
+                documentType: capture.documentType,
+                captureId: capture.captureId,
+                sourceTextHash: capture.structured.sourceTextHash
+              }
+            },
+            consents,
+            { publicRecords }
+          );
+          const execution = preflight.approved
+            ? executeToolAction(preflight.decision.request, consents, {
+                at: preflight.checkedAt,
+                skillPreflightId: preflight.preflightId,
+                publicRecords
+              })
+            : createBlockedToolExecution(preflight.decision, {
+                skillPreflightId: preflight.preflightId
+              });
+          await store.saveDecision(preflight.decision);
+          await store.saveSkillPreflight(preflight);
+          await store.saveToolExecution(execution);
+
+          const persistedCapture = {
+            ...capture,
+            status: execution.status === 'completed' ? 'uploaded' : 'blocked',
+            skillPreflightId: preflight.preflightId,
+            decisionId: preflight.decisionId,
+            executionId: execution.executionId,
+            abhaUpload: execution.toolReceipt
+          };
+          if (execution.status === 'completed') {
+            await store.saveHealthDocumentCapture(persistedCapture);
+          }
+
+          jsonResponse(response, execution.status === 'completed' ? 201 : 403, {
+            ok: execution.status === 'completed',
+            capture: persistedCapture,
+            preflight,
+            execution
+          });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'health-documents' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const captureId = decodeURIComponent(parts[2]);
+        jsonResponse(response, 200, { capture: await store.readHealthDocumentCapture(captureId) });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'profile-auth' && parts[2] === 'challenges') {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        const challenge = createProfileAuthChallenge({
+          identityId: body.identityId,
+          ceremony: body.ceremony ?? 'register'
+        });
+        jsonResponse(response, 201, { ok: true, challenge });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'profile-auth' && parts[2] === 'credentials') {
+        if (request.method === 'GET') {
+          const identityId = url.searchParams.get('identityId');
+          const credentials = await store.listProfileCredentials();
+          jsonResponse(response, 200, {
+            credentials: credentials.filter((credential) => !identityId || credential.identityId === identityId)
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const credential = createProfileCredentialRecord({
+            identityId: body.identityId,
+            credentialId: body.credentialId,
+            challenge: body.challenge,
+            publicKeyAlgorithm: body.publicKeyAlgorithm,
+            transports: body.transports ?? [],
+            userVerified: body.userVerified
+          });
+          await store.saveProfileCredential(credential);
+          jsonResponse(response, 201, { ok: true, credential });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'profile-auth' && parts[2] === 'assertions') {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        const credentials = await store.listProfileCredentials();
+        const credential = credentials.find(
+          (candidate) =>
+            candidate.identityId === body.identityId &&
+            (!body.credentialId || candidate.credentialId === body.credentialId)
+        );
+        const verification = verifyProfileCredentialAssertion({
+          credential,
+          credentialId: body.credentialId,
+          challenge: body.challenge
+        });
+        jsonResponse(response, verification.valid ? 200 : 403, { ok: verification.valid, verification });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'push' && parts[2] === 'subscriptions') {
+        if (request.method === 'GET') {
+          const identityId = url.searchParams.get('identityId');
+          const subscriptions = await store.listPushSubscriptions();
+          jsonResponse(response, 200, {
+            subscriptions: subscriptions.filter(
+              (subscription) => !identityId || subscription.identityId === identityId
+            )
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const subscription = createPushSubscriptionRecord({
+            identityId: body.identityId,
+            endpoint: body.endpoint,
+            keys: body.keys ?? {},
+            permission: body.permission ?? 'granted',
+            source: body.source ?? 'shell',
+            userAgent: body.userAgent
+          });
+          await store.savePushSubscription(subscription);
+          jsonResponse(response, 201, { ok: true, subscription });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'worker-notifications') {
+        if (request.method === 'GET') {
+          const workerId = url.searchParams.get('workerId');
+          const notifications = await store.listWorkerNotifications();
+          jsonResponse(response, 200, {
+            notifications: notifications.filter(
+              (notification) => !workerId || notification.workerId === workerId
+            )
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const subscriptions = await store.listPushSubscriptions();
+          const subscription = [...subscriptions]
+            .filter((candidate) => candidate.identityId === body.workerId)
+            .sort((a, b) => String(b.subscribedAt).localeCompare(String(a.subscribedAt)))[0];
+          const notification = createWorkerNotification({
+            workerId: body.workerId,
+            jobReference: body.jobReference,
+            title: body.title,
+            body: body.body,
+            locale: body.locale,
+            urgency: body.urgency,
+            subscription
+          });
+          await store.saveWorkerNotification(notification);
+          jsonResponse(response, notification.delivery.status === 'blocked_no_subscription' ? 202 : 201, {
+            ok: notification.delivery.status !== 'blocked_no_subscription',
+            notification
+          });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'voice' && parts[2] === 'runtime') {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const locale = url.searchParams.get('locale') ?? 'en-IN';
+        const webSpeechAvailable = url.searchParams.get('webSpeechAvailable') === 'true';
+        const secureContext = url.searchParams.get('secureContext') !== 'false';
+        const modelPacks = await store.listVoiceModelPacks();
+        const plan = createVoiceRuntimePlan({
+          locale,
+          modelPacks,
+          webSpeechAvailable,
+          secureContext
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          plan,
+          supportedLocales: INDIC_ASR_LOCALES
+        });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'voice' && parts[2] === 'model-packs') {
+        if (request.method === 'GET') {
+          const locale = url.searchParams.get('locale');
+          const modelPacks = await store.listVoiceModelPacks();
+          jsonResponse(response, 200, {
+            modelPacks: modelPacks.filter((pack) => !locale || pack.locale === locale)
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const modelPack = createVoiceModelPack({
+            locale: body.locale,
+            modelId: body.modelId,
+            engine: body.engine,
+            bytes: body.bytes,
+            sha256: body.sha256,
+            source: body.source
+          });
+          await store.saveVoiceModelPack(modelPack);
+          jsonResponse(response, 201, { ok: true, modelPack });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'tts' && parts[2] === 'runtime') {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const locale = url.searchParams.get('locale') ?? 'en-IN';
+        const speechSynthesisAvailable = url.searchParams.get('speechSynthesisAvailable') === 'true';
+        const modelPacks = await store.listTtsModelPacks();
+        const plan = createTtsRuntimePlan({
+          locale,
+          modelPacks,
+          speechSynthesisAvailable
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          plan,
+          supportedLocales: INDIC_TTS_LOCALES
+        });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'tts' && parts[2] === 'model-packs') {
+        if (request.method === 'GET') {
+          const locale = url.searchParams.get('locale');
+          const modelPacks = await store.listTtsModelPacks();
+          jsonResponse(response, 200, {
+            modelPacks: modelPacks.filter((pack) => !locale || pack.locale === locale)
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const modelPack = createTtsModelPack({
+            locale: body.locale,
+            modelId: body.modelId,
+            engine: body.engine,
+            bytes: body.bytes,
+            sha256: body.sha256,
+            source: body.source
+          });
+          await store.saveTtsModelPack(modelPack);
+          jsonResponse(response, 201, { ok: true, modelPack });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'on-device' && parts[2] === 'runtime') {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const task = url.searchParams.get('task') ?? 'intent_planning';
+        const webGpuAvailable = url.searchParams.get('webGpuAvailable') === 'true';
+        const wasmAvailable = url.searchParams.get('wasmAvailable') !== 'false';
+        const modelPacks = await store.listOnDeviceModelPacks();
+        const plan = createOnDeviceRuntimePlan({
+          task,
+          modelPacks,
+          webGpuAvailable,
+          wasmAvailable
+        });
+        jsonResponse(response, 200, { ok: true, plan, supportedTasks: ON_DEVICE_TASKS });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'on-device' && parts[2] === 'model-packs') {
+        if (request.method === 'GET') {
+          const task = url.searchParams.get('task');
+          const modelPacks = await store.listOnDeviceModelPacks();
+          jsonResponse(response, 200, {
+            modelPacks: modelPacks.filter((pack) => !task || pack.capabilities?.includes(task))
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const modelPack = createOnDeviceModelPack({
+            modelId: body.modelId,
+            family: body.family,
+            runtime: body.runtime,
+            bytes: body.bytes,
+            sha256: body.sha256,
+            capabilities: body.capabilities,
+            localeCoverage: body.localeCoverage,
+            source: body.source
+          });
+          await store.saveOnDeviceModelPack(modelPack);
+          jsonResponse(response, 201, { ok: true, modelPack });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
       }
 
       if (parts[0] === 'api' && parts[1] === 'integrity' && parts[2] === 'verify') {

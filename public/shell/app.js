@@ -71,7 +71,14 @@ const state = {
   deviceOwnerId: null,
   householdMemberIds: [],
   recognition: null,
-  recognizing: false
+  recognizing: false,
+  voiceRuntimePlan: null,
+  ttsRuntimePlan: null,
+  onDeviceRuntimePlan: null,
+  lastLocalizedResponse: null,
+  profileCredentials: [],
+  workerAlertSubscription: null,
+  healthDocImage: null
 };
 
 function loadDeviceState() {
@@ -141,6 +148,14 @@ function setActiveProfile(identity) {
     $('profileAvatar').textContent = '--';
     $('profileName').textContent = 'No profile';
     $('profileLanguage').textContent = 'English';
+    state.voiceRuntimePlan = null;
+    state.ttsRuntimePlan = null;
+    state.onDeviceRuntimePlan = null;
+    state.lastLocalizedResponse = null;
+    state.profileCredentials = [];
+    state.workerAlertSubscription = null;
+    updateProfileAuthStatus();
+    updateWorkerAlertStatus();
     return;
   }
   $('profileAvatar').textContent = profileInitials(identity.displayName ?? '?');
@@ -148,7 +163,12 @@ function setActiveProfile(identity) {
   $('profileLanguage').textContent = inferProfileLanguage(identity);
   applyGreeting(profileLocale(identity));
   renderSuggestions(profileLocale(identity));
+  loadVoiceRuntimePlan().catch((error) => console.warn('loadVoiceRuntimePlan', error));
+  loadTtsRuntimePlan().catch((error) => console.warn('loadTtsRuntimePlan', error));
+  loadOnDeviceRuntimePlan().catch((error) => console.warn('loadOnDeviceRuntimePlan', error));
   loadRecent();
+  loadProfileCredentials().catch((error) => console.warn('loadProfileCredentials', error));
+  loadWorkerAlertSubscription().catch((error) => console.warn('loadWorkerAlertSubscription', error));
 }
 
 function inferProfileLanguage(identity) {
@@ -204,6 +224,35 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+function hexFromBuffer(buffer) {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function bufferToBase64Url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlToBuffer(value) {
+  const base64 = String(value ?? '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
+async function identityUserHandle(identityId) {
+  const encoded = new TextEncoder().encode(identityId);
+  if (!globalThis.crypto?.subtle) return encoded.slice(0, 64);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
+  return digest.slice(0, 32);
+}
+
 function shortId(id) {
   return String(id ?? '').slice(0, 24);
 }
@@ -215,6 +264,34 @@ async function fetchJson(url, options) {
     throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
   }
   return response.json();
+}
+
+async function loadVoiceRuntimePlan() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const locale = state.activeIdentity ? profileLocale(state.activeIdentity) : 'en-IN';
+  const data = await fetchJson(
+    `/api/voice/runtime?locale=${encodeURIComponent(locale)}&webSpeechAvailable=${Boolean(SpeechRecognition)}&secureContext=${window.isSecureContext !== false}`
+  );
+  state.voiceRuntimePlan = data.plan;
+  if (state.voiceRuntimePlan?.runtime === 'indic_whisper_wasm') {
+    $('micLabel').textContent = 'Hold for offline voice';
+  }
+}
+
+async function loadTtsRuntimePlan() {
+  const locale = state.activeIdentity ? profileLocale(state.activeIdentity) : 'en-IN';
+  const data = await fetchJson(
+    `/api/tts/runtime?locale=${encodeURIComponent(locale)}&speechSynthesisAvailable=${'speechSynthesis' in window}`
+  );
+  state.ttsRuntimePlan = data.plan;
+}
+
+async function loadOnDeviceRuntimePlan() {
+  const webGpuAvailable = Boolean(navigator.gpu);
+  const data = await fetchJson(
+    `/api/on-device/runtime?task=intent_planning&webGpuAvailable=${webGpuAvailable}&wasmAvailable=true`
+  );
+  state.onDeviceRuntimePlan = data.plan;
 }
 
 async function loadIdentities() {
@@ -353,7 +430,16 @@ function buildIntentPayload(intentText) {
     actorId: actor.id,
     intentText,
     locale,
-    execute: true
+    execute: true,
+    metadata: {
+      onDeviceRuntime: state.onDeviceRuntimePlan
+        ? {
+            runtime: state.onDeviceRuntimePlan.runtime,
+            localModelReady: state.onDeviceRuntimePlan.localModelReady,
+            planId: state.onDeviceRuntimePlan.onDeviceRuntimePlanId
+          }
+        : null
+    }
   };
 }
 
@@ -427,8 +513,10 @@ function renderOrchestration(o) {
   `;
 
   const localized = o.localizedResponse;
+  state.lastLocalizedResponse = localized ?? null;
   const vernacular = localized
-    ? `<div class="vernacular" lang="${escapeHtml(localized.locale)}">${escapeHtml(localized.text)}</div>`
+    ? `<div class="vernacular" lang="${escapeHtml(localized.locale)}">${escapeHtml(localized.text)}</div>
+       <button class="listen-action" type="button" data-speak-latest>Listen</button>`
     : '';
 
   const receipt = o.execution?.toolReceipt ?? {};
@@ -454,15 +542,21 @@ function renderActionDetail(actionType, receipt, orchestration) {
     const fare = receipt.fare ? `₹${receipt.fare.amount} ${receipt.fare.currency}` : '--';
     const quote = receipt.quote ?? {};
     const route = [quote.from, quote.to].filter(Boolean).join(' → ') || '--';
+    const payment = receipt.payment ?? {};
+    const paymentAction = payment.uri
+      ? `<a class="pay-action" href="${escapeHtml(payment.uri)}" aria-label="Pay ${escapeHtml(fare)} with UPI">Pay with UPI</a>`
+      : '';
     return `
       <dl class="result-detail-grid">
         <dt>Provider</dt><dd>${escapeHtml(chosen.providerName ?? '--')} (${escapeHtml(chosen.source ?? '--')})</dd>
         <dt>Vertical</dt><dd>${escapeHtml(receipt.vertical ?? '--')}</dd>
         <dt>Route</dt><dd>${escapeHtml(route)}</dd>
         <dt>Fare</dt><dd>${escapeHtml(fare)}</dd>
+        <dt>Payment</dt><dd>${payment.uri ? `UPI · ${escapeHtml(payment.payeeName ?? 'provider')}` : '--'}</dd>
         <dt>Commission</dt><dd>${chosen.commissionPct ?? 0}% (native marketplace)</dd>
         <dt>Booking ref</dt><dd>${escapeHtml(shortId(receipt.bookingRef ?? ''))}</dd>
       </dl>
+      ${paymentAction}
     `;
   }
   if (actionType === 'labor_match_post') {
@@ -514,6 +608,449 @@ function renderActionDetail(actionType, receipt, orchestration) {
     `;
   }
   return `<pre class="result-detail-grid">${escapeHtml(JSON.stringify(receipt, null, 2))}</pre>`;
+}
+
+// ─── Health document capture (Phase 2a.2 scaffold) ───────────────────────
+// Phase 2a.3 profile passkey binding scaffold.
+async function speakLatestLocalizedResponse() {
+  const response = state.lastLocalizedResponse;
+  if (!response?.text) {
+    showToast('No response to speak yet.');
+    return;
+  }
+  if (!state.ttsRuntimePlan) {
+    await loadTtsRuntimePlan().catch((error) => console.warn('loadTtsRuntimePlan', error));
+  }
+  if (!('speechSynthesis' in window)) {
+    showToast('Speech output is not available in this browser.');
+    return;
+  }
+  if (state.ttsRuntimePlan?.runtime === 'indic_tts_wasm') {
+    showToast('Offline TTS model pack found; WASM playback is not wired yet.');
+  }
+  const utterance = new SpeechSynthesisUtterance(response.text);
+  utterance.lang = response.locale ?? profileLocale(state.activeIdentity);
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
+function passkeysAvailable() {
+  return Boolean(window.PublicKeyCredential && navigator.credentials?.create && navigator.credentials?.get && window.isSecureContext !== false);
+}
+
+function updateProfileAuthStatus() {
+  const count = state.profileCredentials.length;
+  $('profileAuthStatus').textContent = count === 1 ? '1 passkey' : `${count} passkeys`;
+  $('profileAuthVerifyButton').disabled = count === 0;
+}
+
+function renderProfileAuthResult(title, rows) {
+  const box = $('profileAuthResult');
+  box.hidden = false;
+  box.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <dl class="result-detail-grid">
+      ${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}
+    </dl>
+  `;
+}
+
+async function loadProfileCredentials() {
+  if (!state.activeIdentity) {
+    state.profileCredentials = [];
+    updateProfileAuthStatus();
+    return;
+  }
+  const data = await fetchJson(`/api/profile-auth/credentials?identityId=${encodeURIComponent(state.activeIdentity.id)}`);
+  state.profileCredentials = data.credentials ?? [];
+  updateProfileAuthStatus();
+}
+
+async function createProfileAuthChallenge(ceremony) {
+  const data = await fetchJson('/api/profile-auth/challenges', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identityId: state.activeIdentity.id, ceremony })
+  });
+  return data.challenge;
+}
+
+async function bindProfilePasskey() {
+  if (!sanityCheckActor()) return;
+  if (!passkeysAvailable()) {
+    showToast('Passkeys need WebAuthn in a secure browser context.');
+    return;
+  }
+
+  const button = $('profileAuthBindButton');
+  button.disabled = true;
+  try {
+    const challenge = await createProfileAuthChallenge('register');
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: base64UrlToBuffer(challenge.challengeBase64Url),
+        rp: { name: 'Bharat OS' },
+        user: {
+          id: await identityUserHandle(state.activeIdentity.id),
+          name: state.activeIdentity.displayName ?? state.activeIdentity.id,
+          displayName: state.activeIdentity.displayName ?? 'Bharat OS profile'
+        },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },
+          { type: 'public-key', alg: -257 }
+        ],
+        authenticatorSelection: {
+          residentKey: 'preferred',
+          userVerification: 'preferred'
+        },
+        attestation: 'none',
+        timeout: 60000
+      }
+    });
+    if (!credential) throw new Error('Passkey registration was cancelled.');
+
+    const stored = await fetchJson('/api/profile-auth/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: state.activeIdentity.id,
+        credentialId: bufferToBase64Url(credential.rawId),
+        challenge,
+        publicKeyAlgorithm: 'ES256',
+        transports: credential.response?.getTransports?.() ?? [],
+        userVerified: false
+      })
+    });
+
+    await loadProfileCredentials();
+    renderProfileAuthResult('Passkey bound', [
+      ['Credential', shortId(stored.credential.profileCredentialId)],
+      ['Challenge', shortId(stored.credential.challengeId)],
+      ['Material', 'No private key stored']
+    ]);
+    showToast('Passkey bound to profile.');
+  } catch (error) {
+    renderProfileAuthResult('Passkey not bound', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function verifyProfilePasskey() {
+  if (!sanityCheckActor()) return;
+  if (!passkeysAvailable()) {
+    showToast('Passkeys need WebAuthn in a secure browser context.');
+    return;
+  }
+
+  if (state.profileCredentials.length === 0) await loadProfileCredentials();
+  const credential = state.profileCredentials[0];
+  if (!credential) {
+    showToast('Bind a passkey first.');
+    return;
+  }
+
+  const button = $('profileAuthVerifyButton');
+  button.disabled = true;
+  try {
+    const challenge = await createProfileAuthChallenge('verify');
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: base64UrlToBuffer(challenge.challengeBase64Url),
+        allowCredentials: [
+          {
+            type: 'public-key',
+            id: base64UrlToBuffer(credential.credentialId),
+            transports: credential.transports ?? []
+          }
+        ],
+        userVerification: 'preferred',
+        timeout: 60000
+      }
+    });
+    if (!assertion) throw new Error('Passkey verification was cancelled.');
+
+    const response = await fetch('/api/profile-auth/assertions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: state.activeIdentity.id,
+        credentialId: bufferToBase64Url(assertion.rawId),
+        challenge
+      })
+    });
+    const body = await response.json();
+    renderProfileAuthResult(body.ok ? 'Passkey verified' : 'Passkey blocked', [
+      ['Credential', shortId(credential.profileCredentialId)],
+      ['Challenge', shortId(challenge.challengeId)],
+      ['Result', body.verification?.valid ? 'valid' : (body.verification?.reasons ?? []).join(', ')]
+    ]);
+    showToast(body.ok ? 'Passkey verified for this profile.' : 'Passkey verification blocked.');
+  } catch (error) {
+    renderProfileAuthResult('Passkey not verified', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    button.disabled = state.profileCredentials.length === 0;
+  }
+}
+
+// Phase 2a.4 worker alert scaffold. Real Web Push delivery needs VAPID keys and
+// a push sender; this demo records capability and uses service-worker local
+// notifications when the browser grants permission.
+function workerAlertsAvailable() {
+  return Boolean('Notification' in window && 'serviceWorker' in navigator);
+}
+
+function updateWorkerAlertStatus() {
+  const status = state.workerAlertSubscription
+    ? state.workerAlertSubscription.mode === 'web_push'
+      ? 'Web Push'
+      : 'Local'
+    : 'Off';
+  $('workerAlertStatus').textContent = status;
+  $('workerAlertTestButton').disabled = !state.workerAlertSubscription;
+}
+
+function renderWorkerAlertResult(title, rows) {
+  const box = $('workerAlertResult');
+  box.hidden = false;
+  box.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <dl class="result-detail-grid">
+      ${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}
+    </dl>
+  `;
+}
+
+async function loadWorkerAlertSubscription() {
+  if (!state.activeIdentity) {
+    state.workerAlertSubscription = null;
+    updateWorkerAlertStatus();
+    return;
+  }
+  const data = await fetchJson(`/api/push/subscriptions?identityId=${encodeURIComponent(state.activeIdentity.id)}`);
+  state.workerAlertSubscription = (data.subscriptions ?? [])
+    .sort((a, b) => String(b.subscribedAt).localeCompare(String(a.subscribedAt)))[0] ?? null;
+  updateWorkerAlertStatus();
+}
+
+async function enableWorkerAlerts() {
+  if (!sanityCheckActor()) return;
+  if (!workerAlertsAvailable()) {
+    showToast('Notifications need service worker support in this browser.');
+    return;
+  }
+
+  const button = $('workerAlertEnableButton');
+  button.disabled = true;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+
+    const registration = await navigator.serviceWorker.ready;
+    const pushSubscription = await registration.pushManager?.getSubscription?.();
+    const serialized = pushSubscription?.toJSON?.() ?? {};
+    const saved = await fetchJson('/api/push/subscriptions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: state.activeIdentity.id,
+        endpoint: serialized.endpoint,
+        keys: serialized.keys ?? {},
+        permission,
+        source: 'shell',
+        userAgent: navigator.userAgent
+      })
+    });
+
+    state.workerAlertSubscription = saved.subscription;
+    updateWorkerAlertStatus();
+    renderWorkerAlertResult('Alerts enabled', [
+      ['Mode', saved.subscription.mode],
+      ['Subscription', shortId(saved.subscription.subscriptionId)],
+      ['Endpoint', saved.subscription.rawEndpointStored ? 'stored' : 'hashed only']
+    ]);
+    showToast('Worker alerts enabled.');
+  } catch (error) {
+    renderWorkerAlertResult('Alerts not enabled', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function testWorkerAlert() {
+  if (!sanityCheckActor()) return;
+  if (!state.workerAlertSubscription) await loadWorkerAlertSubscription();
+  if (!state.workerAlertSubscription) {
+    showToast('Enable alerts first.');
+    return;
+  }
+
+  const button = $('workerAlertTestButton');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/worker-notifications', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workerId: state.activeIdentity.id,
+        jobReference: `demo-job-${Date.now()}`,
+        title: 'Bharat OS job alert',
+        body: 'Nearby work is available. Escrow is required.',
+        locale: profileLocale(state.activeIdentity),
+        urgency: 'normal'
+      })
+    });
+    const body = await response.json();
+    const notification = body.notification;
+    renderWorkerAlertResult(body.ok ? 'Alert queued' : 'Alert blocked', [
+      ['Delivery', notification.delivery.status],
+      ['Notification', shortId(notification.notificationId)],
+      ['VAPID', notification.delivery.vapidIntegrated ? 'ready' : 'not integrated']
+    ]);
+
+    if (Notification.permission === 'granted') {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(notification.content.title, {
+        body: notification.content.body,
+        tag: notification.notificationId,
+        data: { url: '/shell/', notificationId: notification.notificationId }
+      });
+    }
+    showToast(body.ok ? 'Worker alert queued.' : 'Worker alert blocked.');
+  } catch (error) {
+    renderWorkerAlertResult('Alert failed', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    button.disabled = !state.workerAlertSubscription;
+  }
+}
+
+// Lazy-load Tesseract.js from a CDN the first time the user picks a health
+// document image. Worth ~7 MB (engine + Hindi + English + Tamil language
+// data) but only fetched once, then cached by the service worker for offline
+// use. See §17 footprint accounting.
+let tesseractWorkerPromise = null;
+async function ensureTesseractWorker() {
+  if (tesseractWorkerPromise) return tesseractWorkerPromise;
+  tesseractWorkerPromise = (async () => {
+    $('healthDocFileMeta').textContent = 'Loading OCR engine (~7 MB, first time only)…';
+    const mod = await import('https://esm.sh/tesseract.js@5');
+    const worker = await mod.createWorker(['eng', 'hin', 'tam']);
+    return worker;
+  })();
+  return tesseractWorkerPromise;
+}
+
+async function handleHealthDocFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    state.healthDocImage = null;
+    $('healthDocFileMeta').textContent = 'No image selected';
+    return;
+  }
+
+  let sha256 = null;
+  if (globalThis.crypto?.subtle) {
+    const hash = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    sha256 = hexFromBuffer(hash);
+  }
+  state.healthDocImage = {
+    mimeType: file.type || 'application/octet-stream',
+    byteLength: file.size,
+    sha256
+  };
+  $('healthDocFileMeta').textContent = `${Math.round(file.size / 1024)} KB · ${file.type || 'file'} · running OCR…`;
+
+  // Real OCR via Tesseract.js (Phase 2a.8 — Indic OCR wired). If the load or
+  // recognize fails (offline, CDN unreachable), the manual textarea is still
+  // the fallback path — uploadHealthDocument just won't get blank text from us.
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const worker = await ensureTesseractWorker();
+    $('healthDocFileMeta').textContent = `${Math.round(file.size / 1024)} KB · recognizing text…`;
+    const { data } = await worker.recognize(objectUrl);
+    const recognizedText = (data?.text ?? '').trim();
+    if (recognizedText) {
+      const textarea = $('healthDocText');
+      // Only auto-fill if the user hasn't already typed something.
+      if (!textarea.value.trim()) {
+        textarea.value = recognizedText;
+      }
+      const confidence = Math.round(data?.confidence ?? 0);
+      $('healthDocFileMeta').textContent =
+        `${Math.round(file.size / 1024)} KB · OCR ${confidence}% · ${recognizedText.length} chars`;
+    } else {
+      $('healthDocFileMeta').textContent =
+        `${Math.round(file.size / 1024)} KB · OCR found no text — type below`;
+    }
+  } catch (error) {
+    $('healthDocFileMeta').textContent =
+      `${Math.round(file.size / 1024)} KB · OCR offline — type the text manually`;
+    console.warn('Tesseract.js OCR failed', error);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function renderHealthDocumentResult(body) {
+  const box = $('healthDocResult');
+  box.hidden = false;
+  if (!body.ok) {
+    const missing = body.preflight?.remediation?.consentGrant?.scopes?.join(', ') ?? 'health consent';
+    box.innerHTML = `<strong>Blocked</strong><br/><span>Consent required: ${escapeHtml(missing)}</span>`;
+    return;
+  }
+
+  const upload = body.capture?.abhaUpload ?? {};
+  const structured = body.capture?.structured ?? {};
+  const vitals = (structured.vitals ?? []).map((vital) => vital.type).join(', ') || 'none';
+  const meds = (structured.medications ?? []).map((med) => med.name).join(', ') || 'none';
+  box.innerHTML = `
+    <strong>ABHA upload ready</strong>
+    <dl class="result-detail-grid">
+      <dt>Upload</dt><dd>${escapeHtml(shortId(upload.uploadId ?? ''))}</dd>
+      <dt>Vitals</dt><dd>${escapeHtml(vitals)}</dd>
+      <dt>Meds</dt><dd>${escapeHtml(meds)}</dd>
+      <dt>Raw image</dt><dd>Not stored (§15)</dd>
+    </dl>
+  `;
+}
+
+async function uploadHealthDocument() {
+  if (!sanityCheckActor()) return;
+  const text = $('healthDocText').value.trim();
+  if (!text) {
+    showToast('Add OCR text before upload.');
+    $('healthDocText').focus();
+    return;
+  }
+
+  const button = $('healthDocUploadButton');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/health-documents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        actorId: state.activeIdentity.id,
+        documentType: 'prescription',
+        locale: profileLocale(state.activeIdentity),
+        captureMode: state.healthDocImage ? 'camera_or_file' : 'text_fallback',
+        image: state.healthDocImage ?? {},
+        ocrText: text
+      })
+    });
+    const body = await response.json();
+    renderHealthDocumentResult(body);
+    showToast(body.ok ? 'ABHA structured upload receipt created.' : 'Consent needed before ABHA upload.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ─── Voice input (Web Speech API) ─────────────────────────────────────────
@@ -637,6 +1174,11 @@ $('suggestionRow').addEventListener('click', (event) => {
 });
 
 $('micButton').addEventListener('click', toggleVoice);
+$('resultBody').addEventListener('click', (event) => {
+  if (event.target.closest('[data-speak-latest]')) {
+    speakLatestLocalizedResponse();
+  }
+});
 
 $('profileButton').addEventListener('click', () => {
   $('profileSheet').hidden = false;
@@ -668,6 +1210,45 @@ $('profileList').addEventListener('click', (event) => {
 });
 
 $('refreshRecent').addEventListener('click', loadRecent);
+$('profileAuthBindButton').addEventListener('click', bindProfilePasskey);
+$('profileAuthVerifyButton').addEventListener('click', verifyProfilePasskey);
+$('workerAlertEnableButton').addEventListener('click', enableWorkerAlerts);
+$('workerAlertTestButton').addEventListener('click', testWorkerAlert);
+$('healthDocFile').addEventListener('change', handleHealthDocFile);
+$('healthDocUploadButton').addEventListener('click', uploadHealthDocument);
+
+// ─── Diagnostics panel ─────────────────────────────────────────────────────
+// Honest "what's running vs scaffold" surface for investor demos. Maps to
+// the Phase 2a.x status board in BHARAT_OS.md §17.
+const DIAGNOSTICS = [
+  { id: '2a.1', label: 'UPI deep-link payment', status: 'real', detail: 'upi://pay?... opens the user\'s UPI app on result cards' },
+  { id: '2a.2', label: 'Health doc OCR + ABHA upload', status: 'real', detail: 'Tesseract.js (eng/hin/tam) auto-OCR + deterministic field extraction; raw image and OCR text not stored (§15)' },
+  { id: '2a.3', label: 'Per-profile passkey (WebAuthn)', status: 'real-client', detail: 'navigator.credentials.create/get binds a real device passkey. Server attestation verification is still scaffold.' },
+  { id: '2a.4', label: 'Worker alerts (local notifications)', status: 'partial', detail: 'Real Notification.requestPermission + showNotification. Server-side VAPID Web Push is scaffold.' },
+  { id: '2a.5', label: 'Indic ASR voice input', status: 'partial', detail: 'Web Speech API today (needs HTTPS/localhost). IndicWhisper-WASM offline runtime is scaffold.' },
+  { id: '2a.6', label: 'Vernacular TTS (Listen)', status: 'real', detail: 'Browser speechSynthesis speaks the localizedResponse. IndicTTS-WASM upgrade is scaffold.' },
+  { id: '2a.7', label: 'On-device SLM intent', status: 'placeholder', detail: 'Deterministic regex today. WebGPU + transformers.js / Sarvam-1 q4 is opt-in Tier 4.' },
+  { id: '7c', label: 'Device pairing handshake', status: 'placeholder', detail: 'localStorage scaffold today. Real WebRTC ephemeral-key transport is Phase 2a queue #8.' }
+];
+function renderDiagnostics() {
+  const list = $('diagnosticsList');
+  if (!list) return;
+  list.innerHTML = DIAGNOSTICS.map((d) => {
+    const cls = d.status === 'real' ? 'good' : d.status === 'placeholder' ? 'bad' : 'warn';
+    const label = d.status === 'real' ? 'real' : d.status === 'real-client' ? 'real (client)' : d.status === 'partial' ? 'partial' : 'placeholder';
+    return `
+      <li>
+        <div class="diagnostics-row">
+          <span class="diagnostics-id">${escapeHtml(d.id)}</span>
+          <span class="diagnostics-label">${escapeHtml(d.label)}</span>
+          <span class="tag ${cls}">${escapeHtml(label)}</span>
+        </div>
+        <div class="diagnostics-detail">${escapeHtml(d.detail)}</div>
+      </li>
+    `;
+  }).join('');
+}
+renderDiagnostics();
 
 setupVoice();
 loadIdentities().catch((error) => {

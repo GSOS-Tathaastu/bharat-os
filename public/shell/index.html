@@ -61,6 +61,30 @@
         <div class="suggestion-row" id="suggestionRow"></div>
       </section>
 
+      <section class="capture-card profile-auth-card" id="profileAuthSection">
+        <div class="capture-header">
+          <span>Profile security</span>
+          <span id="profileAuthStatus" class="capture-meta">No passkey</span>
+        </div>
+        <div class="passkey-actions">
+          <button id="profileAuthBindButton" class="secondary-button" type="button">Bind passkey</button>
+          <button id="profileAuthVerifyButton" class="link-button" type="button">Verify passkey</button>
+        </div>
+        <div id="profileAuthResult" class="capture-result" hidden></div>
+      </section>
+
+      <section class="capture-card worker-alert-card" id="workerAlertSection">
+        <div class="capture-header">
+          <span>Worker alerts</span>
+          <span id="workerAlertStatus" class="capture-meta">Off</span>
+        </div>
+        <div class="passkey-actions">
+          <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
+          <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
+        </div>
+        <div id="workerAlertResult" class="capture-result" hidden></div>
+      </section>
+
       <section class="flow" id="flowSection" hidden>
         <div class="flow-header">
           <span class="flow-step" id="flowDetected">Detecting…</span>
@@ -75,6 +99,27 @@
         <div class="result-evidence" id="resultEvidence"></div>
       </section>
 
+      <section class="capture-card" id="healthCaptureSection">
+        <div class="capture-header">
+          <span>Health document</span>
+          <label class="file-action">
+            <input id="healthDocFile" type="file" accept="image/*" capture="environment" />
+            <span>Camera</span>
+          </label>
+        </div>
+        <textarea
+          id="healthDocText"
+          rows="3"
+          placeholder="OCR text from prescription or lab report"
+          aria-label="Health document OCR text"
+        ></textarea>
+        <div class="capture-actions">
+          <span id="healthDocFileMeta" class="capture-meta">No image selected</span>
+          <button id="healthDocUploadButton" class="link-button" type="button">Upload to ABHA</button>
+        </div>
+        <div id="healthDocResult" class="capture-result" hidden></div>
+      </section>
+
       <section class="recent" id="recentSection">
         <div class="recent-header">
           <span>Recent activity</span>
@@ -83,6 +128,23 @@
         <ul class="recent-list" id="recentList">
           <li class="recent-empty">No activity yet on this profile.</li>
         </ul>
+      </section>
+
+      <section class="diagnostics" id="diagnosticsSection">
+        <details>
+          <summary>
+            <span>What's running, what's scaffold</span>
+            <span class="diagnostics-meta">honest accounting — §17</span>
+          </summary>
+          <ul class="diagnostics-list" id="diagnosticsList"></ul>
+          <p class="diagnostics-note">
+            Tier 1 (PWA shell) ~50 KB · Tier 2 (Tesseract.js + Indic OCR data)
+            ~7 MB lazy on first health-doc capture · Tier 3 (IndicWhisper-WASM)
+            ~30 MB opt-in · Tier 4 (on-device SLM) 1.5–4 GB explicit opt-in,
+            flagship-device only. The base experience is lighter than Uber,
+            WhatsApp, or the average Android app.
+          </p>
+        </details>
       </section>
     </main>
 

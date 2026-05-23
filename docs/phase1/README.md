@@ -96,6 +96,26 @@ Implemented primitives:
   for service booking across Hindi, Marathi, Bhojpuri, Tamil, Bengali in
   script and romanized forms, with localized response phrases on every
   orchestration receipt;
+- Phase 2a profile passkey binding scaffold: WebAuthn register/verify
+  challenge evidence, profile credential persistence, ledger events,
+  `/api/profile-auth/*` routes, and `/shell/` controls for
+  `navigator.credentials.create/get` in secure browser contexts;
+- Phase 2a worker notification scaffold: push-subscription metadata,
+  worker-notification receipts, `/api/push/subscriptions`,
+  `/api/worker-notifications`, and `/shell/` Worker alerts controls backed by
+  service-worker local notifications;
+- Phase 2a Indic voice runtime scaffold: local ASR model-pack metadata,
+  `/api/voice/runtime`, `/api/voice/model-packs`, and shell runtime planning
+  that prefers installed Indic Whisper WASM packs before falling back to Web
+  Speech or text input;
+- Phase 2a Indic TTS runtime scaffold: TTS model-pack metadata,
+  `/api/tts/runtime`, `/api/tts/model-packs`, and shell Listen controls for
+  localized responses using browser speech synthesis until IndicTTS-WASM is
+  wired;
+- Phase 2a on-device SLM runtime scaffold: local model-pack metadata,
+  `/api/on-device/runtime`, `/api/on-device/model-packs`, and shell
+  orchestration metadata that records whether a WebGPU/WASM local model is
+  ready before falling back to deterministic rules;
 - API and CLI routes for policy/consent/decision/tool work;
 - operator console policy panel.
 
@@ -219,16 +239,26 @@ powershell -ExecutionPolicy Bypass -File scripts/bos.ps1 memory provenance `
 - `digilocker`: returns document references, not raw files.
 - `account_aggregator`: returns derived financial signals, not transactions.
 - `abha`: returns minimal health summaries and record references.
+- `abha` for `health_document_upload`: returns mocked structured ABHA upload
+  receipts from captured health-document observations without raw image/OCR
+  payloads.
 - `upi_escrow`: creates escrow receipts with declared monetary limits.
 - `mesh.storage`: records mesh storage intent without payloads.
+- `bharat_marketplace`: returns native service-booking receipts with booking
+  refs, provider choice, UPI deep-link payment artifacts, and optional ONDC
+  bridge evidence.
+- `ondc_beckn`: returns Phase A ONDC / Beckn bridge booking receipts with the
+  same UPI deep-link payment shape.
 
 ## Orchestration Templates
 
 - `regulated_onboarding` -> Account Aggregator mock.
 - `scheme_delivery` -> DigiLocker mock.
 - `health_record_read` -> ABHA mock.
+- `health_document_upload` -> ABHA structured upload mock.
 - `labor_match_post` -> UPI escrow mock.
 - `mesh_storage` -> mesh storage mock.
+- `service_booking` -> Bharat OS native marketplace mock.
 
 ## Current Limits
 
@@ -307,10 +337,31 @@ powershell -ExecutionPolicy Bypass -File scripts/bos.ps1 memory provenance `
   execution receipt, so clients can show audit-hash status immediately.
 - Aadhaar, PAN, DigiLocker, Account Aggregator, ABHA, and UPI remain mocked until
   real partnerships exist.
+- Health document upload uses deterministic OCR-text normalization today. Real
+  camera-image OCR via Tesseract.js / IndicOCR is still a Phase 2a hardening
+  item; raw images and full OCR text are not persisted in the current artifact.
+- Profile passkey binding stores credential metadata and challenge evidence
+  only. Full FIDO2 attestation/assertion signature verification, challenge
+  persistence, replay protection, and recovery policy are still Phase 2a
+  hardening work.
+- Worker notifications store endpoint hashes and key-presence metadata only.
+  Real VAPID Web Push sending, encrypted endpoint storage, retry/unsubscribe
+  handling, and production push-service integration remain Phase 2a hardening
+  work.
+- Indic voice runtime planning is wired, but no WASM ASR decoder or model pack
+  is bundled in the repo. Model download/side-load, microphone streaming into
+  the decoder, cache management, and Android latency tests remain hardening
+  work.
+- Indic TTS runtime planning is wired, but no WASM TTS decoder or model pack is
+  bundled in the repo. Voice selection, decoder playback, Bhashini SDK
+  evaluation, and Android latency tests remain hardening work.
+- On-device SLM planning is wired, but no WebGPU/llama.cpp runtime or model
+  weights are bundled in the repo. Model download/side-load UX, cache quota,
+  inference-worker isolation, prompt contracts, and Android thermal/latency
+  tests remain hardening work.
 - §9A worker authorization is now a signed first-class artifact and the
-  mediation policy verifies signature, worker ID, and expiry. Per-profile auth
-  on shared devices and a device-less assisted/kiosk channel are still out of
-  scope (identity-layer work).
+  mediation policy verifies signature, worker ID, and expiry. Device-less
+  assisted/kiosk channels are still out of scope (identity-layer work).
 - Net Contribution Score is exposed through the API, CLI, Trust Passport, and
   operator console. It is not yet tied to pricing, credit settlement, abuse
   controls, or real node telemetry.

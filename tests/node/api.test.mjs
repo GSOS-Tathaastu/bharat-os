@@ -66,6 +66,25 @@ test('Phase 0 API exposes health and route catalog', async () => {
     assert.ok(catalog.routes.includes('GET /api/memory-search'));
     assert.ok(catalog.routes.includes('GET /api/memory-records/:recordId/provenance'));
     assert.ok(catalog.routes.includes('POST /api/memory-records/:recordId/read'));
+    assert.ok(catalog.routes.includes('GET /api/health-documents'));
+    assert.ok(catalog.routes.includes('POST /api/health-documents'));
+    assert.ok(catalog.routes.includes('POST /api/profile-auth/challenges'));
+    assert.ok(catalog.routes.includes('GET /api/profile-auth/credentials'));
+    assert.ok(catalog.routes.includes('POST /api/profile-auth/credentials'));
+    assert.ok(catalog.routes.includes('POST /api/profile-auth/assertions'));
+    assert.ok(catalog.routes.includes('GET /api/push/subscriptions'));
+    assert.ok(catalog.routes.includes('POST /api/push/subscriptions'));
+    assert.ok(catalog.routes.includes('GET /api/worker-notifications'));
+    assert.ok(catalog.routes.includes('POST /api/worker-notifications'));
+    assert.ok(catalog.routes.includes('GET /api/voice/runtime'));
+    assert.ok(catalog.routes.includes('GET /api/voice/model-packs'));
+    assert.ok(catalog.routes.includes('POST /api/voice/model-packs'));
+    assert.ok(catalog.routes.includes('GET /api/tts/runtime'));
+    assert.ok(catalog.routes.includes('GET /api/tts/model-packs'));
+    assert.ok(catalog.routes.includes('POST /api/tts/model-packs'));
+    assert.ok(catalog.routes.includes('GET /api/on-device/runtime'));
+    assert.ok(catalog.routes.includes('GET /api/on-device/model-packs'));
+    assert.ok(catalog.routes.includes('POST /api/on-device/model-packs'));
     assert.ok(catalog.routes.includes('GET /api/identities'));
     assert.ok(catalog.routes.includes('POST /api/identities'));
   });
@@ -83,12 +102,26 @@ test('Phase 0 API serves the shell and operator console assets', async () => {
     const shellText = await shellHtml.text();
     assert.match(shellText, /Bharat OS/);
     assert.match(shellText, /What do you want to do today/);
+    assert.match(shellText, /Profile security/);
+    assert.match(shellText, /Worker alerts/);
 
     const shellScript = await fetch(`${baseUrl}/shell/app.js`);
     assert.equal(shellScript.status, 200);
     const shellScriptText = await shellScript.text();
     assert.match(shellScriptText, /sendIntent/);
     assert.match(shellScriptText, /\/api\/orchestrations/);
+    assert.match(shellScriptText, /Pay with UPI/);
+    assert.match(shellScriptText, /uploadHealthDocument/);
+    assert.match(shellScriptText, /bindProfilePasskey/);
+    assert.match(shellScriptText, /\/api\/profile-auth\/challenges/);
+    assert.match(shellScriptText, /enableWorkerAlerts/);
+    assert.match(shellScriptText, /\/api\/worker-notifications/);
+    assert.match(shellScriptText, /loadVoiceRuntimePlan/);
+    assert.match(shellScriptText, /\/api\/voice\/runtime/);
+    assert.match(shellScriptText, /loadTtsRuntimePlan/);
+    assert.match(shellScriptText, /speakLatestLocalizedResponse/);
+    assert.match(shellScriptText, /loadOnDeviceRuntimePlan/);
+    assert.match(shellScriptText, /\/api\/on-device\/runtime/);
 
     const html = await fetch(`${baseUrl}/console/`);
     assert.equal(html.status, 200);
@@ -139,6 +172,300 @@ test('Phase 0 API serves the shell and operator console assets', async () => {
     assert.match(scriptText, /renderTrustPassports/);
     assert.match(scriptText, /loadTrustPassports/);
     assert.match(scriptText, /signTrustPassport/);
+  });
+});
+
+test('Phase 2a API uploads captured health documents to the mocked ABHA structured path', async () => {
+  const { store } = await freshStore('api-health-document');
+  const identity = createIdentity({ displayName: 'API health upload actor' });
+  await store.saveIdentity(identity);
+
+  await withApi(store, async (baseUrl) => {
+    const consentResponse = await fetch(`${baseUrl}/api/consents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subjectId: identity.id,
+        granteeId: 'bharat-os-orchestrator',
+        scopes: ['health.record.write', 'consent.record'],
+        purpose: 'Captured prescription upload',
+        signWithIdentityId: identity.id
+      })
+    });
+    assert.equal(consentResponse.status, 201);
+
+    const uploadResponse = await fetch(`${baseUrl}/api/health-documents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        actorId: identity.id,
+        documentType: 'prescription',
+        captureMode: 'camera_or_file',
+        locale: 'en-IN',
+        image: { mimeType: 'image/jpeg', byteLength: 2048, sha256: 'b'.repeat(64) },
+        ocrText: 'Patient: Secret Name\nDiagnosis diabetes\nHbA1c 7.1\nTab Metformin 500mg'
+      })
+    });
+    assert.equal(uploadResponse.status, 201);
+    const uploaded = await readJson(uploadResponse);
+    assert.equal(uploaded.ok, true);
+    assert.equal(uploaded.capture.status, 'uploaded');
+    assert.equal(uploaded.capture.imageEvidence.rawImageStored, false);
+    assert.equal(uploaded.capture.structured.rawOcrTextStored, false);
+    assert.equal(uploaded.execution.toolReceipt.status, 'structured_upload_mocked');
+    assert.equal(uploaded.execution.toolReceipt.privacy.pointerNotPayload, true);
+    assert.equal(JSON.stringify(uploaded.capture).includes('Secret Name'), false);
+
+    const listed = await readJson(await fetch(`${baseUrl}/api/health-documents`));
+    assert.equal(listed.captures.length, 1);
+    assert.equal(listed.captures[0].captureId, uploaded.capture.captureId);
+
+    const fetched = await readJson(
+      await fetch(`${baseUrl}/api/health-documents/${encodeURIComponent(uploaded.capture.captureId)}`)
+    );
+    assert.equal(fetched.capture.abhaUpload.uploadId, uploaded.capture.abhaUpload.uploadId);
+  });
+});
+
+test('Phase 2a API binds and verifies profile passkey metadata', async () => {
+  const { store } = await freshStore('api-profile-auth');
+  const identity = createIdentity({ displayName: 'API passkey actor' });
+  await store.saveIdentity(identity);
+
+  await withApi(store, async (baseUrl) => {
+    const registerChallengeResponse = await fetch(`${baseUrl}/api/profile-auth/challenges`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identityId: identity.id, ceremony: 'register' })
+    });
+    assert.equal(registerChallengeResponse.status, 201);
+    const registerChallengeBody = await readJson(registerChallengeResponse);
+    assert.match(registerChallengeBody.challenge.challengeId, /^bos:profile-auth-challenge:/);
+
+    const credentialResponse = await fetch(`${baseUrl}/api/profile-auth/credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: identity.id,
+        credentialId: 'api-passkey-credential',
+        challenge: registerChallengeBody.challenge,
+        transports: ['internal'],
+        userVerified: true
+      })
+    });
+    assert.equal(credentialResponse.status, 201);
+    const credentialBody = await readJson(credentialResponse);
+    assert.equal(credentialBody.credential.identityId, identity.id);
+    assert.equal(credentialBody.credential.challengeId, registerChallengeBody.challenge.challengeId);
+
+    const listed = await readJson(
+      await fetch(`${baseUrl}/api/profile-auth/credentials?identityId=${encodeURIComponent(identity.id)}`)
+    );
+    assert.equal(listed.credentials.length, 1);
+    assert.equal(listed.credentials[0].credentialIdHash, credentialBody.credential.credentialIdHash);
+
+    const verifyChallengeResponse = await fetch(`${baseUrl}/api/profile-auth/challenges`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identityId: identity.id, ceremony: 'verify' })
+    });
+    assert.equal(verifyChallengeResponse.status, 201);
+    const verifyChallengeBody = await readJson(verifyChallengeResponse);
+
+    const assertionResponse = await fetch(`${baseUrl}/api/profile-auth/assertions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: identity.id,
+        credentialId: 'api-passkey-credential',
+        challenge: verifyChallengeBody.challenge
+      })
+    });
+    assert.equal(assertionResponse.status, 200);
+    const assertionBody = await readJson(assertionResponse);
+    assert.equal(assertionBody.ok, true);
+    assert.equal(assertionBody.verification.valid, true);
+
+    const rejectedResponse = await fetch(`${baseUrl}/api/profile-auth/assertions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: identity.id,
+        credentialId: 'wrong-credential',
+        challenge: verifyChallengeBody.challenge
+      })
+    });
+    assert.equal(rejectedResponse.status, 403);
+    const rejectedBody = await readJson(rejectedResponse);
+    assert.equal(rejectedBody.ok, false);
+  });
+});
+
+test('Phase 2a API records worker notification capability and queues job alerts', async () => {
+  const { store } = await freshStore('api-worker-notifications');
+  const worker = createIdentity({ displayName: 'API notification worker' });
+  await store.saveIdentity(worker);
+
+  await withApi(store, async (baseUrl) => {
+    const subscriptionResponse = await fetch(`${baseUrl}/api/push/subscriptions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: worker.id,
+        endpoint: 'https://push.example.test/send/sensitive-endpoint',
+        keys: { p256dh: 'secret-p256dh', auth: 'secret-auth' },
+        permission: 'granted',
+        source: 'shell'
+      })
+    });
+    assert.equal(subscriptionResponse.status, 201);
+    const subscriptionBody = await readJson(subscriptionResponse);
+    assert.equal(subscriptionBody.subscription.identityId, worker.id);
+    assert.equal(subscriptionBody.subscription.rawEndpointStored, false);
+    assert.equal(JSON.stringify(subscriptionBody.subscription).includes('sensitive-endpoint'), false);
+
+    const notificationResponse = await fetch(`${baseUrl}/api/worker-notifications`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workerId: worker.id,
+        jobReference: 'api-job-1',
+        title: 'Nearby job',
+        body: 'Three-day work is available. Escrow is required.',
+        urgency: 'high'
+      })
+    });
+    assert.equal(notificationResponse.status, 201);
+    const notificationBody = await readJson(notificationResponse);
+    assert.equal(notificationBody.ok, true);
+    assert.equal(notificationBody.notification.delivery.status, 'queued_web_push');
+    assert.equal(notificationBody.notification.delivery.vapidIntegrated, false);
+    assert.equal(notificationBody.notification.privacy.rawPushEndpointStored, false);
+
+    const listedSubscriptions = await readJson(
+      await fetch(`${baseUrl}/api/push/subscriptions?identityId=${encodeURIComponent(worker.id)}`)
+    );
+    assert.equal(listedSubscriptions.subscriptions.length, 1);
+
+    const listedNotifications = await readJson(
+      await fetch(`${baseUrl}/api/worker-notifications?workerId=${encodeURIComponent(worker.id)}`)
+    );
+    assert.equal(listedNotifications.notifications.length, 1);
+  });
+});
+
+test('Phase 2a API plans voice runtime and records local ASR model packs', async () => {
+  const { store } = await freshStore('api-voice-runtime');
+
+  await withApi(store, async (baseUrl) => {
+    const fallback = await readJson(
+      await fetch(`${baseUrl}/api/voice/runtime?locale=hi-IN&webSpeechAvailable=true&secureContext=true`)
+    );
+    assert.equal(fallback.plan.runtime, 'web_speech_api');
+    assert.equal(fallback.plan.offlineReady, false);
+    assert.equal(fallback.plan.modelBytesStoredInReceipt, false);
+
+    const modelResponse = await fetch(`${baseUrl}/api/voice/model-packs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        locale: 'hi-IN',
+        modelId: 'indic-whisper-small-hi-q5',
+        bytes: 128000000,
+        sha256: 'd'.repeat(64),
+        source: 'side-loaded'
+      })
+    });
+    assert.equal(modelResponse.status, 201);
+    const modelBody = await readJson(modelResponse);
+    assert.equal(modelBody.modelPack.modelBytesStored, false);
+
+    const offline = await readJson(
+      await fetch(`${baseUrl}/api/voice/runtime?locale=hi-IN&webSpeechAvailable=true&secureContext=true`)
+    );
+    assert.equal(offline.plan.runtime, 'indic_whisper_wasm');
+    assert.equal(offline.plan.offlineReady, true);
+    assert.equal(offline.plan.selectedModelPackId, modelBody.modelPack.voiceModelPackId);
+
+    const packs = await readJson(await fetch(`${baseUrl}/api/voice/model-packs?locale=hi-IN`));
+    assert.equal(packs.modelPacks.length, 1);
+  });
+});
+
+test('Phase 2a API plans TTS runtime and records local TTS model packs', async () => {
+  const { store } = await freshStore('api-tts-runtime');
+
+  await withApi(store, async (baseUrl) => {
+    const fallback = await readJson(
+      await fetch(`${baseUrl}/api/tts/runtime?locale=bn-IN&speechSynthesisAvailable=true`)
+    );
+    assert.equal(fallback.plan.runtime, 'browser_speech_synthesis');
+    assert.equal(fallback.plan.offlineReady, false);
+
+    const modelResponse = await fetch(`${baseUrl}/api/tts/model-packs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        locale: 'bn-IN',
+        modelId: 'indic-tts-small-bn-q5',
+        bytes: 64000000,
+        sha256: 'f'.repeat(64),
+        source: 'side-loaded'
+      })
+    });
+    assert.equal(modelResponse.status, 201);
+    const modelBody = await readJson(modelResponse);
+    assert.equal(modelBody.modelPack.modelBytesStored, false);
+
+    const offline = await readJson(
+      await fetch(`${baseUrl}/api/tts/runtime?locale=bn-IN&speechSynthesisAvailable=true`)
+    );
+    assert.equal(offline.plan.runtime, 'indic_tts_wasm');
+    assert.equal(offline.plan.offlineReady, true);
+    assert.equal(offline.plan.selectedModelPackId, modelBody.modelPack.ttsModelPackId);
+
+    const packs = await readJson(await fetch(`${baseUrl}/api/tts/model-packs?locale=bn-IN`));
+    assert.equal(packs.modelPacks.length, 1);
+  });
+});
+
+test('Phase 2a API plans on-device SLM runtime and records local model packs', async () => {
+  const { store } = await freshStore('api-on-device-runtime');
+
+  await withApi(store, async (baseUrl) => {
+    const fallback = await readJson(
+      await fetch(`${baseUrl}/api/on-device/runtime?task=intent_planning&webGpuAvailable=true&wasmAvailable=true`)
+    );
+    assert.equal(fallback.plan.runtime, 'deterministic_rules_with_model_slot');
+    assert.equal(fallback.plan.localModelReady, false);
+
+    const modelResponse = await fetch(`${baseUrl}/api/on-device/model-packs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        modelId: 'gemma-2b-it-q4-webgpu',
+        family: 'gemma-2b-it-q4',
+        runtime: 'webgpu_transformersjs',
+        bytes: 1250000000,
+        sha256: '1'.repeat(64),
+        capabilities: ['intent_planning', 'summarization'],
+        localeCoverage: ['en-IN', 'hi-IN'],
+        source: 'side-loaded'
+      })
+    });
+    assert.equal(modelResponse.status, 201);
+    const modelBody = await readJson(modelResponse);
+    assert.equal(modelBody.modelPack.modelBytesStored, false);
+
+    const ready = await readJson(
+      await fetch(`${baseUrl}/api/on-device/runtime?task=intent_planning&webGpuAvailable=true&wasmAvailable=true`)
+    );
+    assert.equal(ready.plan.runtime, 'webgpu_transformersjs');
+    assert.equal(ready.plan.localModelReady, true);
+    assert.equal(ready.plan.selectedModelPackId, modelBody.modelPack.onDeviceModelPackId);
+
+    const packs = await readJson(await fetch(`${baseUrl}/api/on-device/model-packs?task=summarization`));
+    assert.equal(packs.modelPacks.length, 1);
   });
 });
 

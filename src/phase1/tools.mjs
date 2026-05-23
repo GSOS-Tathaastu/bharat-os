@@ -1,4 +1,5 @@
 import { sha256Hex, stableStringify } from '../phase0/core.mjs';
+import { createAbhaStructuredUploadReceipt } from './health-document.mjs';
 import { evaluateDecision } from './policy.mjs';
 
 export const TOOL_PROTOCOL_VERSION = 'bos.phase1.tools.v0';
@@ -79,6 +80,71 @@ function safeAmount(money = {}) {
   };
 }
 
+export function createUpiDeepLink({
+  payeeAddress,
+  payeeName,
+  amount,
+  currency = 'INR',
+  transactionRef,
+  transactionNote
+}) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || currency !== 'INR') {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    pa: payeeAddress,
+    pn: payeeName,
+    am: numericAmount.toFixed(2),
+    cu: 'INR',
+    tr: transactionRef,
+    tn: transactionNote
+  });
+
+  return `upi://pay?${params.toString()}`;
+}
+
+function serviceBookingPayment(request, { bookingRef, providerName, vertical, defaultPayeeAddress }) {
+  const money = safeAmount(request.money);
+  const payeeAddress = request.metadata?.payeeVpa ?? defaultPayeeAddress;
+  const payeeName = request.metadata?.payeeName ?? providerName;
+  const transactionNote =
+    request.metadata?.transactionNote ?? `Bharat OS ${vertical} booking`;
+  const transactionRef =
+    request.metadata?.transactionRef ??
+    token('bos_upi', {
+      actorId: request.actorId,
+      bookingRef,
+      amount: money.amount,
+      currency: money.currency
+    });
+  const uri = createUpiDeepLink({
+    payeeAddress,
+    payeeName,
+    amount: money.amount,
+    currency: money.currency,
+    transactionRef,
+    transactionNote
+  });
+
+  if (!uri) return null;
+
+  return {
+    rail: 'upi',
+    mode: 'deep_link',
+    partnerIntegrated: false,
+    requiresUserApproval: true,
+    payeeAddress,
+    payeeName,
+    amount: money.amount,
+    currency: money.currency,
+    transactionRef,
+    transactionNote,
+    uri
+  };
+}
+
 function uidaiOfflineEkyc(request) {
   return {
     toolId: 'uidai_offline_ekyc',
@@ -124,6 +190,14 @@ function accountAggregator(request) {
 }
 
 function abha(request) {
+  if (request.actionType === 'health_document_upload') {
+    const capture = request.metadata?.healthDocumentCapture;
+    if (!capture) {
+      throw new Error('health_document_upload requires metadata.healthDocumentCapture.');
+    }
+    return createAbhaStructuredUploadReceipt(capture);
+  }
+
   return {
     toolId: 'abha',
     status: 'summarized',
@@ -193,6 +267,12 @@ function ondcBeckn(request) {
       grocery: 'Kirana via ONDC (mock)',
       services: 'Urban Services via ONDC (mock)'
     }[vertical];
+  const bookingRef = idFrom('ondc:booking', {
+    actorId: request.actorId,
+    vertical,
+    providerName,
+    at: nowIso()
+  });
 
   return {
     toolId: 'ondc_beckn',
@@ -202,13 +282,14 @@ function ondcBeckn(request) {
     vertical,
     providerId: token('ondc_provider', { vertical, providerName }),
     providerName,
-    bookingRef: idFrom('ondc:booking', {
-      actorId: request.actorId,
-      vertical,
-      providerName,
-      at: nowIso()
-    }),
+    bookingRef,
     fare: money.amount > 0 ? { amount: money.amount, currency: money.currency } : null,
+    payment: serviceBookingPayment(request, {
+      bookingRef,
+      providerName,
+      vertical,
+      defaultPayeeAddress: 'ondc.provider@upi'
+    }),
     quote: {
       from: request.metadata?.from ?? null,
       to: request.metadata?.to ?? null,
@@ -263,6 +344,12 @@ function bharatMarketplace(request) {
   // This is the design principle from §9B — the substrate prefers itself.
   const chosen = nativeProvider;
   const sources = bridgeQuote ? ['native', 'ondc-bridge'] : ['native'];
+  const bookingRef = idFrom('bos:booking', {
+    actorId: request.actorId,
+    vertical,
+    providerId: chosen.providerId,
+    at: nowIso()
+  });
 
   return {
     toolId: 'bharat_marketplace',
@@ -276,13 +363,14 @@ function bharatMarketplace(request) {
       trustPassportScore: chosen.trustPassportScore,
       commissionPct: chosen.commissionPct
     },
-    bookingRef: idFrom('bos:booking', {
-      actorId: request.actorId,
-      vertical,
-      providerId: chosen.providerId,
-      at: nowIso()
-    }),
+    bookingRef,
     fare: money.amount > 0 ? { amount: money.amount, currency: money.currency } : null,
+    payment: serviceBookingPayment(request, {
+      bookingRef,
+      providerName: chosen.providerName,
+      vertical,
+      defaultPayeeAddress: 'bharatos.marketplace@upi'
+    }),
     quote: {
       from: request.metadata?.from ?? null,
       to: request.metadata?.to ?? null,

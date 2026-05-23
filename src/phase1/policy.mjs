@@ -88,6 +88,11 @@ export const ACTION_TEMPLATES = {
     defaultTool: 'abha',
     scopes: ['health.record.read', 'consent.record']
   },
+  health_document_upload: {
+    regulated: true,
+    defaultTool: 'abha',
+    scopes: ['health.record.write', 'consent.record']
+  },
   labor_match_post: {
     regulated: true,
     defaultTool: 'upi_escrow',

@@ -1968,11 +1968,18 @@ code lands; do not create a separate `STATUS.md` (§16).
   surface — voice-first or text, persona-aware, per-action result
   cards) + a device-claim model (owner + household, not the system
   registry). All built against *mocked* tools where the doc says
-  *mocked*. 133/133 tests green.
+  *mocked*. 162/162 tests green.
 - **Phase 2a — PWA / app distribution: ~85% of the product is
-  PWA-buildable.** The reframing in §13 makes explicit that the L3–L8
-  stack and most of L2 do not require the OS layer; they ship in the
-  PWA. The Phase 2a queue below is prioritized to land that scope.
+  PWA-buildable.** In progress. 2a.1 lands the first product-feel
+  transaction: `service_booking` receipts now carry UPI deep-links and
+  `/shell/` renders a `Pay with UPI` action. 2a.2 adds health document
+  capture -> structured OCR extraction -> mocked ABHA upload, consent-
+  gated under `health.record.write`. 2a.3 adds WebAuthn per-profile
+  passkey binding as a metadata/challenge-evidence scaffold. 2a.4 adds
+  worker-notification receipts + PWA service-worker local alerts. 2a.5
+  adds Indic ASR runtime planning and local model-pack metadata. 2a.6
+  adds TTS runtime planning and shell Listen controls. 2a.7 adds
+  on-device SLM runtime planning and model-pack metadata.
 - **Phase 2b — AOSP shell on OEM:** not started. Wins the remaining
   ~15% (persistent mesh daemon, launcher replacement, system-wide intent
   capture, TEE attestation at OS level, syscall-level L4 enforcement).
@@ -1985,13 +1992,13 @@ code lands; do not create a separate `STATUS.md` (§16).
 |---|---|---|
 | L1 — AOSP substrate + node daemon | none | no fork, no daemon, no kernel scheduling work |
 | L2 — Mesh + adaptive router | placement simulator only (`src/phase0/simulate.mjs`); NCS computed from nodes + memory and surfaced through API / CLI / Trust Passport / console | no real P2P, no TEE attestation (Knox/StrongBox/QSEE), no erasure-coded transport, no fiat-credit settlement plumbing on UPI |
-| L3 — IndiaStack tools | six mocked adapters returning tokens, not PII (`src/phase1/tools.mjs`) | no AUA/KSA partnership; no DigiLocker / AA / ABHA empanelment |
+| L3 — IndiaStack tools | six mocked adapters returning tokens, not PII (`src/phase1/tools.mjs`); ABHA now supports a mocked structured document-upload receipt from captured OCR observations | no AUA/KSA partnership; no DigiLocker / AA / ABHA empanelment; no real ABHA write API yet |
 | L4 — Policy + consent ledger | signed consents, lifecycle, queryable + NDJSON-exportable audit ledger, ten policy rules including the full §9A worker-protection set (advance-fee, escrow, wage floor, age, signed mediation authorization, fiat-only) | policies are local code, not a DSL; no distributed revocation log; no human-review / dispute workflow for worker-protection violations |
-| L5 — Identity-anchored memory | encrypted local records, pointer-not-payload, consent-gated reads, metadata-only search and provenance; device-pairing scaffold for QR / recovery phrase portability | not distributed across the mesh; no production cryptographic pairing / vault migration; identity has no per-profile auth (shared-device case from §9A still open) |
-| L6 — Skill marketplace + service marketplace | local static registry, versioned signed manifests, preflight + remediation + retry + execute, trace evidence, Trust Passport counts; remediation actions cover all §9A policies; §9B **native service marketplace** (`bharat_marketplace` skill+tool) as the OS-owned substrate for cab/hotel/ticket/food/grocery/services, with `ondc_beckn` as a Phase A outbound bridge only | no third-party developer KYC; no sandbox runtime; no signing trust chain; no real provider registry yet (mocked); no inbound Beckn-compliant endpoints exposed yet (interop direction) |
+| L5 — Identity-anchored memory | encrypted local records, pointer-not-payload, consent-gated reads, metadata-only search and provenance; device-pairing scaffold for QR / recovery phrase portability; profile passkey credential scaffold (`src/phase1/profile-auth.mjs`) with challenge evidence + ledger persistence | not distributed across the mesh; no production cryptographic pairing / vault migration; passkey scaffold does not yet do full FIDO2 attestation/assertion signature verification or replay-proof challenge persistence |
+| L6 — Skill marketplace + service marketplace | local static registry, versioned signed manifests, preflight + remediation + retry + execute, trace evidence, Trust Passport counts; remediation actions cover all §9A policies; §9B **native service marketplace** (`bharat_marketplace` skill+tool) as the OS-owned substrate for cab/hotel/ticket/food/grocery/services, with `ondc_beckn` as a Phase A outbound bridge only; service-booking receipts include UPI deep-link payment artifacts | no third-party developer KYC; no sandbox runtime; no signing trust chain; no real provider registry yet (mocked); no inbound Beckn-compliant endpoints exposed yet (interop direction); no PSP callback / settlement reconciliation yet |
 | L7 — Intent orchestrator | deterministic alias + rule normalization, links L6 preflight → L3 execution, persisted receipts, carries labor / mediation / age-attestation fields through to the policy engine | no LLM; intent space is the five canonical templates |
-| L8 — Vernacular generative UI | deterministic intent normalization across five Indian languages (Hindi, Marathi, Bhojpuri, Tamil, Bengali — script + romanized) with localized response strings (`src/phase1/vernacular.mjs`); **user-facing shell at `/shell/`** (`public/shell/`) with voice (Web Speech API fallback), persona-aware greeting, per-action result cards, device-claim model with owner + household | no IndicWhisper-WASM / IndicTTS-WASM / IndicTrans2-WASM yet (Phase 2a queue #5–6); no on-device SLM yet (queue #7); generative UI is action-type-specific cards, not from-scratch UI synthesis |
-| Cross-cutting | Trust Passport v1 (derived + signed snapshots), integrity verifier, audit ledger, operator console, PWA shell, local identity creation | none unique to layer |
+| L8 — Vernacular generative UI | deterministic intent normalization across five Indian languages (Hindi, Marathi, Bhojpuri, Tamil, Bengali — script + romanized) with localized response strings (`src/phase1/vernacular.mjs`); **user-facing shell at `/shell/`** (`public/shell/`) with voice + TTS runtime planning (`src/phase1/voice-runtime.mjs`), on-device SLM runtime planning (`src/phase1/on-device-model.mjs`), Web Speech / browser SpeechSynthesis fallbacks, persona-aware greeting, per-action result cards, health-document capture card, profile passkey card, Worker alerts card, device-claim model with owner + household | no actual IndicWhisper-WASM / IndicTTS-WASM / WebGPU SLM decoder/model pack bundled yet; no IndicTrans2-WASM yet; health OCR is deterministic text normalization, not real image OCR yet; Web Push is local-notification/VAPID-pending scaffold; generative UI is action-type-specific cards, not from-scratch UI synthesis |
+| Cross-cutting | Trust Passport v1 (derived + signed snapshots), integrity verifier, audit ledger, operator console, PWA shell, local identity creation, worker-notification receipts (`src/phase1/worker-notification.mjs`) | none unique to layer |
 
 ### Team and operational state (2026-05-23)
 
@@ -2039,6 +2046,27 @@ Closed in Phase 1.40–1.43 (ADRs 0046, 0047, 0048, 0049):
 6. ✅ **PWA conversion of the operator console.** Manifest, service worker, offline app shell. The Phase 2a §13 distribution path is runnable on a phone.
 7. ✅ **Phase 1.43: user-facing vernacular shell at `/shell/`** (`public/shell/`). Voice-first or text, persona-aware, per-action result cards rendering vernacular `localizedResponse`. **Device-claim model:** owner + household stored in localStorage; demo personas re-initialize the device rather than masquerading as same-device profiles. English-vs-Hinglish intent detection corrected so pure-ASCII English doesn't get mis-classified as `hi-Latn-IN`.
 
+Closed in Phase 2a.1 (ADR 0050):
+1. ✅ **UPI deep-link for service bookings** — `bharat_marketplace` and `ondc_beckn` receipts now include a `payment` artifact with a `upi://pay?...` URI, and `/shell/` renders a `Pay with UPI` action on service-booking result cards. This is a handoff only: no PSP callback, reconciliation, or payment-status verification yet.
+
+Closed in Phase 2a.2 (ADR 0051):
+1. ✅ **Health document capture -> mocked ABHA structured upload** — `health-document.mjs`, `bos:skill:abha-document-upload`, `POST /api/health-documents`, and `/shell/` capture card. The artifact stores image metadata/hash + structured observations only; raw image and full OCR text are not persisted. Real Tesseract.js / IndicOCR image-to-text remains a hardening step.
+
+Closed in Phase 2a.3 (ADR 0052):
+1. ✅ **WebAuthn per-profile passkey binding scaffold** — `profile-auth.mjs`, `profile-credentials` store persistence, `POST /api/profile-auth/challenges`, `POST /api/profile-auth/credentials`, `POST /api/profile-auth/assertions`, and `/shell/` passkey controls. The artifact stores credential metadata + challenge linkage, not biometric material or private keys. Full FIDO2 attestation/assertion signature verification and replay-proof challenge persistence remain hardening steps.
+
+Closed in Phase 2a.4 (ADR 0053):
+1. ✅ **Web Push worker notification scaffold** — `worker-notification.mjs`, `push-subscriptions` + `worker-notifications` store persistence, `GET/POST /api/push/subscriptions`, `GET/POST /api/worker-notifications`, service-worker `push`/notification-click handlers, and `/shell/` Worker alerts controls. The scaffold stores endpoint hashes/key-presence metadata, not raw Push endpoints or keys. Real VAPID delivery, retries, unsubscribe handling, and production push-service integration remain hardening steps.
+
+Closed in Phase 2a.5 (ADR 0054):
+1. ✅ **Indic voice runtime scaffold** — `voice-runtime.mjs`, `voice-model-packs` store persistence, `GET /api/voice/runtime`, `GET/POST /api/voice/model-packs`, and `/shell/` runtime planning for active-profile locale. The plan prefers installed Indic Whisper WASM packs, falls back to Web Speech in secure contexts, and otherwise leaves text input as the safe path. Real WASM decoder/model-pack delivery remains open.
+
+Closed in Phase 2a.6 (ADR 0055):
+1. ✅ **Indic TTS runtime scaffold** — `voice-runtime.mjs` now also covers `tts-model-packs`, `GET /api/tts/runtime`, `GET/POST /api/tts/model-packs`, and `/shell/` Listen controls for localized responses. Browser `speechSynthesis` is the demo playback path until IndicTTS-WASM / Bhashini SDK integration lands.
+
+Closed in Phase 2a.7 (ADR 0056):
+1. ✅ **On-device SLM runtime scaffold** — `on-device-model.mjs`, `on-device-model-packs` persistence, `GET /api/on-device/runtime`, `GET/POST /api/on-device/model-packs`, and shell orchestration metadata for local model readiness. Current inference remains deterministic until a WebGPU / llama.cpp.wasm model pack is installed.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the
@@ -2048,19 +2076,41 @@ the OS layer.
 
 | # | Feature | Effort | Notes |
 |---|---|---|---|
-| 1 | **UPI deep-link** in `service_booking` execution result | small | `upi://pay?pa=…&pn=…&am=…&tn=…` opens the user's UPI app. One-tap pay from the result card. No partner integration. |
-| 2 | **Document capture → OCR → ABHA structured upload** (§9C 16a) | small–medium | `getUserMedia` for the camera; **Tesseract.js** for Indic OCR; existing L7 orchestrator → mocked ABHA tool. Replaces the mock with a real captured prescription. |
-| 3 | **WebAuthn per-profile biometric** (§9A design problem A) | small | `navigator.credentials.create / get` to bind a passkey per profile on the device. Closes the "real ownership claim" gap. |
-| 4 | **Web Push** for §9A worker notifications | small | Installed-PWA push, works on Android. |
-| 5 | **Real Indic voice** via **IndicWhisper-WASM** (replaces Web Speech API) | medium | Replaces the Google-Cloud-dependent Web Speech API with on-device ASR. Removes the HTTPS-on-LAN voice break the user just hit. |
-| 6 | **Real Indic TTS** via **IndicTTS-WASM** or Bhashini JS SDK | medium | Speak the `localizedResponse` aloud in the user's language. |
-| 7 | **On-device SLM** via WebGPU + **transformers.js / llama.cpp.wasm** | large | Phi-3 / Gemma 2 / Sarvam-1 (quantized small) running in the browser tab. Replaces deterministic regex with real ML for L8 intent + L7 planning. Big download (1–2 GB), worth caching aggressively. |
+| 1 | ✅ **UPI deep-link** in `service_booking` execution result | done | `upi://pay?pa=…&pn=…&am=…&tn=…` opens the user's UPI app from the result card. No partner integration; settlement confirmation is still open. |
+| 2 | ✅ **Document capture → OCR → ABHA structured upload** (§9C 16a) | real | **Tesseract.js wired (Phase 2a.8)** — eng / hin / tam language data lazy-loaded from CDN on first capture; auto-fills the OCR text area; falls back to manual textarea if offline. Deterministic structured field extraction (HbA1c, BP, meds, follow-up). Mocked ABHA upload. Still open: language-specific extraction patterns for non-English prescriptions. |
+| 3 | ✅ **WebAuthn per-profile biometric** (§9A design problem A) | scaffold done | `navigator.credentials.create / get` binds a passkey per profile in the shell, backed by challenge evidence and profile-credential persistence. Still open: full FIDO2 verification + replay-proof challenge persistence. |
+| 4 | ✅ **Web Push** for §9A worker notifications | scaffold done | Installed-PWA permission + service-worker local notifications + persisted worker-notification receipts. Still open: VAPID send path, retries, unsubscribe handling. |
+| 5 | ✅ **Real Indic voice** via **IndicWhisper-WASM** (replaces Web Speech API) | scaffold done | Runtime planning + model-pack metadata are live. Still open: actual WASM decoder/model download, microphone streaming, Android latency tests. |
+| 6 | ✅ **Real Indic TTS** via **IndicTTS-WASM** or Bhashini JS SDK | scaffold done | TTS runtime planning + model-pack metadata + shell Listen controls are live. Still open: decoder/model delivery, Bhashini SDK evaluation, voice selection, Android latency tests. |
+| 7 | ✅ **On-device SLM** via WebGPU + **transformers.js / llama.cpp.wasm** | scaffold done | Local model-pack metadata + runtime planning are live. Still open: actual model download/side-load, WebGPU/WASM inference worker, prompt contract, Android thermal/latency tests. |
 | 8 | **Camera + WebRTC** for §7c device-pairing transport | medium | QR scan opens an ephemeral peer connection; identity vault transfers browser-to-browser, no server. Hardens the current localStorage scaffold. |
 | 9 | **Background Sync / Periodic Background Sync** for L2 mesh contribution while PWA is installed | medium | Not as persistent as a system daemon (that's Phase 2b) but enough to demonstrate the mesh story on a PWA-only device. |
 | 10 | **ONDC sandbox real integration** (replace `ondc_beckn` mock) | depends on partner | Awaiting ONDC sandbox credentials. The Beckn HTTP calls themselves are the same on PWA or native. |
 | 11 | **DigiLocker / AA / ABHA real OAuth flows** | depends on partner | Public OAuth redirects work in PWA the same as native. Need AUA/KSA partner + DPDP fiduciary registration first (§12). |
 | 12 | **Federated learning round** via TensorFlow.js or ONNX Runtime Web (§7f) | large | Phase 3 commitment in §7f; technically PWA-buildable. |
 | 13 | **One-tap reporting + flag ledger** (§9A safeguard escalation) | medium | New artifact type + L4 review policy + shell button. Independent of platform. |
+
+### Footprint accounting — "is this too heavy for mobile?"
+
+Honest tier accounting so an investor / partner can answer the heaviness
+concern in one paragraph:
+
+| Tier | What | Size | Loaded when |
+|---|---|---|---|
+| **1 — Always** | PWA app shell (HTML + JS + CSS + service worker + icon + manifest) | **~50 KB compressed** | First load, cached forever |
+| **2 — Lazy on first need** | Tesseract.js core + Hindi + English + Tamil language data | ~7 MB | First time the user taps "Camera" for a health document; cached after |
+| **3 — Opt-in offline voice** | IndicWhisper-WASM tiny model + decoder | ~30 MB | Only if user enables offline voice (Phase 2a queue #5 runtime, currently scaffold) |
+| **4 — Opt-in flagship-only** | On-device SLM (Sarvam-1 q4 7B, or Gemma 2B q4) | 1.5–4 GB | Explicit opt-in, Snapdragon 8 Gen 2+ / Tensor G3+ only (Phase 2a queue #7, currently scaffold) |
+
+**The base demo footprint is ~7 MB.** That is lighter than the Uber rider
+app (~150 MB), WhatsApp (~100 MB), or the average Android app (~30–50 MB).
+Bharat OS as a PWA is the *lightest* way a phone gets this functionality,
+not the heaviest — Tiers 3–4 are opt-in sovereignty upgrades, not the
+default load. This is a talking point with investors, not a constraint.
+
+The shell exposes this honestly through a "What's running, what's
+scaffold" diagnostics panel at the bottom of `/shell/` so the heaviness
+question can be inspected interactively during a demo.
 
 ### Phase 2b minimum — what genuinely needs the OS layer
 
@@ -2097,10 +2147,13 @@ an AOSP shell on an OEM partner. Nothing else in §6 requires it.
   no-advance-fee, escrow, minimum-wage-floor, age-verification, kiosk
   mediation, and fiat-only rules; remediation hints guide callers to fix
   blocks, and mediated actions now require a signed worker authorization
-  artifact. Still open: (1) per-profile auth on shared devices and a device-less
-  assisted/kiosk channel (identity layer work, not policy); (2) one-tap
-  reporting and human-review workflow for §9A safeguards; (3) NGO / labour-law
-  partner engagement; (4) real-world compliance testing beyond mocked flows.
+  artifact. Per-profile passkey binding is scaffolded, but still needs full
+  FIDO2 verification and replay protection. Worker alerts are scaffolded, but
+  still need real VAPID delivery and unsubscribe/retry handling. Still open:
+  (1) device-less assisted/kiosk channel (identity layer work, not policy);
+  (2) one-tap reporting and human-review workflow for §9A safeguards; (3) NGO
+  / labour-law partner engagement; (4) real-world compliance testing beyond
+  mocked flows.
 - **L6 marketplace economics absent.** No KYC'd developer onboarding, no
   installer / sandbox, no signing trust chain — the §13A "network-effect
   revenue" line has nothing to stand on yet.
@@ -2115,9 +2168,9 @@ an AOSP shell on an OEM partner. Nothing else in §6 requires it.
 - `BHARAT_OS.md` — this canonical reference. §0 (independence), §6
   (architecture), §15 (constants) are binding. §17 (this section) is
   the up-to-date status board; check it before assuming anything.
-- `README.md` — phase-by-phase build log (1.0 → 1.43).
-- `docs/adr/` — 49 ADRs numbered chronologically. Most recent
-  (0046–0049) describe Phase 1.40–1.43.
+- `README.md` — phase-by-phase build log (1.0 → 2a.7).
+- `docs/adr/` — 56 ADRs numbered chronologically. Most recent
+  (0046–0056) describe Phase 1.40–1.43 and Phase 2a.1–2a.7.
 - `docs/phase0/`, `docs/phase1/`, `docs/ui/` — implementation notes.
 
 **The code:**
@@ -2147,13 +2200,23 @@ an AOSP shell on an OEM partner. Nothing else in §6 requires it.
 - `src/phase1/worker-authorization.mjs` — §9A signed receipt verified
   by the L4 mediation policy.
 - `src/phase1/device-pairing.mjs` — §7c scaffold (Phase 2b hardens).
+- `src/phase1/profile-auth.mjs` — Phase 2a.3 per-profile passkey
+  challenge and credential metadata scaffold.
+- `src/phase1/worker-notification.mjs` — Phase 2a.4 worker alert
+  subscription metadata and notification receipts.
+- `src/phase1/voice-runtime.mjs` — Phase 2a.5/2a.6 Indic ASR/TTS
+  runtime planning and local model-pack metadata.
+- `src/phase1/on-device-model.mjs` — Phase 2a.7 local SLM runtime
+  planning and model-pack metadata.
 - `bin/bos.mjs` — comprehensive CLI (~30 commands).
 - `bin/bos-api.mjs` — local HTTP API server entry.
 
 **The user-facing PWA surfaces:**
-- `public/shell/` — **Bharat OS user shell** (Phase 1.43). Voice-first,
+- `public/shell/` — **Bharat OS user shell** (Phase 2a.7). Voice-first,
   vernacular, persona-aware, device-claim model (owner + household),
-  PWA-installable. The surface a user actually interacts with.
+  health-document capture, profile passkey controls, Worker alerts, voice
+  + TTS + on-device SLM runtime planning, PWA-installable. The surface a
+  user actually interacts with.
 - `public/operator-console/` — operator / dev observability UI (NOT
   consumer-facing). PWA-installable as a separate app.
 
@@ -2163,7 +2226,7 @@ an AOSP shell on an OEM partner. Nothing else in §6 requires it.
   Anjali). Run once, then start the API on the demo store.
 - `scripts/test.ps1`, `scripts/bos.ps1`, `scripts/api.ps1` — PowerShell
   wrappers (use the portable Node in `.tools/`).
-- `tests/node/` — 11 test files, 133 tests, all green.
+- `tests/node/` — 20 test files, 162 tests, all green.
 
 ### How to run the demo locally
 ```
@@ -2186,7 +2249,7 @@ node bin/bos-api.mjs --store .demo-bharat-os --host 0.0.0.0 --port 8787
 1. Read `BHARAT_OS.md` §0, §6, §15, §17 first. §17 is the live status
    board.
 2. Run the test suite: `node --test tests/node/*.test.mjs`. Should be
-   133/133 green.
+   162/162 green.
 3. Run the demo (above). Inspect both `/shell/` and `/console/`.
 4. Pick a feature from the **Phase 2a queue** in §17. The queue is
    prioritized; the smaller items at the top are 1–2 session efforts.

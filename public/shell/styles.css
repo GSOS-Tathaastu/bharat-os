@@ -350,6 +350,236 @@ body {
   word-break: break-all;
 }
 
+.pay-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 18px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #0c1018;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.pay-action:active {
+  transform: translateY(1px);
+}
+
+.listen-action {
+  min-height: 36px;
+  margin: 10px 0 2px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.listen-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.diagnostics {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+}
+
+.diagnostics summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.diagnostics summary::-webkit-details-marker { display: none; }
+.diagnostics summary::after {
+  content: '▾';
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.diagnostics[open] summary::after { content: '▴'; }
+
+.diagnostics-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.diagnostics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.diagnostics-list li {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.diagnostics-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.diagnostics-id {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--text-muted);
+  font-size: 11px;
+  width: 36px;
+}
+
+.diagnostics-label {
+  flex: 1;
+  font-weight: 600;
+}
+
+.diagnostics-list .tag {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+.diagnostics-list .tag.good { background: rgba(46, 160, 67, 0.18); color: var(--good); }
+.diagnostics-list .tag.warn { background: rgba(210, 153, 34, 0.18); color: var(--warn); }
+.diagnostics-list .tag.bad { background: rgba(229, 83, 75, 0.18); color: var(--bad); }
+
+.diagnostics-detail {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.diagnostics-note {
+  margin: 4px 16px 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.capture-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.capture-header,
+.capture-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.capture-header {
+  font-weight: 650;
+}
+
+.file-action {
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.file-action input {
+  display: none;
+}
+
+#healthDocText {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  min-height: 92px;
+}
+
+.capture-meta,
+.capture-result {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.capture-result {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.profile-auth-card,
+.worker-alert-card {
+  background: var(--bg-elevated);
+}
+
+.passkey-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.secondary-button {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.secondary-button:hover:not(:disabled),
+.link-button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.secondary-button:disabled,
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .result-evidence {
   font-size: 11px;
   color: var(--text-muted);

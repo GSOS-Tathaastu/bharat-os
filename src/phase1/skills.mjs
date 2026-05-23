@@ -53,6 +53,16 @@ const SKILL_DEFINITIONS = [
     dataExposure: 'health_summary_metadata'
   },
   {
+    skillId: 'bos:skill:abha-document-upload',
+    name: 'ABHA Structured Document Upload',
+    category: 'health',
+    actionType: 'health_document_upload',
+    toolId: 'abha',
+    summary: 'Uploads structured health observations extracted from a captured document without storing raw image or OCR text.',
+    requiredScopes: ['health.record.write', 'consent.record'],
+    dataExposure: 'structured_health_observations'
+  },
+  {
     skillId: 'bos:skill:upi-escrow',
     name: 'UPI Escrow',
     category: 'payments',

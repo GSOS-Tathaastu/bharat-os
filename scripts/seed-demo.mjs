@@ -169,8 +169,8 @@ const lakshmiConsent = signConsent(
   createConsent({
     subjectId: lakshmi.id,
     granteeId: 'bharat-os-orchestrator',
-    scopes: ['health.record.read', 'consent.record'],
-    purpose: 'Diabetes record read'
+    scopes: ['health.record.read', 'health.record.write', 'consent.record'],
+    purpose: 'Diabetes record read and captured prescription upload'
   }),
   lakshmi
 );
@@ -350,4 +350,4 @@ log(`  bootstrap report: 1 (nodes=${bootstrap.report.inputs.nodeCount}, objects=
 
 log('\nDone. Start the API with:');
 log(`  node bin/bos-api.mjs --store ${storePath}`);
-log('Then open: http://127.0.0.1:8787/console/');
+log('Then open: http://127.0.0.1:8787/ for the shell, or /console/ for operator view.');
