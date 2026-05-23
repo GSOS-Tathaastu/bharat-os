@@ -59,6 +59,7 @@ export class BosStore {
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
+    this.attestationsPath = path.join(rootPath, 'attestations');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -88,6 +89,7 @@ export class BosStore {
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
+    await fs.mkdir(this.attestationsPath, { recursive: true });
     await fs.appendFile(this.ledgerPath, '');
   }
 
@@ -577,6 +579,35 @@ export class BosStore {
 
   async listFederatedUpdates() {
     return listJson(this.federatedUpdatesPath);
+  }
+
+  // §13A #7 Trust attestations — ADR 0072.
+
+  attestationFile(attestationId) {
+    return path.join(this.attestationsPath, `${safeName(attestationId)}.json`);
+  }
+
+  async saveAttestation(attestation) {
+    await this.init();
+    await writeJson(this.attestationFile(attestation.attestationId), attestation);
+    await this.appendLedger({
+      type: 'attestation.saved',
+      attestationId: attestation.attestationId,
+      subjectId: attestation.subjectId,
+      verifierName: attestation.verifierName,
+      purpose: attestation.purpose,
+      expiresAt: attestation.expiresAt,
+      at: new Date().toISOString()
+    });
+    return attestation;
+  }
+
+  async readAttestation(attestationId) {
+    return readJson(this.attestationFile(attestationId));
+  }
+
+  async listAttestations() {
+    return listJson(this.attestationsPath);
   }
 
   async savePairingSession(session) {

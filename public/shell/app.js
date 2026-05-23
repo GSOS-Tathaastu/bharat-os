@@ -2021,6 +2021,100 @@ $('trustPassportRefresh')?.addEventListener('click', () => {
 });
 $('trustPassportPreview')?.addEventListener('click', previewVerifierView);
 
+// Sign and share — Phase 2a.22.
+//
+// Mints a real trust_passport_attestation via the orchestration API
+// (auto-signed server-side with the subject's identity per ADR 0072),
+// then renders the verifier URL + QR so a landlord/NBFC can open it
+// on any browser and see the signed claims.
+async function signAndShareAttestation() {
+  if (!sanityCheckActor()) return;
+  const verifierName = window.prompt(
+    'Who is this attestation for? (e.g. "Kothrud Landlord", "Acme NBFC")',
+    'Landlord'
+  );
+  if (!verifierName) return;
+  const shareDays = Number(
+    window.prompt('Share window in days (1-90)?', '14') ?? '14'
+  );
+  const box = $('trustPassportShare');
+  box.hidden = false;
+  box.innerHTML = '<div class="diagnostics-note">Granting consent + minting attestation…</div>';
+
+  try {
+    // 1) Mint a donation-purpose consent for the trust attestation.
+    await fetchJson('/api/consents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subjectId: state.activeIdentity.id,
+        granteeId: 'bharat-os-orchestrator',
+        scopes: ['trust.attest', 'consent.record'],
+        purpose: 'trust_attestation',
+        ttlSeconds: shareDays * 24 * 60 * 60,
+        signWithIdentityId: state.activeIdentity.id,
+        signRole: 'subject'
+      })
+    });
+
+    // 2) Run the orchestration to mint + auto-sign the attestation.
+    const data = await fetchJson('/api/orchestrations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        actorId: state.activeIdentity.id,
+        actionType: 'trust_attestation',
+        intentText: `Generate a trust attestation for ${verifierName}`,
+        locale: profileLocale(state.activeIdentity),
+        execute: true,
+        metadata: {
+          verifierName,
+          shareDays,
+          purpose: 'tenant_verification'
+        }
+      })
+    });
+
+    const attestation = data.attestation;
+    if (!attestation?.attestationId) {
+      throw new Error('Orchestration did not return a signed attestation.');
+    }
+    const verifyUrl = `${window.location.origin}/verify/?attestationId=${encodeURIComponent(attestation.attestationId)}`;
+
+    // 3) Render the URL + QR.
+    box.innerHTML = `
+      <div class="trust-share-label">Attestation minted &amp; signed. Share this link with ${escapeHtml(verifierName)}:</div>
+      <div class="trust-share-url">
+        <input type="text" readonly value="${escapeHtml(verifyUrl)}" id="trustShareUrlInput" />
+        <button id="trustShareCopyButton" class="link-button" type="button">Copy</button>
+      </div>
+      <div id="trustShareQr" class="trust-share-qr"></div>
+      <p class="diagnostics-note" style="margin: 0;">
+        Expires ${escapeHtml(new Date(attestation.expiresAt).toLocaleString())}. The
+        verifier sees the signed envelope (bands &amp; booleans) — never
+        your underlying records. §15 selective disclosure.
+      </p>
+    `;
+    document.getElementById('trustShareCopyButton').addEventListener('click', async () => {
+      const input = document.getElementById('trustShareUrlInput');
+      try {
+        await navigator.clipboard.writeText(input.value);
+        showToast('Verify URL copied to clipboard.');
+      } catch (_error) {
+        input.select();
+        showToast('Tap and hold to copy.');
+      }
+    });
+    renderQrInto(document.getElementById('trustShareQr'), verifyUrl).catch((err) =>
+      console.warn('QR render', err)
+    );
+  } catch (error) {
+    box.innerHTML = `<div class="diagnostics-note" style="color: var(--bad);">Failed: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+$('trustPassportSignShare')?.addEventListener('click', signAndShareAttestation);
+
 // ─── §7c device pairing — WebRTC handshake UI ──────────────────────────────
 
 // QR payload shape — versioned so future fields don't break older

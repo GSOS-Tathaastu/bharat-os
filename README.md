@@ -144,6 +144,22 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.22 **§13A #7 verifier round-trip** — closes the
+  Trust-as-a-service loop end-to-end. New artifact
+  `src/phase1/trust-attestation.mjs` with `signTrustAttestation` +
+  `verifyTrustAttestation` (Ed25519). Orchestration API auto-signs
+  trust attestations with the subject identity and persists to a new
+  `attestations/` store. Three routes: `GET /api/attestations`,
+  `GET /api/attestations/:id`,
+  `GET|POST /api/attestations/:id/verify` (discriminated result:
+  valid / expired / signature_invalid / unknown_subject / malformed).
+  Shell adds *"Sign & share"* to the Trust Passport card — mints,
+  signs, renders verify URL + QR. New `/verify/?attestationId=...`
+  page reads the attestation, calls verify, renders one of five
+  badge states with the disclosed claims (bands & booleans only).
+  §15 selective-disclosure preserved end-to-end. 249/249 tests (+8
+  new, including full orchestration → sign → verify e2e). SW cache
+  to v19. ADR 0072.
 - Phase 3.0 **§7f federated learning round substrate** — first Phase 3
   commitment kicks off. `src/phase1/federated-round.mjs` ships the
   round lifecycle (created → accepting_updates → completed/expired),

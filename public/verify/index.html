@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c1018" />
+    <title>Bharat OS · Verify attestation</title>
+    <link rel="stylesheet" href="/verify/verify.css" />
+    <link rel="icon" type="image/svg+xml" href="/shell/icon.svg" />
+  </head>
+  <body>
+    <main class="verify">
+      <header class="verify-header">
+        <div class="brand">
+          <div class="brand-mark">B</div>
+          <div>
+            <div class="brand-title">Bharat OS</div>
+            <div class="brand-sub">Trust attestation verifier · §13A #7</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="verify-card" id="verifyCard">
+        <div class="verify-status" id="verifyStatus">
+          <div class="verify-spinner" aria-hidden="true"></div>
+          <div class="verify-status-text">Loading attestation…</div>
+        </div>
+      </section>
+
+      <section class="verify-footer">
+        <p class="diagnostics-note">
+          You're seeing this page because someone signed and shared a
+          Bharat OS attestation with you. Verification happens
+          server-side against the subject's published Ed25519 public
+          key. The page shows only the <em>bands and booleans</em> the
+          subject chose to disclose — never the underlying values.
+          <a href="/shell/">Learn about Bharat OS</a>.
+        </p>
+      </section>
+    </main>
+    <script src="/verify/verify.js" type="module"></script>
+  </body>
+</html>

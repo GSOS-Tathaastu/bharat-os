@@ -74,6 +74,10 @@ import {
 import { generateRecoveryPhrase } from '../phase1/device-pairing.mjs';
 import { gatherDailyBriefSignals } from '../phase1/daily-brief.mjs';
 import {
+  signTrustAttestation,
+  verifyTrustAttestation
+} from '../phase1/trust-attestation.mjs';
+import {
   aggregateRound,
   createFederatedRound,
   createGradientUpdate,
@@ -110,6 +114,7 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 const consoleRoot = path.join(repoRoot, 'public/operator-console');
 const shellRoot = path.join(repoRoot, 'public/shell');
+const verifyRoot = path.join(repoRoot, 'public/verify');
 
 function jsonResponse(response, statusCode, value) {
   const body = JSON.stringify(value, null, 2);
@@ -496,6 +501,25 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/verify') {
+        response.writeHead(302, { location: '/verify/' });
+        response.end();
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/verify/')) {
+        const relativePath =
+          url.pathname === '/verify/'
+            ? 'index.html'
+            : decodeURIComponent(url.pathname.slice('/verify/'.length));
+        const requestedPath = path.resolve(verifyRoot, relativePath);
+        if (!requestedPath.startsWith(verifyRoot)) {
+          return notFound(response, url.pathname);
+        }
+        await staticResponse(response, requestedPath);
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname.startsWith('/console/')) {
         const relativePath = url.pathname === '/console/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/console/'.length));
         const requestedPath = path.resolve(consoleRoot, relativePath);
@@ -523,6 +547,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api',
             'GET /shell/',
             'GET /console/',
+            'GET /verify/',
             'GET /api/dashboard',
             'GET /api/policies',
             'GET /api/skills',
@@ -583,6 +608,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/contribution',
             'GET /api/identities/:identityId/recovery-phrase',
             'GET /api/identities/:identityId/vault-snapshot',
+            'GET /api/attestations',
+            'GET /api/attestations/:attestationId',
+            'GET /api/attestations/:attestationId/verify',
+            'POST /api/attestations/:attestationId/verify',
             'GET /api/worker-authorizations',
             'POST /api/worker-authorizations',
             'GET /api/worker-authorizations/:authorizationId',
@@ -809,10 +838,93 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             await store.saveToolExecution(orchestration.execution);
           }
           await store.saveOrchestration(orchestration);
-          jsonResponse(response, 201, { ok: true, orchestration });
+
+          // §13A #7 — when the just-executed action minted a trust
+          // attestation, auto-sign it with the subject's identity and
+          // persist to the attestations index so the verifier flow
+          // (`/api/attestations/:id` + `/verify/`) can read it back.
+          // Phase 2b moves the signing step to the device hardware
+          // keystore; here it happens on the server because the
+          // private key is server-stored (see ADR 0066's demo-mode
+          // warning).
+          let signedAttestation = null;
+          if (
+            body.actionType === 'trust_attestation' &&
+            orchestration.execution?.toolReceipt?.toolId ===
+              'trust_passport_attestation' &&
+            orchestration.execution.status === 'completed'
+          ) {
+            const subject = await store.readIdentity(body.actorId).catch(() => null);
+            if (subject) {
+              signedAttestation = signTrustAttestation(
+                orchestration.execution.toolReceipt,
+                subject
+              );
+              await store.saveAttestation(signedAttestation);
+            }
+          }
+
+          jsonResponse(response, 201, {
+            ok: true,
+            orchestration,
+            attestation: signedAttestation
+          });
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // §13A #7 — verifier-side attestation read + signature
+      // verification. Both routes are public-read (the attestation
+      // envelope is signed; verification needs only the subject's
+      // public record). The verifier flow is intentionally
+      // server-side: the page just renders the result.
+      if (parts[0] === 'api' && parts[1] === 'attestations' && parts.length === 2) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const attestations = await store.listAttestations();
+        jsonResponse(response, 200, {
+          attestations: attestations.map((att) => ({
+            attestationId: att.attestationId,
+            subjectId: att.subjectId,
+            verifierName: att.verifierName,
+            purpose: att.purpose,
+            issuedAt: att.issuedAt,
+            expiresAt: att.expiresAt,
+            claimCount: Array.isArray(att.claims) ? att.claims.length : 0
+          }))
+        });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'attestations' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const attestationId = decodeURIComponent(parts[2]);
+        const attestation = await store.readAttestation(attestationId).catch(() => null);
+        if (!attestation) return notFound(response);
+        jsonResponse(response, 200, { attestation });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'attestations' &&
+        parts.length === 4 &&
+        parts[3] === 'verify'
+      ) {
+        if (request.method !== 'POST' && request.method !== 'GET') {
+          return methodNotAllowed(response, ['GET', 'POST']);
+        }
+        const attestationId = decodeURIComponent(parts[2]);
+        const attestation = await store.readAttestation(attestationId).catch(() => null);
+        if (!attestation) return notFound(response);
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const result = verifyTrustAttestation(attestation, publicRecords);
+        jsonResponse(response, 200, { attestationId, ...result });
+        return;
       }
 
       if (parts[0] === 'api' && parts[1] === 'tools' && parts.length === 2) {
