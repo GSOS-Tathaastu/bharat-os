@@ -20,8 +20,13 @@ import {
   listPolicies,
   revokeConsent
 } from '../src/phase1/policy.mjs';
-import { createBlockedToolExecution, executeToolAction, listTools } from '../src/phase1/tools.mjs';
+import { createBlockedToolExecution, executeToolAction, listTools, SERVICE_VERTICALS } from '../src/phase1/tools.mjs';
 import { listOrchestrationTemplates, orchestrateIntent } from '../src/phase1/orchestrator.mjs';
+import {
+  listSupportedLanguages,
+  localizeResponse,
+  normalizeIntent
+} from '../src/phase1/vernacular.mjs';
 import {
   createMemoryRecord,
   memoryProvenance,
@@ -43,6 +48,17 @@ import {
   signConsentRevocation,
   verifyArtifactIntegrity
 } from '../src/phase1/integrity.mjs';
+import {
+  createWorkerAuthorization,
+  signWorkerAuthorization,
+  verifyWorkerAuthorization
+} from '../src/phase1/worker-authorization.mjs';
+import {
+  createPairingPayload,
+  generateRecoveryPhrase,
+  verifyPairingPayload,
+  verifyRecoveryPhrase
+} from '../src/phase1/device-pairing.mjs';
 
 function print(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -132,7 +148,17 @@ function usage() {
       'memory provenance --record-id ID [--store .bharat-os]',
       'memory read --identity-id ID --record-id ID [--grantee-id ID] [--store .bharat-os]',
       'ledger list [--limit 100] [--type EVENT_TYPE] [--store .bharat-os]',
-      'integrity verify --artifact consent|decision|tool-execution|orchestration|skill-preflight|skill --id ID [--store .bharat-os]'
+      'integrity verify --artifact consent|decision|tool-execution|orchestration|skill-preflight|skill --id ID [--store .bharat-os]',
+      'contribution show --identity-id ID [--store .bharat-os]',
+      'worker-auth create --worker-id ID --operator-id ID --job-reference REF --scopes a,b --purpose TEXT [--ttl-days 1] [--sign-with-identity-id ID] [--store .bharat-os]',
+      'worker-auth list [--store .bharat-os]',
+      'worker-auth verify --id ID [--store .bharat-os]',
+      `service book --actor-id ID --vertical ${SERVICE_VERTICALS.join('|')} [--from FROM] [--to TO] [--amount N] [--currency INR] [--limit N] [--include-ondc-bridge true|false] [--store .bharat-os]`,
+      'vernacular normalize --intent "TEXT" [--locale en-IN] [--store .bharat-os]',
+      'vernacular languages [--store .bharat-os]',
+      'device recovery-phrase --identity-id ID [--store .bharat-os]',
+      'device verify-phrase --identity-id ID --phrase "twelve words" [--store .bharat-os]',
+      'device pair --identity-id ID [--ttl-seconds 300] [--store .bharat-os]'
     ]
   };
 }
@@ -287,6 +313,7 @@ async function main() {
     if (!options.id) throw new Error('--id is required.');
     if (!options['actor-id']) throw new Error('--actor-id is required.');
     const consents = await store.listConsents();
+    const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
     const preflight = evaluateSkillPreflight(
       options.id,
       {
@@ -305,7 +332,8 @@ async function main() {
           workerPays: asBoolean(options['worker-pays'])
         }
       },
-      consents
+      consents,
+      { publicRecords }
     );
     await store.saveDecision(preflight.decision);
     await store.saveSkillPreflight(preflight);
@@ -453,6 +481,7 @@ async function main() {
 
   if (command === 'decision' && subcommand === 'evaluate') {
     const consents = await store.listConsents();
+    const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
     const decision = evaluateDecision(
       {
         actorId: options['actor-id'],
@@ -474,7 +503,8 @@ async function main() {
           workerPays: asBoolean(options['worker-pays'])
         }
       },
-      consents
+      consents,
+      { publicRecords }
     );
     await store.saveDecision(decision);
     print({ ok: true, decision });
@@ -531,6 +561,7 @@ async function main() {
 
   if (command === 'intent' && subcommand === 'orchestrate') {
     const consents = await store.listConsents();
+    const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
     const orchestration = orchestrateIntent(
       {
         actorId: options['actor-id'],
@@ -555,7 +586,7 @@ async function main() {
         }
       },
       consents,
-      { execute: asBoolean(options.execute) }
+      { execute: asBoolean(options.execute), publicRecords }
     );
     await store.saveDecision(orchestration.decision);
     await store.saveSkillPreflight(orchestration.skillPreflight);
@@ -656,6 +687,145 @@ async function main() {
         limit: asInteger(options.limit, 100, 'limit'),
         type: options.type
       })
+    });
+    return;
+  }
+
+  if (command === 'contribution' && subcommand === 'show') {
+    if (!options['identity-id']) throw new Error('--identity-id is required.');
+    const contribution = await store.computeContribution(options['identity-id']);
+    print({ contribution });
+    return;
+  }
+
+  if (command === 'worker-auth' && subcommand === 'create') {
+    if (!options['worker-id']) throw new Error('--worker-id is required.');
+    if (!options['operator-id']) throw new Error('--operator-id is required.');
+    if (!options['job-reference']) throw new Error('--job-reference is required.');
+    if (!options.scopes) throw new Error('--scopes is required.');
+    if (!options.purpose) throw new Error('--purpose is required.');
+    const scopes = String(options.scopes)
+      .split(',')
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    let auth = createWorkerAuthorization({
+      workerId: options['worker-id'],
+      operatorId: options['operator-id'],
+      jobReference: options['job-reference'],
+      scopes,
+      purpose: options.purpose,
+      ttlDays: asInteger(options['ttl-days'], 1, 'ttl-days')
+    });
+    if (options['sign-with-identity-id']) {
+      const signer = await store.readIdentity(options['sign-with-identity-id']);
+      auth = signWorkerAuthorization(auth, signer);
+    }
+    await store.saveWorkerAuthorization(auth);
+    print({ ok: true, authorization: auth });
+    return;
+  }
+
+  if (command === 'worker-auth' && subcommand === 'list') {
+    print({ authorizations: await store.listWorkerAuthorizations() });
+    return;
+  }
+
+  if (command === 'worker-auth' && subcommand === 'verify') {
+    if (!options.id) throw new Error('--id is required.');
+    const auth = await store.readWorkerAuthorization(options.id);
+    const publicRecord = await store
+      .readIdentity(auth.workerId)
+      .catch(() => null)
+      .then((identity) => (identity ? publicIdentity(identity) : null));
+    const result = verifyWorkerAuthorization(auth, publicRecord);
+    print({ ok: result.valid, verification: result });
+    return;
+  }
+
+  if (command === 'service' && subcommand === 'book') {
+    if (!options['actor-id']) throw new Error('--actor-id is required.');
+    if (!options.vertical) throw new Error('--vertical is required.');
+    if (!SERVICE_VERTICALS.includes(options.vertical)) {
+      throw new Error(`--vertical must be one of: ${SERVICE_VERTICALS.join(', ')}`);
+    }
+    const consents = await store.listConsents();
+    const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+    const amount = asNumber(options.amount, 0, 'amount');
+    const includeOndcBridge =
+      options['include-ondc-bridge'] === undefined
+        ? true
+        : asBoolean(options['include-ondc-bridge']);
+    const execution = executeToolAction(
+      {
+        actorId: options['actor-id'],
+        actionType: 'service_booking',
+        tool: 'bharat_marketplace',
+        scopes: ['service.book', 'consent.record', 'upi.settle'],
+        regulated: true,
+        piiHandling: 'tokenized',
+        money: {
+          amount,
+          currency: options.currency ?? 'INR',
+          limit: options.limit === undefined ? Math.max(amount, 1) : asNumber(options.limit, undefined, 'limit')
+        },
+        metadata: {
+          vertical: options.vertical,
+          from: options.from ?? null,
+          to: options.to ?? null,
+          includeOndcBridge
+        }
+      },
+      consents,
+      { publicRecords }
+    );
+    await store.saveDecision(execution.decision);
+    await store.saveToolExecution(execution);
+    print({ ok: execution.status === 'completed', execution });
+    return;
+  }
+
+  if (command === 'vernacular' && subcommand === 'normalize') {
+    if (!options.intent) throw new Error('--intent is required.');
+    const normalized = normalizeIntent(options.intent, { locale: options.locale ?? 'en-IN' });
+    const localized = localizeResponse(
+      normalized.matchedAliases[0]?.actionType ?? null,
+      'planned',
+      normalized.detectedLocale
+    );
+    print({ normalized, localized });
+    return;
+  }
+
+  if (command === 'vernacular' && subcommand === 'languages') {
+    print({ languages: listSupportedLanguages() });
+    return;
+  }
+
+  if (command === 'device' && subcommand === 'recovery-phrase') {
+    if (!options['identity-id']) throw new Error('--identity-id is required.');
+    const identity = await store.readIdentity(options['identity-id']);
+    print({ recovery: generateRecoveryPhrase(identity) });
+    return;
+  }
+
+  if (command === 'device' && subcommand === 'verify-phrase') {
+    if (!options['identity-id']) throw new Error('--identity-id is required.');
+    if (!options.phrase) throw new Error('--phrase is required.');
+    const identity = await store.readIdentity(options['identity-id']);
+    const result = verifyRecoveryPhrase(identity, options.phrase);
+    print({ ok: result.valid, ...result });
+    return;
+  }
+
+  if (command === 'device' && subcommand === 'pair') {
+    if (!options['identity-id']) throw new Error('--identity-id is required.');
+    const identity = await store.readIdentity(options['identity-id']);
+    const payload = createPairingPayload(identity, {
+      ttlSeconds: asInteger(options['ttl-seconds'], 300, 'ttl-seconds')
+    });
+    print({
+      pairing: payload,
+      verification: verifyPairingPayload(payload, identity)
     });
     return;
   }

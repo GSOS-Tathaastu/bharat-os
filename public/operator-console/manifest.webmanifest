@@ -1,0 +1,21 @@
+{
+  "name": "Bharat OS Operator Console",
+  "short_name": "Bharat OS",
+  "description": "Operator console for Bharat OS — the India-first AI-native operating system. Voice-first, vernacular, sovereign by design (§17 Phase 2a app distribution).",
+  "start_url": "/console/",
+  "scope": "/console/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c1018",
+  "theme_color": "#0c1018",
+  "lang": "en-IN",
+  "categories": ["productivity", "utilities", "developer"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

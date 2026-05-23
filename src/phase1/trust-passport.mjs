@@ -71,6 +71,29 @@ function assuranceLevel({ attestationCount, verifiedConsentCount, activeConsentC
   return 'basic';
 }
 
+function meshFromNodes(identityId, nodes, memoryRecords) {
+  if (!nodes && !memoryRecords) return null;
+  const operatorNodes = (nodes ?? []).filter((node) => node.operatorId === identityId);
+  const ownedRecords = (memoryRecords ?? []).filter((record) => record.ownerId === identityId);
+  const contributedBytes = operatorNodes.reduce(
+    (sum, node) => sum + Number(node.storageBytes ?? 0),
+    0
+  );
+  const consumedBytes = ownedRecords.reduce(
+    (sum, record) => sum + Number(record.plaintextBytes ?? 0),
+    0
+  );
+  const scoreBytes = contributedBytes - consumedBytes;
+  return {
+    contributedBytes,
+    consumedBytes,
+    scoreBytes,
+    class: scoreBytes >= 0 ? 'producer' : 'consumer',
+    nodeCount: operatorNodes.length,
+    memoryRecordCount: ownedRecords.length
+  };
+}
+
 export function createTrustPassport(
   identity,
   {
@@ -80,6 +103,8 @@ export function createTrustPassport(
     toolExecutions = [],
     ledgerEvents = [],
     publicRecords = [],
+    nodes = null,
+    contribution = null,
     generatedAt = new Date().toISOString()
   } = {}
 ) {
@@ -173,6 +198,23 @@ export function createTrustPassport(
       eventCount: subjectLedger.length,
       recentEventTypes: uniqueSorted(subjectLedger.slice(0, 10).map((event) => event.type))
     },
+    mesh: contribution
+      ? {
+          contributedBytes: Number(contribution.contributedBytes ?? 0),
+          consumedBytes: Number(contribution.consumedBytes ?? 0),
+          scoreBytes: Number(contribution.scoreBytes ?? 0),
+          class: contribution.class ?? 'consumer',
+          nodeCount: Number(contribution.nodeCount ?? 0),
+          memoryRecordCount: Number(contribution.memoryRecordCount ?? 0)
+        }
+      : meshFromNodes(identity.id, nodes, subjectMemory) ?? {
+          contributedBytes: 0,
+          consumedBytes: 0,
+          scoreBytes: 0,
+          class: 'consumer',
+          nodeCount: 0,
+          memoryRecordCount: 0
+        },
     privacy: {
       exposure: 'public_metadata_only',
       privateKeyIncluded: false,
@@ -203,6 +245,7 @@ export function canonicalTrustPassportPayload(passport) {
     memory: passport.memory,
     skillInvocations: passport.skillInvocations,
     ledger: passport.ledger,
+    mesh: passport.mesh,
     privacy: passport.privacy,
     evidenceHash: passport.evidenceHash
   };

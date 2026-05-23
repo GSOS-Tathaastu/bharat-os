@@ -260,7 +260,7 @@ function renderTrustPassports(passports) {
   state.trustPassports = passports;
   $('trustPassportCountLabel').textContent = `${passports.length} passports`;
   if (passports.length === 0) {
-    $('trustPassportsTable').innerHTML = '<tr><td colspan="10">No trust passports yet.</td></tr>';
+    $('trustPassportsTable').innerHTML = '<tr><td colspan="11">No trust passports yet.</td></tr>';
     return;
   }
 
@@ -269,6 +269,10 @@ function renderTrustPassports(passports) {
     .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))
     .map((passport) => {
       const attestationTypes = passport.attestations?.types ?? [];
+      const mesh = passport.mesh ?? {};
+      const meshClass = mesh.class === 'producer' ? 'good' : 'warn';
+      const meshLabel = `${formatBytes(mesh.scoreBytes ?? 0)} (${mesh.class ?? 'consumer'})`;
+      const meshTitle = `contributed ${formatBytes(mesh.contributedBytes ?? 0)} • consumed ${formatBytes(mesh.consumedBytes ?? 0)} • ${mesh.nodeCount ?? 0} nodes`;
       return `
         <tr>
           <td class="mono" title="${escapeHtml(passport.subjectId)}">${escapeHtml(shortId(passport.subjectId))}</td>
@@ -278,9 +282,83 @@ function renderTrustPassports(passports) {
           <td>${passport.consents?.signed ?? 0}/${passport.consents?.total ?? 0}</td>
           <td>${passport.memory?.recordCount ?? 0} / ${formatBytes(passport.memory?.plaintextBytes ?? 0)}</td>
           <td>${passport.skillInvocations?.approvedPreflightCount ?? 0}/${passport.skillInvocations?.preflightCount ?? 0} preflight, ${passport.skillInvocations?.executionCount ?? 0} runs</td>
+          <td title="${escapeHtml(meshTitle)}"><span class="tag ${meshClass}">${escapeHtml(meshLabel)}</span></td>
           <td class="mono" title="${escapeHtml(passport.evidenceHash)}">${escapeHtml(shortId(passport.evidenceHash))}</td>
           <td>${passport.generatedAt ? new Date(passport.generatedAt).toLocaleString() : '--'}</td>
           <td><button class="row-action" type="button" data-trust-sign="${escapeHtml(passport.subjectId)}">Sign</button></td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function renderServiceMarketplace(orchestrations) {
+  state.marketplaceOrchestrations = orchestrations;
+  const bookings = orchestrations.filter(
+    (o) => o.actionRequest?.actionType === 'service_booking'
+  );
+  $('marketplaceCountLabel').textContent = `${bookings.length} bookings`;
+  if (bookings.length === 0) {
+    $('marketplaceTable').innerHTML =
+      '<tr><td colspan="8">No service bookings yet. Try "Book me a cab from X to Y".</td></tr>';
+    return;
+  }
+
+  $('marketplaceTable').innerHTML = bookings
+    .slice()
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .map((orchestration) => {
+      const receipt = orchestration.execution?.toolReceipt ?? {};
+      const fare = receipt.fare
+        ? `₹${receipt.fare.amount} ${receipt.fare.currency ?? 'INR'}`
+        : '--';
+      const provider = receipt.chosen?.providerName ?? receipt.providerName ?? '--';
+      const source = receipt.chosen?.source ?? receipt.source ?? '--';
+      const sourceClass = source === 'native' ? 'good' : 'warn';
+      const locale = orchestration.intent?.detectedLocale ?? '--';
+      const statusClass = orchestration.status === 'completed' ? 'good' : orchestration.status === 'blocked' ? 'bad' : 'warn';
+      const bookingRef = receipt.bookingRef ?? orchestration.orchestrationId ?? '';
+      return `
+        <tr>
+          <td class="mono" title="${escapeHtml(bookingRef)}">${escapeHtml(shortId(bookingRef))}</td>
+          <td>${escapeHtml(receipt.vertical ?? '--')}</td>
+          <td title="${escapeHtml(provider)}">${escapeHtml(provider)}</td>
+          <td><span class="tag ${sourceClass}">${escapeHtml(source)}</span></td>
+          <td>${escapeHtml(fare)}</td>
+          <td class="mono">${escapeHtml(locale)}</td>
+          <td><span class="tag ${statusClass}">${escapeHtml(orchestration.status ?? '--')}</span></td>
+          <td>${orchestration.createdAt ? new Date(orchestration.createdAt).toLocaleString() : '--'}</td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function renderWorkerAuthorizations(authorizations) {
+  state.workerAuthorizations = authorizations;
+  $('workerAuthCountLabel').textContent = `${authorizations.length} receipts`;
+  if (authorizations.length === 0) {
+    $('workerAuthTable').innerHTML =
+      '<tr><td colspan="8">No worker authorizations yet. §9A kiosk-mediated flows require these.</td></tr>';
+    return;
+  }
+
+  $('workerAuthTable').innerHTML = authorizations
+    .slice()
+    .sort((left, right) => String(right.issuedAt).localeCompare(String(left.issuedAt)))
+    .map((auth) => {
+      const statusClass = auth.status === 'signed' ? 'good' : 'warn';
+      const sigCount = (auth.signatures ?? []).length;
+      return `
+        <tr>
+          <td class="mono" title="${escapeHtml(auth.authorizationId)}">${escapeHtml(shortId(auth.authorizationId))}</td>
+          <td class="mono" title="${escapeHtml(auth.workerId)}">${escapeHtml(shortId(auth.workerId))}</td>
+          <td class="mono" title="${escapeHtml(auth.operatorId)}">${escapeHtml(shortId(auth.operatorId))}</td>
+          <td title="${escapeHtml(auth.purpose ?? '')}">${escapeHtml(shortId(auth.jobReference ?? ''))}</td>
+          <td><span class="tag ${statusClass}">${escapeHtml(auth.status ?? 'unsigned')}</span></td>
+          <td>${sigCount}</td>
+          <td>${auth.expiresAt ? new Date(auth.expiresAt).toLocaleString() : '--'}</td>
+          <td><button class="row-action" type="button" data-worker-auth-verify="${escapeHtml(auth.authorizationId)}">Verify</button></td>
         </tr>
       `;
     })
@@ -498,6 +576,8 @@ async function loadDashboard() {
     await loadDefaultActor();
     await loadMemory();
     await loadConsents();
+    await loadServiceMarketplace();
+    await loadWorkerAuthorizations();
     setApiStatus(true, 'Connected');
   } catch (error) {
     setApiStatus(false, 'Disconnected');
@@ -721,6 +801,55 @@ async function loadTrustPassports() {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
   renderTrustPassports(data.passports ?? []);
+}
+
+async function loadServiceMarketplace() {
+  try {
+    const response = await fetch('/api/orchestrations');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderServiceMarketplace(data.orchestrations ?? []);
+  } catch (error) {
+    renderServiceMarketplace([]);
+  }
+}
+
+async function loadWorkerAuthorizations() {
+  try {
+    const response = await fetch('/api/worker-authorizations');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderWorkerAuthorizations(data.authorizations ?? []);
+  } catch (error) {
+    renderWorkerAuthorizations([]);
+  }
+}
+
+async function verifyWorkerAuth(authorizationId) {
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/worker-authorizations/${encodeURIComponent(authorizationId)}/verify`,
+      { method: 'POST' }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    $('decisionOutput').textContent = JSON.stringify(
+      {
+        authorizationId,
+        valid: data.verification?.valid,
+        signatureValid: data.verification?.signatureValid,
+        reasons: data.verification?.reasons ?? []
+      },
+      null,
+      2
+    );
+  } catch (error) {
+    $('decisionOutput').textContent = error.message;
+    setApiStatus(false, 'Worker authorization verify failed');
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function signTrustPassport(identityId) {
@@ -1330,6 +1459,12 @@ $('trustPassportsTable').addEventListener('click', (event) => {
   const signButton = event.target.closest('[data-trust-sign]');
   if (!signButton || signButton.disabled) return;
   signTrustPassport(signButton.dataset.trustSign);
+});
+
+$('workerAuthTable').addEventListener('click', (event) => {
+  const verifyButton = event.target.closest('[data-worker-auth-verify]');
+  if (!verifyButton || verifyButton.disabled) return;
+  verifyWorkerAuth(verifyButton.dataset.workerAuthVerify);
 });
 
 loadDashboard();

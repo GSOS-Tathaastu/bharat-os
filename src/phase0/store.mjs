@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { netContributionScore } from './core.mjs';
 
 function safeName(id) {
   return id.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -45,6 +46,7 @@ export class BosStore {
     this.orchestrationsPath = path.join(rootPath, 'orchestrations');
     this.skillPreflightsPath = path.join(rootPath, 'skill-preflights');
     this.memoryRecordsPath = path.join(rootPath, 'memory-records');
+    this.workerAuthorizationsPath = path.join(rootPath, 'worker-authorizations');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -61,6 +63,7 @@ export class BosStore {
     await fs.mkdir(this.orchestrationsPath, { recursive: true });
     await fs.mkdir(this.skillPreflightsPath, { recursive: true });
     await fs.mkdir(this.memoryRecordsPath, { recursive: true });
+    await fs.mkdir(this.workerAuthorizationsPath, { recursive: true });
     await fs.appendFile(this.ledgerPath, '');
   }
 
@@ -110,6 +113,10 @@ export class BosStore {
 
   memoryRecordFile(recordId) {
     return path.join(this.memoryRecordsPath, `${safeName(recordId)}.json`);
+  }
+
+  workerAuthorizationFile(authorizationId) {
+    return path.join(this.workerAuthorizationsPath, `${safeName(authorizationId)}.json`);
   }
 
   async appendLedger(event) {
@@ -380,5 +387,67 @@ export class BosStore {
 
   async listMemoryRecords() {
     return listJson(this.memoryRecordsPath);
+  }
+
+  async saveWorkerAuthorization(auth) {
+    await this.init();
+    await writeJson(this.workerAuthorizationFile(auth.authorizationId), auth);
+    await this.appendLedger({
+      type: 'worker_authorization.saved',
+      authorizationId: auth.authorizationId,
+      workerId: auth.workerId,
+      operatorId: auth.operatorId,
+      jobReference: auth.jobReference,
+      status: auth.status,
+      signatureCount: (auth.signatures ?? []).length,
+      at: new Date().toISOString()
+    });
+    return auth;
+  }
+
+  async readWorkerAuthorization(authorizationId) {
+    return readJson(this.workerAuthorizationFile(authorizationId));
+  }
+
+  async listWorkerAuthorizations() {
+    return listJson(this.workerAuthorizationsPath);
+  }
+
+  // Phase 1.40 — surface the §13B Net Contribution Score for an identity by
+  // aggregating across the nodes they operate (supply side: storageBytes) and
+  // the data they have stored on the mesh (demand side: memory-record sizes).
+  // The fair-use lever in §13B reads from this: NCS ≥ 0 → producer (free
+  // service + earning); NCS < 0 → consumer (pays on the progressive curve).
+  async computeContribution(identityId) {
+    const [nodes, memoryRecords] = await Promise.all([
+      this.listNodes(),
+      this.listMemoryRecords()
+    ]);
+    const operatorNodes = nodes.filter((node) => node.operatorId === identityId);
+    const ownedRecords = memoryRecords.filter((record) => record.ownerId === identityId);
+
+    const contributedBytes = operatorNodes.reduce(
+      (sum, node) => sum + Number(node.storageBytes ?? 0),
+      0
+    );
+    const usedBytesOnOwnNodes = operatorNodes.reduce(
+      (sum, node) => sum + Number(node.usedBytes ?? 0),
+      0
+    );
+    const consumedBytes = ownedRecords.reduce(
+      (sum, record) => sum + Number(record.plaintextBytes ?? 0),
+      0
+    );
+
+    const ncs = netContributionScore({ contributedBytes, consumedBytes });
+
+    return {
+      identityId,
+      ...ncs,
+      nodeCount: operatorNodes.length,
+      usedBytesOnOwnNodes,
+      memoryRecordCount: ownedRecords.length,
+      computedAt: new Date().toISOString()
+    };
   }
 }

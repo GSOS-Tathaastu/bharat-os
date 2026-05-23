@@ -158,17 +158,33 @@ test('mediation requires a worker authorization receipt alongside the operator',
   assert.equal(decision.approved, false);
 });
 
-test('mediation passes when a worker authorization receipt is provided', () => {
+test('mediation passes when a signed worker authorization receipt is provided', async () => {
+  const { createWorkerAuthorization, signWorkerAuthorization } = await import(
+    '../../src/phase1/worker-authorization.mjs'
+  );
+  const { publicRecordsFromIdentities } = await import('../../src/phase1/integrity.mjs');
   const identity = createIdentity({ displayName: 'Authorized kiosk actor' });
+  const signedAuth = signWorkerAuthorization(
+    createWorkerAuthorization({
+      workerId: identity.id,
+      operatorId: 'bos:operator:csc-001',
+      jobReference: 'bos:job:demo-brick-kiln',
+      scopes: LABOR_SCOPES,
+      purpose: 'Worker authorizes CSC operator-assisted job acceptance'
+    }),
+    identity
+  );
+
   const decision = evaluateDecision(
     laborRequest(identity, {
       mediation: {
         channel: 'kiosk',
         kioskOperatorId: 'bos:operator:csc-001',
-        workerAuthorizationId: 'bos:worker-auth:demo-001'
+        workerAuthorization: signedAuth
       }
     }),
-    [consentFor(identity)]
+    [consentFor(identity)],
+    { publicRecords: publicRecordsFromIdentities([identity]) }
   );
   assert.equal(
     policyResult(decision, 'policy.mediation.requires_worker_authorization').status,

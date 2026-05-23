@@ -1,4 +1,5 @@
 import { sha256Hex, stableStringify } from '../phase0/core.mjs';
+import { verifyWorkerAuthorization } from './worker-authorization.mjs';
 
 export const PHASE1_PROTOCOL_VERSION = 'bos.phase1.v0';
 
@@ -340,14 +341,16 @@ function resolveActionRequest(request) {
       ? {
           channel: mediation.channel ?? 'kiosk',
           kioskOperatorId: mediation.kioskOperatorId ?? null,
-          workerAuthorizationId: mediation.workerAuthorizationId ?? null
+          workerAuthorizationId:
+            mediation.workerAuthorization?.authorizationId ?? mediation.workerAuthorizationId ?? null,
+          workerAuthorization: mediation.workerAuthorization ?? null
         }
       : null,
     metadata: request.metadata ?? {}
   };
 }
 
-export function evaluateDecision(request, consents = [], { at = nowIso() } = {}) {
+export function evaluateDecision(request, consents = [], { at = nowIso(), publicRecords = [] } = {}) {
   const resolved = resolveActionRequest(request);
   const checks = [];
 
@@ -525,29 +528,63 @@ export function evaluateDecision(request, consents = [], { at = nowIso() } = {})
   }
 
   // policy.mediation.requires_worker_authorization — §9A design problem A:
-  // a kiosk/CSC operator can help, but cannot ACT as the worker.
+  // a kiosk/CSC operator can help, but cannot ACT as the worker. The
+  // mediation must carry a signed worker-authorization receipt (Phase 1.41
+  // upgraded this from an opaque ID to a verified artifact).
   if (resolved.mediation && resolved.mediation.kioskOperatorId) {
-    if (!resolved.mediation.workerAuthorizationId) {
+    const auth = resolved.mediation.workerAuthorization;
+    if (!auth) {
       checks.push(
         check(
           'fail',
           'policy.mediation.requires_worker_authorization',
-          'Assisted/kiosk channel requires a separate worker authorization receipt (mediation.workerAuthorizationId).',
+          'Assisted/kiosk channel requires a signed worker authorization receipt (mediation.workerAuthorization).',
           { kioskOperatorId: resolved.mediation.kioskOperatorId }
         )
       );
     } else {
-      checks.push(
-        check(
-          'pass',
-          'policy.mediation.requires_worker_authorization',
-          'Worker authorization receipt is present alongside the kiosk operator.',
-          {
-            kioskOperatorId: resolved.mediation.kioskOperatorId,
-            workerAuthorizationId: resolved.mediation.workerAuthorizationId
-          }
-        )
-      );
+      const workerPublic = publicRecords.find((record) => record.id === auth.workerId);
+      const verification = verifyWorkerAuthorization(auth, workerPublic, { at });
+      if (!verification.valid) {
+        checks.push(
+          check(
+            'fail',
+            'policy.mediation.requires_worker_authorization',
+            `Worker authorization invalid: ${verification.reasons.join('; ')}`,
+            {
+              kioskOperatorId: resolved.mediation.kioskOperatorId,
+              workerAuthorizationId: resolved.mediation.workerAuthorizationId,
+              workerId: auth.workerId,
+              reasons: verification.reasons
+            }
+          )
+        );
+      } else if (auth.workerId !== resolved.actorId) {
+        checks.push(
+          check(
+            'fail',
+            'policy.mediation.requires_worker_authorization',
+            'Worker authorization does not name this actor as the worker.',
+            {
+              authorizationWorkerId: auth.workerId,
+              actorId: resolved.actorId
+            }
+          )
+        );
+      } else {
+        checks.push(
+          check(
+            'pass',
+            'policy.mediation.requires_worker_authorization',
+            'Worker authorization is signed by the worker and verifies cleanly.',
+            {
+              kioskOperatorId: resolved.mediation.kioskOperatorId,
+              workerAuthorizationId: resolved.mediation.workerAuthorizationId,
+              workerId: auth.workerId
+            }
+          )
+        );
+      }
     }
   } else {
     checks.push(

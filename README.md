@@ -89,6 +89,26 @@ Implemented pieces:
   Voice intents like *"mujhe ek cab book karo"* route to the native
   marketplace across Hindi, Marathi, Bhojpuri, Tamil, and Bengali, with
   localized response strings.
+- Phase 1.40 Net Contribution Score surfaced via `store.computeContribution`,
+  `GET /api/identities/:id/contribution`, `bos contribution show`, and a
+  `mesh` block on the Trust Passport (covered by the audit hash and
+  signed snapshots). The §13B fair-use lever is now readable end-to-end.
+- Phase 1.41 §9A worker authorization receipts as a signed first-class
+  artifact (`src/phase1/worker-authorization.mjs`). L4 mediation policy
+  now verifies signature + workerId + expiry, not just ID presence.
+  `publicRecords` threaded through `evaluateDecision`,
+  `evaluateSkillPreflight`, `executeToolAction`, `orchestrateIntent`,
+  and the API + CLI surfaces.
+- Phase 1.42 Phase 1 tie-off bundle: (a) operator console adds an NCS
+  column on Trust Passports + a §9B Service Marketplace panel + a §9A
+  Worker Authorizations panel with verify buttons; (b) new CLI commands
+  `bos service book`, `bos vernacular normalize`, `bos vernacular
+  languages`, `bos worker-auth create/list/verify`,
+  `bos device recovery-phrase / verify-phrase / pair`; (c) PWA conversion
+  of the operator console with manifest, service worker, and offline app
+  shell (Phase 2a §13 distribution path); (d) device-pairing scaffold
+  (`src/phase1/device-pairing.mjs`) with deterministic recovery phrase
+  and pairing payload for §7c phone migration.
 
 ## Quickstart
 

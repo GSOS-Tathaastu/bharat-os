@@ -46,6 +46,11 @@ import {
   signTrustPassportSnapshot,
   verifyTrustPassportSnapshot
 } from '../phase1/trust-passport.mjs';
+import {
+  createWorkerAuthorization,
+  signWorkerAuthorization,
+  verifyWorkerAuthorization
+} from '../phase1/worker-authorization.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -74,14 +79,22 @@ function contentTypeFor(filePath) {
   if (ext === '.css') return 'text/css; charset=utf-8';
   if (ext === '.js') return 'text/javascript; charset=utf-8';
   if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.webmanifest' || ext === '.json') return 'application/manifest+json; charset=utf-8';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.ico') return 'image/x-icon';
   return 'application/octet-stream';
 }
 
 async function staticResponse(response, filePath) {
   const body = await fs.readFile(filePath);
+  const base = path.basename(filePath);
+  // PWA app-shell assets need to be cacheable so the service worker can
+  // store them for offline use. Everything else stays no-store so dev
+  // iteration on the console doesn't fight the cache.
+  const cacheable = ['manifest.webmanifest', 'icon.svg', 'service-worker.js'].includes(base);
   response.writeHead(200, {
     'content-type': contentTypeFor(filePath),
-    'cache-control': 'no-store'
+    'cache-control': cacheable ? 'public, max-age=3600' : 'no-store'
   });
   response.end(body);
 }
@@ -219,7 +232,8 @@ async function trustPassportContext(store) {
     skillPreflights: await store.listSkillPreflights(),
     toolExecutions: await store.listToolExecutions(),
     ledgerEvents: await store.listLedger({ limit: undefined }),
-    publicRecords: publicRecordsFromIdentities(identities)
+    publicRecords: publicRecordsFromIdentities(identities),
+    nodes: await store.listNodes()
   };
 }
 
@@ -462,6 +476,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/trust-passports/:identityId/sign',
             'GET /api/identities',
             'POST /api/identities',
+            'GET /api/identities/:identityId/contribution',
+            'GET /api/worker-authorizations',
+            'POST /api/worker-authorizations',
+            'GET /api/worker-authorizations/:authorizationId',
+            'POST /api/worker-authorizations/:authorizationId/verify',
             'GET /api/nodes',
             'GET /api/manifests',
             'GET /api/reports',
@@ -496,7 +515,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
         const body = await readRequestJson(request);
         const consents = await store.listConsents();
-        const preflight = evaluateSkillPreflight(decodeURIComponent(parts[2]), body, consents);
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const preflight = evaluateSkillPreflight(decodeURIComponent(parts[2]), body, consents, {
+          publicRecords
+        });
         await store.saveDecision(preflight.decision);
         await store.saveSkillPreflight(preflight);
         jsonResponse(response, 200, {
@@ -582,12 +604,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           throw new Error('Stored preflight must be approved before execution.');
         }
         const consents = await store.listConsents();
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
         const execution = executeToolAction(preflight.decision.request, consents, {
-          skillPreflightId: preflight.preflightId
+          skillPreflightId: preflight.preflightId,
+          publicRecords
         });
         await store.saveDecision(execution.decision);
         await store.saveToolExecution(execution);
-        const publicRecords = await identityPublicRecords(store);
         jsonResponse(response, 201, {
           ok: execution.status === 'completed',
           preflightId: preflight.preflightId,
@@ -620,7 +643,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         if (request.method === 'POST') {
           const body = await readRequestJson(request);
           const consents = await store.listConsents();
-          const orchestration = orchestrateIntent(body, consents, { execute: Boolean(body.execute) });
+          const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+          const orchestration = orchestrateIntent(body, consents, {
+            execute: Boolean(body.execute),
+            publicRecords
+          });
           await store.saveDecision(orchestration.decision);
           await store.saveSkillPreflight(orchestration.skillPreflight);
           if (orchestration.execution) {
@@ -649,12 +676,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
         const body = await readRequestJson(request);
         const consents = await store.listConsents();
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
         const skill = skillForTool(toolIdFromActionRequest(body));
-        const preflight = evaluateSkillPreflight(skill.skillId, body, consents);
+        const preflight = evaluateSkillPreflight(skill.skillId, body, consents, { publicRecords });
         const execution = preflight.approved
           ? executeToolAction(preflight.decision.request, consents, {
               at: preflight.checkedAt,
-              skillPreflightId: preflight.preflightId
+              skillPreflightId: preflight.preflightId,
+              publicRecords
             })
           : createBlockedToolExecution(preflight.decision, {
               skillPreflightId: preflight.preflightId
@@ -736,7 +765,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
         const body = await readRequestJson(request);
         const consents = await store.listConsents();
-        const decision = evaluateDecision(body, consents);
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const decision = evaluateDecision(body, consents, { publicRecords });
         await store.saveDecision(decision);
         jsonResponse(response, 201, { ok: true, decision });
         return;
@@ -903,6 +933,72 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         jsonResponse(response, 200, {
           passport: createTrustPassport(identity, context)
         });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'worker-authorizations' && parts.length === 2) {
+        if (request.method === 'GET') {
+          jsonResponse(response, 200, { authorizations: await store.listWorkerAuthorizations() });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          let auth = createWorkerAuthorization({
+            workerId: body.workerId,
+            operatorId: body.operatorId,
+            jobReference: body.jobReference,
+            scopes: body.scopes,
+            purpose: body.purpose,
+            ttlDays: body.ttlDays,
+            expiresAt: body.expiresAt
+          });
+          if (body.signWithIdentityId) {
+            const signer = await store.readIdentity(body.signWithIdentityId);
+            auth = signWorkerAuthorization(auth, signer);
+          }
+          await store.saveWorkerAuthorization(auth);
+          jsonResponse(response, 201, { ok: true, authorization: auth });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'worker-authorizations' &&
+        parts.length === 4 &&
+        parts[3] === 'verify'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const authorizationId = decodeURIComponent(parts[2]);
+        const auth = await store.readWorkerAuthorization(authorizationId);
+        const workerIdentity = await store.readIdentity(auth.workerId).catch(() => null);
+        const verification = verifyWorkerAuthorization(
+          auth,
+          workerIdentity ? publicIdentity(workerIdentity) : null
+        );
+        jsonResponse(response, 200, { ok: verification.valid, verification });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'worker-authorizations' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const authorizationId = decodeURIComponent(parts[2]);
+        const auth = await store.readWorkerAuthorization(authorizationId);
+        jsonResponse(response, 200, { authorization: auth });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'contribution'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const contribution = await store.computeContribution(identityId);
+        jsonResponse(response, 200, { contribution });
         return;
       }
 

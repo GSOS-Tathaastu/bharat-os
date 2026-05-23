@@ -1441,11 +1441,31 @@ distribution.
 - **Phase 1 (months 6–12): the decision layer.** L4 (policy/consent) + L7
   (orchestrator) on top of the mesh, with the IndiaStack tool layer wired. Trust
   Passport v1. First regulated flows in two languages.
-- **Phase 2 (months 12–24): the AI-OS shell as a flashable ROM.** L8 vernacular
-  generative UI, L6 MCP skill marketplace, AUA partnership for online auth.
-- **Phase 3 (month 24+): open the marketplace and the mesh** to third-party
-  developers; explore export to other IndiaStack-adopting countries (Sri Lanka's
-  SLUDI, Philippines' PhilSys, Morocco's CNIE).
+- **Phase 2a (months 12–18): Android app distribution.** Bharat OS as an
+  Android app on Play Store and side-load — and earlier as a Progressive
+  Web App reusing the existing operator console for the very first
+  investor demos. All L3–L8 features run inside the app process; L2 mesh
+  participation is limited (foreground / charging-only because of Android
+  Doze, see §7b). **No OEM dependency.** This is the right MVP path for
+  a solo founder pre-funding — the architecture (§6) is portable as an
+  app, the §7b mesh story is partially constrained but still demoable,
+  and the §13B unit economics are illustrable end-to-end on a single
+  device. See §17 distribution-path note.
+- **Phase 2b (months 18–30): AOSP shell on a partner OEM, post-funding.**
+  The same L3–L8 logic now runs as system services on a Bharat OS
+  flavour of AOSP, shipped on a Lava / Micromax / Lyf / Jio phone.
+  Persistent mesh node daemon (no Doze killing — this is exactly §7b's
+  "owning the OS fixes mobile DePIN"); launcher replacement; full L4
+  policy enforcement at syscall level; TEE attestation (§12 hard part).
+  Requires the OEM LOI (§14 P0 risk) and the §12 ₹3–8 Cr seed.
+- **Phase 2c (months 30+): full flashable ROM, multi-OEM.** Multiple OEM
+  partners. AUA partnership for online auth. L8 generative UI fully
+  built (Bhashini / IndicWhisper / IndicTTS / IndicTrans2 integrated, not
+  just the deterministic normalizer). L6 skill marketplace open to
+  third-party developers.
+- **Phase 3 (month 30+): open the marketplace and the mesh** to
+  third-party developers; explore export to other IndiaStack-adopting
+  countries (Sri Lanka's SLUDI, Philippines' PhilSys, Morocco's CNIE).
 
 ---
 
@@ -1901,16 +1921,17 @@ code lands; do not create a separate `STATUS.md` (§16).
   baseline spec (`src/BharatOS.Phase0/`) + Node Phase 0.1 core/store
   (`src/phase0/`). Deterministic 1,000-node bootstrap simulator; local HTTP API
   and operator console.
-- **Phase 1 — decision layer:** in deep iteration (1.1 → 1.39 as of this
-  snapshot). 1.37 added the multilingual L8 vernacular module; 1.38 added the
-  §9A worker-protection policies (escrow, wage floor, age verification,
-  kiosk-mediation authorization, fiat-only settlement, advance-fee block
-  generalized); 1.39 added the §9B **native service marketplace**
-  (`bharat_marketplace` L6 tool + `bos:skill:bharat-marketplace`) as the
-  Bharat OS-owned substrate for cab / hotel / ticket / food / grocery /
-  professional-services booking, with ONDC demoted to a Phase A outbound
-  bridge (`ondc_beckn` L3, `bos:skill:ondc-bridge`). All built against
-  *mocked* tools.
+- **Phase 1 — decision layer:** in deep iteration (1.1 → 1.42 as of this
+  snapshot). 1.37 multilingual L8 vernacular module; 1.38 §9A worker-
+  protection policies; 1.39 §9B native service marketplace +
+  ONDC bridge; 1.40 NCS surfacing through API / CLI / Trust Passport;
+  1.41 worker authorization as a signed first-class artifact with
+  signature-level mediation policy enforcement; 1.42 Phase 1 tie-off
+  bundle (operator console panels for 1.37–1.41 surfaces, CLI commands
+  for service booking + vernacular + worker-auth + device pairing, PWA
+  conversion of the operator console for §13 Phase 2a distribution,
+  device-pairing scaffold for §7c portability). All built against
+  *mocked* tools. 133/133 tests green.
 - **Phase 2 — flashable ROM + L8 + L6 marketplace:** not started.
 - **Phase 3 — open marketplace + export:** not started.
 
@@ -1941,6 +1962,16 @@ code lands; do not create a separate `STATUS.md` (§16).
 - **Testing capability:** one spare phone (model TBC) or Android Studio
   emulator. §7e Pro-tier SLM validation needs Snapdragon 8 Gen 2+ at
   minimum.
+- **Distribution path: app first, OS later.** Confirmed 2026-05-23.
+  §13 Phase 2 is reordered into 2a (Android app, no OEM dependency) →
+  2b (AOSP shell on OEM partner, post-funding) → 2c (multi-OEM full
+  ROM). The "OS" endgame is unchanged; the bootstrap order matches what
+  one person can ship pre-funding. Concrete near-term shape: wrap the
+  existing operator console (`public/operator-console/` + Phase 0.3 API)
+  as a PWA for the *very* first investor demo, then a native Android
+  build, then AOSP shell when capital + OEM LOI land. The §7b
+  "owning-the-OS" argument is intact for Phase 2b/2c; in Phase 2a, mesh
+  participation is foreground/charging-only.
 - **External commitments awaiting human action (not Claude Code's
   work):**
   - OEM / telco LOI (§10, §14 P0 risk) — none started.
@@ -1953,30 +1984,21 @@ code lands; do not create a separate `STATUS.md` (§16).
   - Patent counsel engagement (§14A defensive strategy) — planned.
   - Regulatory counsel for DPDP / RBI / MeitY items — planned.
 
-### Phase 1 tie-offs in priority order (before Phase 2 begins)
+### Phase 1 tie-offs — status
 
-1. **NCS surfacing through API / CLI / Trust Passport / operator
-   console.** §13B fair-use lever is invisible today; investors need the
-   unit-economics dashboard to read this story.
-2. **Worker authorization receipts as signed first-class artifact.**
-   §9A mediation policy currently checks ID presence only; needs to
-   become a signed receipt with the worker's local key, mirroring the
-   consent-artifact integrity pattern.
-3. **Operator console updates for 1.37–1.39 surfaces.** Today the
-   console shows none of: vernacular detection, worker-protection policy
-   results, service-marketplace bookings, ONDC bridge usage. High-
-   visibility for investor demo.
-4. **CLI commands for direct service-booking and vernacular
-   inspection.** Service bookings can only be exercised via the intent
-   orchestrator today; a direct `bos service book` flow unblocks
-   manual testing.
-5. **Device-pairing / phone-migration scaffold.** §7c documented in this
-   session; not built. Cross-OEM portability story does not stand
-   without at least a runnable scaffold.
-6. **Per-profile auth on shared devices + one-tap reporting / flag
-   ledger.** Treat as Phase 1.40 / 1.41; bigger identity-layer work.
+Closed in Phase 1.40–1.42 (ADRs 0046, 0047, 0048):
+1. ✅ **NCS surfacing** — `store.computeContribution`, `GET /api/identities/:id/contribution`, `bos contribution show`, Trust Passport `mesh` block.
+2. ✅ **Worker authorization receipts as signed artifact** — new `worker-authorization.mjs` module, L4 mediation policy verifies signature + workerId + expiry, `publicRecords` threaded through evaluation chain.
+3. ✅ **Operator console panels for 1.37–1.41 surfaces** — NCS column on Trust Passports, §9B Service Marketplace panel, §9A Worker Authorizations panel with per-row verify.
+4. ✅ **CLI commands** — `bos service book`, `bos vernacular normalize|languages`, `bos worker-auth create|list|verify`, `bos device recovery-phrase|verify-phrase|pair`.
+5. ✅ **Device-pairing scaffold** — `device-pairing.mjs` with deterministic recovery phrase and pairing payload. Hardening (real ephemeral-key handshake, full BIP-39 wordlist) is Phase 2b.
+6. **Bonus delivered: PWA conversion of the operator console.** Manifest, service worker, offline app shell. This is the Phase 2a §13 distribution path now actually runnable on a phone.
 
-This list is the canonical tracker. Update it inline as items close.
+Still open (deferred to Phase 1.43+ or absorbed into Phase 2b):
+- Per-profile auth on shared devices (§9A design problem A — bigger identity-layer work).
+- One-tap reporting + flag ledger (§9A safeguard escalation).
+- Real cryptographic device-pairing protocol (handshake over local WiFi/Bluetooth, full BIP-39 wordlist).
+- Federated training mesh (§7f Phase 3 commitment).
 
 ### Observations carried forward as risks
 - **L8 is the product promise; only the deterministic normalizer exists.** §1

@@ -2,9 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c1018" />
+    <meta name="description" content="Bharat OS Operator Console — Phase 2a PWA demo." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Bharat OS Operator Console</title>
     <link rel="stylesheet" href="/console/styles.css" />
+    <link rel="manifest" href="/console/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/console/icon.svg" />
+    <link rel="apple-touch-icon" href="/console/icon.svg" />
   </head>
   <body>
     <div class="app-shell">
@@ -335,12 +342,61 @@
                   <th>Signed</th>
                   <th>Memory</th>
                   <th>Skills</th>
+                  <th>Mesh / NCS (§13B)</th>
                   <th>Evidence</th>
                   <th>Generated</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody id="trustPassportsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="marketplace" class="panel table-panel" aria-labelledby="marketplaceTitle">
+          <div class="panel-header">
+            <h3 id="marketplaceTitle">§9B Service Marketplace</h3>
+            <span id="marketplaceCountLabel">-- bookings</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Booking</th>
+                  <th>Vertical</th>
+                  <th>Provider</th>
+                  <th>Source</th>
+                  <th>Fare</th>
+                  <th>Locale</th>
+                  <th>Status</th>
+                  <th>Completed</th>
+                </tr>
+              </thead>
+              <tbody id="marketplaceTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="worker-auth" class="panel table-panel" aria-labelledby="workerAuthTitle">
+          <div class="panel-header">
+            <h3 id="workerAuthTitle">§9A Worker Authorizations</h3>
+            <span id="workerAuthCountLabel">-- receipts</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Authorization</th>
+                  <th>Worker</th>
+                  <th>Operator</th>
+                  <th>Job</th>
+                  <th>Status</th>
+                  <th>Signatures</th>
+                  <th>Expires</th>
+                  <th>Verify</th>
+                </tr>
+              </thead>
+              <tbody id="workerAuthTable"></tbody>
             </table>
           </div>
         </section>
@@ -479,5 +535,14 @@
     </div>
 
     <script src="/console/app.js" type="module"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register('/console/service-worker.js', { scope: '/console/' })
+            .catch((error) => console.warn('Bharat OS service worker registration failed:', error));
+        });
+      }
+    </script>
   </body>
 </html>
