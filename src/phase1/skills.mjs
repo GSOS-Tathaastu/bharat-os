@@ -400,6 +400,7 @@ export function evaluateSkillPreflight(
   options = {}
 ) {
   const publicRecords = options.publicRecords ?? [];
+  const flags = options.flags ?? [];
   const skill = typeof skillOrId === 'string' ? readSkill(skillOrId) : skillOrId;
   const integrity = verifySkillManifestIntegrity(skill);
   const requestedScopes = scopes ?? skill.permissions.requiredScopes;
@@ -424,7 +425,7 @@ export function evaluateSkillPreflight(
     }
   };
   const decision = integrity.valid
-    ? evaluateDecision(request, consents, { ...options, at: checkedAt, publicRecords })
+    ? evaluateDecision(request, consents, { ...options, at: checkedAt, publicRecords, flags })
     : integrityBlockedDecision(request, integrity, checkedAt);
   const remediation = remediationFor(skill, request, decision, integrity);
   const core = {

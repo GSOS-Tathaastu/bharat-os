@@ -2088,7 +2088,7 @@ the OS layer.
 | 10 | **ONDC sandbox real integration** (replace `ondc_beckn` mock) | depends on partner | Awaiting ONDC sandbox credentials. The Beckn HTTP calls themselves are the same on PWA or native. |
 | 11 | **DigiLocker / AA / ABHA real OAuth flows** | depends on partner | Public OAuth redirects work in PWA the same as native. Need AUA/KSA partner + DPDP fiduciary registration first (§12). |
 | 12 | **Federated learning round** via TensorFlow.js or ONNX Runtime Web (§7f) | large | Phase 3 commitment in §7f; technically PWA-buildable. |
-| 13 | **One-tap reporting + flag ledger** (§9A safeguard escalation) | medium | New artifact type + L4 review policy + shell button. Independent of platform. |
+| 13 | ✅ **One-tap reporting + flag ledger** (§9A safeguard escalation) | done | `flag-report.mjs` signed by the reporter; `policy.report.flag_review_threshold` auto-blocks subjects with ≥ 3 open high-severity flags until human review. API + CLI + shell card. ADR 0058. |
 
 ### Footprint accounting — "is this too heavy for mobile?"
 

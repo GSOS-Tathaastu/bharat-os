@@ -130,6 +130,50 @@
         </ul>
       </section>
 
+      <section class="capture-card flag-report-card" id="flagReportSection">
+        <div class="capture-header">
+          <span>Report a problem (§9A)</span>
+          <span id="flagReportStatus" class="capture-meta">Open to file a flag</span>
+        </div>
+        <p class="diagnostics-note" style="margin: 0;">
+          A signed report from your profile against another actor. Three open
+          high-severity reports auto-block that actor's sensitive actions until
+          a human review resolves them. §9A safeguard.
+        </p>
+        <select id="flagSubjectSelect" aria-label="Report against">
+          <option value="">— Choose who you're reporting —</option>
+        </select>
+        <div class="flag-report-row">
+          <select id="flagCategorySelect" aria-label="Category">
+            <option value="advance_fee">Asked me to pay (advance fee)</option>
+            <option value="wage_non_payment">Wages not paid</option>
+            <option value="unsafe_conditions">Unsafe conditions</option>
+            <option value="underage_worker">Child labour suspected</option>
+            <option value="no_show">No-show</option>
+            <option value="fraud">Fraud / fake job</option>
+            <option value="exploitation">Exploitation / trafficking</option>
+            <option value="abuse">Abuse</option>
+            <option value="other">Other</option>
+          </select>
+          <select id="flagSeveritySelect" aria-label="Severity">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <textarea
+          id="flagSummary"
+          rows="2"
+          placeholder="What happened? (min 4 chars)"
+          aria-label="Report summary"
+        ></textarea>
+        <div class="capture-actions">
+          <span id="flagReportMeta" class="capture-meta"></span>
+          <button id="flagReportSubmit" class="link-button" type="button">File report</button>
+        </div>
+        <div id="flagReportResult" class="capture-result" hidden></div>
+      </section>
+
       <section class="diagnostics" id="diagnosticsSection">
         <details>
           <summary>

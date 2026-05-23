@@ -51,6 +51,13 @@ import {
   signWorkerAuthorization,
   verifyWorkerAuthorization
 } from '../phase1/worker-authorization.mjs';
+import {
+  createFlagReport,
+  flagSummaryForSubject,
+  resolveFlagReport,
+  signFlagReport,
+  verifyFlagReport
+} from '../phase1/flag-report.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -543,6 +550,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/worker-authorizations',
             'GET /api/worker-authorizations/:authorizationId',
             'POST /api/worker-authorizations/:authorizationId/verify',
+            'GET /api/flags',
+            'POST /api/flags',
+            'GET /api/flags/:flagId',
+            'POST /api/flags/:flagId/resolve',
+            'GET /api/flags/summary/:subjectActorId',
             'GET /api/nodes',
             'GET /api/manifests',
             'GET /api/reports',
@@ -706,9 +718,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           const body = await readRequestJson(request);
           const consents = await store.listConsents();
           const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+          const flags = await store.listFlagReports();
           const orchestration = orchestrateIntent(body, consents, {
             execute: Boolean(body.execute),
-            publicRecords
+            publicRecords,
+            flags
           });
           await store.saveDecision(orchestration.decision);
           await store.saveSkillPreflight(orchestration.skillPreflight);
@@ -1373,6 +1387,91 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const authorizationId = decodeURIComponent(parts[2]);
         const auth = await store.readWorkerAuthorization(authorizationId);
         jsonResponse(response, 200, { authorization: auth });
+        return;
+      }
+
+      // §9A flag reports
+      if (parts[0] === 'api' && parts[1] === 'flags' && parts.length === 2) {
+        if (request.method === 'GET') {
+          const subjectFilter = url.searchParams.get('subjectActorId');
+          const statusFilter = url.searchParams.get('status');
+          let flags = await store.listFlagReports();
+          if (subjectFilter) {
+            flags = flags.filter((flag) => flag.subjectActorId === subjectFilter);
+          }
+          if (statusFilter) {
+            flags = flags.filter((flag) => flag.status === statusFilter);
+          }
+          jsonResponse(response, 200, { flags });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          let report = createFlagReport({
+            reporterId: body.reporterId,
+            subjectActorId: body.subjectActorId,
+            category: body.category,
+            severity: body.severity,
+            jobReference: body.jobReference,
+            summary: body.summary
+          });
+          if (body.signWithIdentityId) {
+            const signer = await store.readIdentity(body.signWithIdentityId);
+            report = signFlagReport(report, signer);
+          }
+          await store.saveFlagReport(report);
+          const reporterPublic = await store
+            .readIdentity(report.reporterId)
+            .catch(() => null)
+            .then((identity) => (identity ? publicIdentity(identity) : null));
+          jsonResponse(response, 201, {
+            ok: true,
+            flag: report,
+            integrity: verifyFlagReport(report, reporterPublic)
+          });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'flags' &&
+        parts.length === 4 &&
+        parts[2] === 'summary'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const subjectActorId = decodeURIComponent(parts[3]);
+        const flags = await store.listFlagReports();
+        jsonResponse(response, 200, { summary: flagSummaryForSubject(subjectActorId, flags) });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'flags' &&
+        parts.length === 4 &&
+        parts[3] === 'resolve'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const flagId = decodeURIComponent(parts[2]);
+        const body = await readRequestJson(request);
+        const existing = await store.readFlagReport(flagId);
+        const resolved = resolveFlagReport(existing, {
+          status: body.status,
+          reason: body.reason,
+          resolvedBy: body.resolvedBy
+        });
+        await store.saveFlagReport(resolved);
+        jsonResponse(response, 200, { ok: true, flag: resolved });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'flags' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const flagId = decodeURIComponent(parts[2]);
+        const flag = await store.readFlagReport(flagId);
+        jsonResponse(response, 200, { flag });
         return;
       }
 

@@ -1,5 +1,13 @@
 import { sha256Hex, stableStringify } from '../phase0/core.mjs';
 import { verifyWorkerAuthorization } from './worker-authorization.mjs';
+import { flagSummaryForSubject } from './flag-report.mjs';
+
+// §9A safeguard escalation: an actor with this many or more open
+// high-severity flags is auto-blocked from sensitive actions until a
+// human review resolves them. Deliberately conservative — three workers
+// independently reporting the same contractor for advance-fee or
+// exploitation is sufficient signal.
+export const FLAG_REVIEW_BLOCK_THRESHOLD = 3;
 
 export const PHASE1_PROTOCOL_VERSION = 'bos.phase1.v0';
 
@@ -63,6 +71,12 @@ export const DEFAULT_POLICIES = [
     layer: 'L4',
     severity: 'block',
     description: 'Any monetary action must declare a user-visible limit and currency.'
+  },
+  {
+    policyId: 'policy.report.flag_review_threshold',
+    layer: 'L4',
+    severity: 'block',
+    description: `Actors with ${FLAG_REVIEW_BLOCK_THRESHOLD}+ open high-severity §9A flag reports against them are auto-blocked from sensitive actions until human review resolves the queue.`
   }
 ];
 
@@ -355,7 +369,7 @@ function resolveActionRequest(request) {
   };
 }
 
-export function evaluateDecision(request, consents = [], { at = nowIso(), publicRecords = [] } = {}) {
+export function evaluateDecision(request, consents = [], { at = nowIso(), publicRecords = [], flags = [] } = {}) {
   const resolved = resolveActionRequest(request);
   const checks = [];
 
@@ -626,6 +640,40 @@ export function evaluateDecision(request, consents = [], { at = nowIso(), public
   } else {
     checks.push(
       check('pass', 'policy.money.limit_required', 'Monetary limits are explicit or not required.')
+    );
+  }
+
+  // policy.report.flag_review_threshold — §9A: actors carrying enough
+  // open high-severity flag reports are auto-blocked from sensitive
+  // actions until a human review (NGO / labour-law partner per §9A) has
+  // resolved the queue. Flags are evidence, not punishment — the goal is
+  // friction-with-due-process for repeat offenders.
+  const flagSummary = flagSummaryForSubject(resolved.actorId, flags);
+  if (flagSummary.openHigh >= FLAG_REVIEW_BLOCK_THRESHOLD) {
+    checks.push(
+      check(
+        'fail',
+        'policy.report.flag_review_threshold',
+        `Actor has ${flagSummary.openHigh} open high-severity §9A flag reports — sensitive actions are blocked until human review.`,
+        {
+          openHigh: flagSummary.openHigh,
+          openMedium: flagSummary.openMedium,
+          openLow: flagSummary.openLow,
+          threshold: FLAG_REVIEW_BLOCK_THRESHOLD
+        }
+      )
+    );
+  } else {
+    checks.push(
+      check(
+        'pass',
+        'policy.report.flag_review_threshold',
+        `Actor has ${flagSummary.openHigh} open high-severity flags (threshold ${FLAG_REVIEW_BLOCK_THRESHOLD}).`,
+        {
+          openHigh: flagSummary.openHigh,
+          threshold: FLAG_REVIEW_BLOCK_THRESHOLD
+        }
+      )
     );
   }
 

@@ -141,6 +141,14 @@ Implemented pieces:
 - Phase 2a.6 Indic TTS runtime scaffold: TTS model-pack metadata,
   `/api/tts/runtime`, `/api/tts/model-packs`, and `/shell/` Listen controls for
   localized responses via browser speech synthesis until IndicTTS-WASM is wired.
+- Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
+  diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
+  ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.9 §9A safeguard escalation — signed flag reports
+  (`src/phase1/flag-report.mjs`), `policy.report.flag_review_threshold` that
+  auto-blocks subjects with 3+ open high-severity flags, store persistence
+  + ledger, `/api/flags*` + `bos flag create|list|summary|resolve` + a
+  "Report a problem" card in `/shell/`. Closes Phase 2a queue item #13.
 - Phase 2a.7 on-device SLM runtime scaffold: local model-pack metadata,
   `/api/on-device/runtime`, `/api/on-device/model-packs`, and shell
   orchestration metadata that records whether a WebGPU/WASM local model is ready

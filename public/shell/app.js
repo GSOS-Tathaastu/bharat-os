@@ -113,6 +113,7 @@ function reinitializeDeviceAs(identityId) {
   const owner = state.identities.find((i) => i.id === identityId);
   if (owner) setActiveProfile(owner);
   renderProfileList();
+  refreshFlagReportSubjectOptions();
   showToast('Device re-initialized. Real Bharat OS would only ever know one household.');
 }
 
@@ -324,6 +325,7 @@ async function loadIdentities() {
   }
   setActiveProfile(owner);
   renderProfileList();
+  refreshFlagReportSubjectOptions();
 }
 
 function renderProfileList() {
@@ -1217,6 +1219,79 @@ $('workerAlertTestButton').addEventListener('click', testWorkerAlert);
 $('healthDocFile').addEventListener('change', handleHealthDocFile);
 $('healthDocUploadButton').addEventListener('click', uploadHealthDocument);
 
+// ─── §9A flag report ───────────────────────────────────────────────────────
+function refreshFlagReportSubjectOptions() {
+  const select = $('flagSubjectSelect');
+  if (!select) return;
+  const currentSelection = select.value;
+  const currentActor = state.activeIdentity?.id;
+  const candidates = (state.identities ?? []).filter(
+    (id) => id.id !== currentActor && !/(bootstrap|tenant)/i.test(id.displayName ?? '')
+  );
+  const optionsHtml = ['<option value="">— Choose who you\'re reporting —</option>']
+    .concat(
+      candidates.map(
+        (identity) =>
+          `<option value="${escapeHtml(identity.id)}">${escapeHtml(identity.displayName ?? identity.id)}</option>`
+      )
+    )
+    .join('');
+  select.innerHTML = optionsHtml;
+  if (currentSelection && candidates.some((c) => c.id === currentSelection)) {
+    select.value = currentSelection;
+  }
+}
+
+async function submitFlagReport() {
+  if (!sanityCheckActor()) return;
+  const subjectActorId = $('flagSubjectSelect').value;
+  const category = $('flagCategorySelect').value;
+  const severity = $('flagSeveritySelect').value;
+  const summary = $('flagSummary').value.trim();
+  if (!subjectActorId) {
+    showToast('Pick who you\'re reporting first.');
+    return;
+  }
+  if (summary.length < 4) {
+    showToast('Add a short summary (min 4 chars).');
+    return;
+  }
+
+  const button = $('flagReportSubmit');
+  button.disabled = true;
+  try {
+    const data = await fetchJson('/api/flags', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        reporterId: state.activeIdentity.id,
+        subjectActorId,
+        category,
+        severity,
+        summary,
+        signWithIdentityId: state.activeIdentity.id
+      })
+    });
+    const box = $('flagReportResult');
+    box.hidden = false;
+    box.innerHTML = `
+      <strong>Report filed and signed</strong>
+      <dl class="result-detail-grid">
+        <dt>Flag</dt><dd>${escapeHtml(shortId(data.flag.flagId))}</dd>
+        <dt>Severity</dt><dd>${escapeHtml(data.flag.severity)}</dd>
+        <dt>Signature</dt><dd>${data.integrity?.signatureValid ? 'verified' : 'unverified'}</dd>
+        <dt>Status</dt><dd>${escapeHtml(data.flag.status)}</dd>
+      </dl>
+    `;
+    $('flagSummary').value = '';
+    showToast('Report filed.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ─── Diagnostics panel ─────────────────────────────────────────────────────
 // Honest "what's running vs scaffold" surface for investor demos. Maps to
 // the Phase 2a.x status board in BHARAT_OS.md §17.
@@ -1228,7 +1303,8 @@ const DIAGNOSTICS = [
   { id: '2a.5', label: 'Indic ASR voice input', status: 'partial', detail: 'Web Speech API today (needs HTTPS/localhost). IndicWhisper-WASM offline runtime is scaffold.' },
   { id: '2a.6', label: 'Vernacular TTS (Listen)', status: 'real', detail: 'Browser speechSynthesis speaks the localizedResponse. IndicTTS-WASM upgrade is scaffold.' },
   { id: '2a.7', label: 'On-device SLM intent', status: 'placeholder', detail: 'Deterministic regex today. WebGPU + transformers.js / Sarvam-1 q4 is opt-in Tier 4.' },
-  { id: '7c', label: 'Device pairing handshake', status: 'placeholder', detail: 'localStorage scaffold today. Real WebRTC ephemeral-key transport is Phase 2a queue #8.' }
+  { id: '7c', label: 'Device pairing handshake', status: 'placeholder', detail: 'localStorage scaffold today. Real WebRTC ephemeral-key transport is Phase 2a queue #8.' },
+  { id: '2a.9', label: 'One-tap reporting + flag ledger (§9A)', status: 'real', detail: 'Reporter signs the flag with their identity key; 3+ open high-severity flags auto-block the subject\'s sensitive actions until human review.' }
 ];
 function renderDiagnostics() {
   const list = $('diagnosticsList');
@@ -1249,6 +1325,8 @@ function renderDiagnostics() {
   }).join('');
 }
 renderDiagnostics();
+
+$('flagReportSubmit').addEventListener('click', submitFlagReport);
 
 setupVoice();
 loadIdentities().catch((error) => {

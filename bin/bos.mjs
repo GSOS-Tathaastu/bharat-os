@@ -54,6 +54,12 @@ import {
   verifyWorkerAuthorization
 } from '../src/phase1/worker-authorization.mjs';
 import {
+  createFlagReport,
+  flagSummaryForSubject,
+  resolveFlagReport,
+  signFlagReport
+} from '../src/phase1/flag-report.mjs';
+import {
   createPairingPayload,
   generateRecoveryPhrase,
   verifyPairingPayload,
@@ -158,7 +164,11 @@ function usage() {
       'vernacular languages [--store .bharat-os]',
       'device recovery-phrase --identity-id ID [--store .bharat-os]',
       'device verify-phrase --identity-id ID --phrase "twelve words" [--store .bharat-os]',
-      'device pair --identity-id ID [--ttl-seconds 300] [--store .bharat-os]'
+      'device pair --identity-id ID [--ttl-seconds 300] [--store .bharat-os]',
+      'flag create --reporter-id ID --subject-id ID --category advance_fee|wage_non_payment|unsafe_conditions|underage_worker|no_show|fraud|exploitation|abuse|other [--severity low|medium|high] [--job-reference REF] --summary "TEXT" [--sign-with-identity-id ID] [--store .bharat-os]',
+      'flag list [--subject-id ID] [--status pending|under_review|resolved|dismissed] [--store .bharat-os]',
+      'flag summary --subject-id ID [--store .bharat-os]',
+      'flag resolve --id ID --status resolved|dismissed|under_review --reason "TEXT" --resolved-by ID [--store .bharat-os]'
     ]
   };
 }
@@ -827,6 +837,63 @@ async function main() {
       pairing: payload,
       verification: verifyPairingPayload(payload, identity)
     });
+    return;
+  }
+
+  if (command === 'flag' && subcommand === 'create') {
+    if (!options['reporter-id']) throw new Error('--reporter-id is required.');
+    if (!options['subject-id']) throw new Error('--subject-id is required.');
+    if (!options.category) throw new Error('--category is required.');
+    if (!options.summary) throw new Error('--summary is required.');
+    let report = createFlagReport({
+      reporterId: options['reporter-id'],
+      subjectActorId: options['subject-id'],
+      category: options.category,
+      severity: options.severity ?? 'medium',
+      jobReference: options['job-reference'],
+      summary: options.summary
+    });
+    if (options['sign-with-identity-id']) {
+      const signer = await store.readIdentity(options['sign-with-identity-id']);
+      report = signFlagReport(report, signer);
+    }
+    await store.saveFlagReport(report);
+    print({ ok: true, flag: report });
+    return;
+  }
+
+  if (command === 'flag' && subcommand === 'list') {
+    let flags = await store.listFlagReports();
+    if (options['subject-id']) {
+      flags = flags.filter((flag) => flag.subjectActorId === options['subject-id']);
+    }
+    if (options.status) {
+      flags = flags.filter((flag) => flag.status === options.status);
+    }
+    print({ flags });
+    return;
+  }
+
+  if (command === 'flag' && subcommand === 'summary') {
+    if (!options['subject-id']) throw new Error('--subject-id is required.');
+    const flags = await store.listFlagReports();
+    print({ summary: flagSummaryForSubject(options['subject-id'], flags) });
+    return;
+  }
+
+  if (command === 'flag' && subcommand === 'resolve') {
+    if (!options.id) throw new Error('--id is required.');
+    if (!options.status) throw new Error('--status is required.');
+    if (!options.reason) throw new Error('--reason is required.');
+    if (!options['resolved-by']) throw new Error('--resolved-by is required.');
+    const existing = await store.readFlagReport(options.id);
+    const resolved = resolveFlagReport(existing, {
+      status: options.status,
+      reason: options.reason,
+      resolvedBy: options['resolved-by']
+    });
+    await store.saveFlagReport(resolved);
+    print({ ok: true, flag: resolved });
     return;
   }
 

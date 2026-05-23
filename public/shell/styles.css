@@ -483,6 +483,24 @@ body {
   line-height: 1.5;
 }
 
+.flag-report-card select,
+.flag-report-card textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.flag-report-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+}
+
 .capture-card {
   background: var(--surface);
   border: 1px solid var(--border);

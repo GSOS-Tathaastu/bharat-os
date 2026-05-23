@@ -47,6 +47,7 @@ export class BosStore {
     this.skillPreflightsPath = path.join(rootPath, 'skill-preflights');
     this.memoryRecordsPath = path.join(rootPath, 'memory-records');
     this.workerAuthorizationsPath = path.join(rootPath, 'worker-authorizations');
+    this.flagReportsPath = path.join(rootPath, 'flag-reports');
     this.healthDocumentsPath = path.join(rootPath, 'health-documents');
     this.profileCredentialsPath = path.join(rootPath, 'profile-credentials');
     this.pushSubscriptionsPath = path.join(rootPath, 'push-subscriptions');
@@ -71,6 +72,7 @@ export class BosStore {
     await fs.mkdir(this.skillPreflightsPath, { recursive: true });
     await fs.mkdir(this.memoryRecordsPath, { recursive: true });
     await fs.mkdir(this.workerAuthorizationsPath, { recursive: true });
+    await fs.mkdir(this.flagReportsPath, { recursive: true });
     await fs.mkdir(this.healthDocumentsPath, { recursive: true });
     await fs.mkdir(this.profileCredentialsPath, { recursive: true });
     await fs.mkdir(this.pushSubscriptionsPath, { recursive: true });
@@ -131,6 +133,10 @@ export class BosStore {
 
   workerAuthorizationFile(authorizationId) {
     return path.join(this.workerAuthorizationsPath, `${safeName(authorizationId)}.json`);
+  }
+
+  flagReportFile(flagId) {
+    return path.join(this.flagReportsPath, `${safeName(flagId)}.json`);
   }
 
   healthDocumentFile(captureId) {
@@ -453,6 +459,31 @@ export class BosStore {
 
   async listWorkerAuthorizations() {
     return listJson(this.workerAuthorizationsPath);
+  }
+
+  async saveFlagReport(report) {
+    await this.init();
+    await writeJson(this.flagReportFile(report.flagId), report);
+    await this.appendLedger({
+      type: 'flag_report.saved',
+      flagId: report.flagId,
+      reporterId: report.reporterId,
+      subjectActorId: report.subjectActorId,
+      category: report.category,
+      severity: report.severity,
+      status: report.status,
+      jobReference: report.jobReference,
+      at: new Date().toISOString()
+    });
+    return report;
+  }
+
+  async readFlagReport(flagId) {
+    return readJson(this.flagReportFile(flagId));
+  }
+
+  async listFlagReports() {
+    return listJson(this.flagReportsPath);
   }
 
   async saveHealthDocumentCapture(capture) {

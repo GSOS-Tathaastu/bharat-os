@@ -247,7 +247,7 @@ function deriveLifecycleStatus(skillPreflightApproved, execution) {
   return 'blocked';
 }
 
-export function orchestrateIntent(intent, consents = [], { execute = false, at = nowIso(), publicRecords = [] } = {}) {
+export function orchestrateIntent(intent, consents = [], { execute = false, at = nowIso(), publicRecords = [], flags = [] } = {}) {
   const actionRequest = buildActionRequest(intent);
   const normalizedIntent = {
     normalizedText: actionRequest.metadata.normalizedText,
@@ -256,7 +256,7 @@ export function orchestrateIntent(intent, consents = [], { execute = false, at =
     matchedAliases: actionRequest.metadata.matchedAliases,
     confidence: actionRequest.metadata.languageConfidence
   };
-  const skillPreflight = evaluateSkillPreflight(actionRequest.skillId, actionRequest, consents, { at, publicRecords });
+  const skillPreflight = evaluateSkillPreflight(actionRequest.skillId, actionRequest, consents, { at, publicRecords, flags });
   let decision = skillPreflight.decision;
   let execution = null;
 
@@ -264,7 +264,8 @@ export function orchestrateIntent(intent, consents = [], { execute = false, at =
     execution = executeToolAction(skillPreflight.decision.request, consents, {
       at,
       skillPreflightId: skillPreflight.preflightId,
-      publicRecords
+      publicRecords,
+      flags
     });
     decision = execution.decision;
   }
