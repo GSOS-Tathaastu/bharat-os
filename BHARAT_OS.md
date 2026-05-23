@@ -2129,6 +2129,9 @@ Closed in Phase 2a.14 (ADR 0063):
 Closed in Phase 2a.15 (ADR 0064):
 1. ✅ **Shell polish pass** — reordered `/shell/` so the intent loop and the live §13B mesh ticker sit above the fold; auxiliary surfaces (pairing, passkey, alerts, health document, §9A flag report) collapsed into a single "More controls" `<details>` block with a meta line that lists what's one click away. No behavioural change; HTML + CSS only. Service worker cache bumped to v11.
 
+Closed in Phase 2a.16 (ADR 0065):
+1. ✅ **Demo readiness pass** — suggestion chips expanded to six per locale covering four action types (loan, cab, health record, hotel, scheme, train); Hinglish loan regex hardened to match `karza` / `karzaa` / `karja` / `business` / `nbfc` and the Devanagari side extended with कारोबारी / कारोबार / व्यवसाय (no more silent mis-classification as `mesh_storage`); first-run onboarding overlay shown once per browser with three coach-mark steps (intent → mesh ticker → more controls + diagnostics) and a *Replay tour* link in More controls. SW cache to v12.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

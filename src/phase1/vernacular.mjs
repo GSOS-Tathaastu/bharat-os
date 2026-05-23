@@ -108,8 +108,8 @@ export const VERNACULAR_INTENT_ALIASES = [
     label: 'Hindi regulated onboarding intent',
     hints: ['account', 'onboard', 'kyc', 'bank', 'loan'],
     patterns: [
-      /(बैंक|खाता|ऋण|लोन|केवाईसी)/,
-      /\b(bank|khata|khaata|loan|karz|kyc)\b/i
+      /(बैंक|खाता|ऋण|लोन|केवाईसी|कारोबारी|कारोबार|व्यवसाय)/,
+      /\b(bank|khata|khaata|loan|karz|karza|karzaa|karja|karjaa|kyc|business|nbfc)\b/i
     ]
   },
   {

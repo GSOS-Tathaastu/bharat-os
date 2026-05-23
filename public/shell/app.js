@@ -11,23 +11,60 @@ const $ = (id) => document.getElementById(id);
 
 const SUGGESTIONS_BY_LANG = {
   'hi-IN': [
-    'मुझे योजना का लाभ चाहिए',
-    'टैक्सी बुक करो',
-    'मेरा सेहत रिकॉर्ड दिखाओ'
+    'मुझे ₹50,000 का छोटा कारोबारी लोन चाहिए',
+    'ऑफिस से घर तक टैक्सी बुक करो',
+    'मेरा HbA1c रिकॉर्ड दिखाओ',
+    'मुनार में दो रात का होटल बुक करो',
+    'मुझे सरकारी योजना का लाभ चाहिए',
+    'कल रात बैंगलोर से हैदराबाद की ट्रेन बुक करो'
   ],
   'hi-Latn-IN': [
+    'Mujhe ₹50,000 ka chhota karza chahiye',
+    'Office se ghar tak cab book karo',
+    'Mera health record dikhao',
+    'Munnar mein do raat ka hotel book karo',
     'Mujhe sarkari yojana ke labh chahiye',
-    'Mujhe ek cab book karo',
-    'Mera bank khata kholna hai'
+    'Bangalore se Hyderabad ki train book karo'
   ],
-  'mr-IN': ['मला सरकारी योजना हवी', 'टॅक्सी बुक कर', 'आरोग्य नोंदणी दाखव'],
-  'ta-IN': ['எனக்கு திட்டம் வேண்டும்', 'டாக்ஸி புக் பண்ணு', 'மருத்துவ பதிவு காட்டு'],
-  'bn-IN': ['আমার সরকারি প্রকল্প দরকার', 'ট্যাক্সি বুক করো', 'স্বাস্থ্য রেকর্ড দেখাও'],
-  'bho-IN': ['हमरा सरकारी योजना चाहीं', 'टैक्सी बुक करा', 'सेहत के रिकार्ड देखावा'],
+  'mr-IN': [
+    'मला छोटा व्यवसाय कर्ज हवे',
+    'ऑफिस ते घर टॅक्सी बुक कर',
+    'माझा आरोग्य रेकॉर्ड दाखव',
+    'गोव्यात दोन रात्रींचे हॉटेल बुक कर',
+    'मला सरकारी योजना हवी',
+    'पुणे ते मुंबई ट्रेन बुक कर'
+  ],
+  'ta-IN': [
+    'எனக்கு ₹50,000 சிறு வணிக கடன் வேண்டும்',
+    'அலுவலகத்திலிருந்து வீட்டுக்கு டாக்ஸி புக் பண்ணு',
+    'என் சர்க்கரை நோய் பதிவு காட்டு',
+    'ஊட்டியில் இரண்டு இரவு ஹோட்டல் புக் பண்ணு',
+    'எனக்கு அரசு திட்டம் வேண்டும்',
+    'பெங்களூரிலிருந்து சென்னை ரயில் புக் பண்ணு'
+  ],
+  'bn-IN': [
+    'আমার ছোট ব্যবসার জন্য ৫০,০০০ টাকার ঋণ দরকার',
+    'অফিস থেকে বাড়ি ট্যাক্সি বুক করো',
+    'আমার স্বাস্থ্য রেকর্ড দেখাও',
+    'দার্জিলিং-এ দুই রাত হোটেল বুক করো',
+    'আমার সরকারি প্রকল্প দরকার',
+    'কলকাতা থেকে দিল্লি ট্রেন বুক করো'
+  ],
+  'bho-IN': [
+    'हमरा छोटा करजा चाहीं',
+    'ऑफिस से घर ले टैक्सी बुक करा',
+    'सेहत के रिकार्ड देखावा',
+    'दू रात के होटल बुक करा',
+    'हमरा सरकारी योजना चाहीं',
+    'पटना से दिल्ली के ट्रेन बुक करा'
+  ],
   'en-IN': [
-    'I want to apply for a small loan',
-    'Book me a cab',
-    'Show me my health record'
+    'I want a ₹50,000 small business loan',
+    'Book a cab from office to home',
+    'Show me my health record',
+    'Book a hotel in Munnar for two nights',
+    'I want to apply for a government scheme',
+    'Book a Bangalore to Hyderabad train for tomorrow night'
   ]
 };
 
@@ -67,6 +104,7 @@ const ACTION_LABEL_BY_TYPE = {
 // same device.
 const LS_KEY_OWNER = 'bharat-os.shell.deviceOwnerId';
 const LS_KEY_HOUSEHOLD = 'bharat-os.shell.householdIds';
+const LS_KEY_ONBOARDING_SEEN = 'bharat-os.shell.onboardingSeen.v1';
 
 const state = {
   identities: [],
@@ -1826,7 +1864,39 @@ document.addEventListener('click', (event) => {
   }, 1500);
 });
 
+function setupOnboarding() {
+  const sheet = $('onboardingSheet');
+  const dismiss = () => {
+    try {
+      localStorage.setItem(LS_KEY_ONBOARDING_SEEN, '1');
+    } catch (_error) {
+      /* private-mode storage failure is fine */
+    }
+    sheet.hidden = true;
+  };
+  $('onboardingSkip')?.addEventListener('click', dismiss);
+  $('onboardingDone')?.addEventListener('click', dismiss);
+  $('replayTour')?.addEventListener('click', () => {
+    sheet.hidden = false;
+  });
+}
+
+function maybeShowOnboarding() {
+  let seen = null;
+  try {
+    seen = localStorage.getItem(LS_KEY_ONBOARDING_SEEN);
+  } catch (_error) {
+    seen = null;
+  }
+  if (!seen) {
+    $('onboardingSheet').hidden = false;
+  }
+}
+
 setupVoice();
-loadIdentities().catch((error) => {
-  showToast(`Could not reach Bharat OS: ${error.message}`);
-});
+setupOnboarding();
+loadIdentities()
+  .then(() => maybeShowOnboarding())
+  .catch((error) => {
+    showToast(`Could not reach Bharat OS: ${error.message}`);
+  });

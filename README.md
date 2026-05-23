@@ -144,6 +144,16 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.16 **demo readiness pass** — suggestion chips expanded to six
+  per locale (loan / cab / health record / hotel / scheme / train) and
+  every chip verified end-to-end to classify to a real action type; the
+  Hinglish loan regex hardened so *"karza"* / *"karzaa"* / *"karja"* /
+  *"business"* / *"nbfc"* route to `regulated_onboarding` instead of
+  silently falling to `mesh_storage`, with कारोबारी / कारोबार / व्यवसाय
+  added on the Devanagari side; a first-run onboarding overlay (3 steps:
+  intent → mesh ticker → more controls + diagnostics) shown once per
+  browser with a *Replay tour* link in More controls. SW cache bumped to
+  v12. ADR 0065.
 - Phase 2a.15 **shell polish pass** — `/shell/` reordered so the intent
   loop + the live §13B mesh ticker sit above the fold; the auxiliary
   cards (pairing, passkey, alerts, health document, §9A flag report)

@@ -133,6 +133,9 @@
           <span class="more-controls-meta">device pairing · passkey · alerts · health doc · §9A flag</span>
         </summary>
         <div class="more-controls-grid">
+          <div class="more-controls-actions">
+            <button id="replayTour" class="link-button" type="button">Replay onboarding tour</button>
+          </div>
           <section class="capture-card pairing-card" id="pairingSection">
             <div class="capture-header">
               <span>📲 Pair another device (§7c)</span>
@@ -268,6 +271,44 @@
         </details>
       </section>
     </main>
+
+    <div class="sheet onboarding-sheet" id="onboardingSheet" hidden>
+      <div class="sheet-content">
+        <div class="sheet-title">Welcome to Bharat OS</div>
+        <div class="sheet-sub">
+          A 30-second tour of what's here. You can replay this any time
+          from the "More controls" menu.
+        </div>
+        <ol class="onboarding-steps">
+          <li>
+            <strong>Speak or type any intent.</strong>
+            <span>Hindi · Marathi · Bhojpuri · Tamil · Bengali · English.
+            *"Book a cab from office to home"*, *"mera HbA1c dikhao"*,
+            *"मुझे ₹50,000 का लोन चाहिए"*. The shell will plan it, run §9A
+            worker / §15 consent checks, and either complete it or hand
+            you off to UPI / the right app.</span>
+          </li>
+          <li>
+            <strong>Watch the §13B mesh ticker.</strong>
+            <span>Tap *Start earning* in the Mesh node card. Your phone
+            (demo-mode) serves a few tokens of inference + a few MB of
+            storage, signs each contribution, and ticks the ₹ counter.
+            Real Bharat OS does this only while charging + on WiFi.</span>
+          </li>
+          <li>
+            <strong>Auxiliary surfaces are in "More controls".</strong>
+            <span>§7c pair-another-device, passkey, push alerts, health
+            document capture, and §9A flag reporting are one
+            summary-click away. The diagnostics panel below is the §17
+            honesty board — real / partial / placeholder per surface.</span>
+          </li>
+        </ol>
+        <div class="onboarding-actions">
+          <button id="onboardingSkip" class="link-button" type="button">Skip</button>
+          <button id="onboardingDone" class="secondary-button" type="button">Got it</button>
+        </div>
+      </div>
+    </div>
 
     <div class="sheet" id="profileSheet" hidden>
       <div class="sheet-content">
