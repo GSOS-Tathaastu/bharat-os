@@ -626,17 +626,30 @@ export function normalizeIntent(intentText = '', { locale = 'en-IN' } = {}) {
 
   const { languageId: scoredLanguageId } = scoreLanguageFromText(originalText);
 
+  // Detect pure English: ASCII-only AND no Indic-language markers anywhere.
+  // The Indic-romanized aliases deliberately include code-mixed English
+  // words like "cab" or "hotel" to catch Hinglish ("mujhe ek cab book karo"),
+  // so without this guard a sentence like "Book me a cab" gets mis-flagged
+  // as Hindi-romanized just because the Hindi alias matched.
+  const isAscii = !/[^\x00-\x7F]/.test(originalText);
+  const englishish = isAscii && scoredLanguageId === null;
+
   // When multiple languages match the same intent (common across the
   // Devanagari family — Hindi / Marathi / Bhojpuri share script), prefer the
-  // language with the highest language-marker score. This keeps a Bhojpuri
-  // sentence with `हमरा / चाहीं` markers from being flagged as Hindi just
-  // because the Hindi alias is registered first.
-  const matchedAliases = scoredLanguageId
-    ? [
-        ...rawMatches.filter((m) => m.languageId === scoredLanguageId),
-        ...rawMatches.filter((m) => m.languageId !== scoredLanguageId)
-      ]
-    : rawMatches;
+  // language with the highest language-marker score. If the text is plain
+  // English, drop the Indic-romanized matches entirely so we don't claim a
+  // language we didn't actually detect.
+  let matchedAliases;
+  if (englishish) {
+    matchedAliases = [];
+  } else if (scoredLanguageId) {
+    matchedAliases = [
+      ...rawMatches.filter((m) => m.languageId === scoredLanguageId),
+      ...rawMatches.filter((m) => m.languageId !== scoredLanguageId)
+    ];
+  } else {
+    matchedAliases = rawMatches;
+  }
 
   const detectedLocale = detectLocale(originalText, locale, matchedAliases, scoredLanguageId);
   const detectedLanguageId =

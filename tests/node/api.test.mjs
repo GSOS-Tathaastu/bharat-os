@@ -43,6 +43,7 @@ test('Phase 0 API exposes health and route catalog', async () => {
 
     const catalog = await readJson(await fetch(`${baseUrl}/api`));
     assert.ok(catalog.routes.includes('POST /api/simulations/bootstrap'));
+    assert.ok(catalog.routes.includes('GET /shell/'));
     assert.ok(catalog.routes.includes('GET /console/'));
     assert.ok(catalog.routes.includes('POST /api/orchestrations'));
     assert.ok(catalog.routes.includes('POST /api/integrity/verify'));
@@ -70,12 +71,24 @@ test('Phase 0 API exposes health and route catalog', async () => {
   });
 });
 
-test('Phase 0 API serves the operator console assets', async () => {
+test('Phase 0 API serves the shell and operator console assets', async () => {
   const { store } = await freshStore('api-console');
   await withApi(store, async (baseUrl) => {
     const redirected = await fetch(`${baseUrl}/`, { redirect: 'manual' });
     assert.equal(redirected.status, 302);
-    assert.equal(redirected.headers.get('location'), '/console/');
+    assert.equal(redirected.headers.get('location'), '/shell/');
+
+    const shellHtml = await fetch(`${baseUrl}/shell/`);
+    assert.equal(shellHtml.status, 200);
+    const shellText = await shellHtml.text();
+    assert.match(shellText, /Bharat OS/);
+    assert.match(shellText, /What do you want to do today/);
+
+    const shellScript = await fetch(`${baseUrl}/shell/app.js`);
+    assert.equal(shellScript.status, 200);
+    const shellScriptText = await shellScript.text();
+    assert.match(shellScriptText, /sendIntent/);
+    assert.match(shellScriptText, /\/api\/orchestrations/);
 
     const html = await fetch(`${baseUrl}/console/`);
     assert.equal(html.status, 200);

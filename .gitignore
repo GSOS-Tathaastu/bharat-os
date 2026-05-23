@@ -5,6 +5,7 @@ Thumbs.db
 *.bak
 .cache/
 .bharat-os/
+.demo-bharat-os/
 .tools/
 .tmp/
 node_modules/

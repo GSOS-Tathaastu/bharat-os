@@ -1,0 +1,21 @@
+{
+  "name": "Bharat OS",
+  "short_name": "Bharat OS",
+  "description": "Vernacular voice-first agent shell for India. §17 Phase 2a app distribution.",
+  "start_url": "/shell/",
+  "scope": "/shell/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c1018",
+  "theme_color": "#0c1018",
+  "lang": "en-IN",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -307,10 +307,10 @@ powershell -ExecutionPolicy Bypass -File scripts/bos.ps1 memory provenance `
   execution receipt, so clients can show audit-hash status immediately.
 - Aadhaar, PAN, DigiLocker, Account Aggregator, ABHA, and UPI remain mocked until
   real partnerships exist.
-- §9A worker authorization receipts are referenced by ID
-  (`mediation.workerAuthorizationId`) but are not yet a signed first-class
-  artifact type; a follow-on iteration will make the worker's authorization a
-  proper signed receipt. Per-profile auth on shared devices and a device-less
-  assisted/kiosk channel are still out of scope (identity-layer work).
-- Net Contribution Score is computed by the Phase 0 simulator but not yet
-  exposed through the API, CLI, Trust Passport, or operator console.
+- §9A worker authorization is now a signed first-class artifact and the
+  mediation policy verifies signature, worker ID, and expiry. Per-profile auth
+  on shared devices and a device-less assisted/kiosk channel are still out of
+  scope (identity-layer work).
+- Net Contribution Score is exposed through the API, CLI, Trust Passport, and
+  operator console. It is not yet tied to pricing, credit settlement, abuse
+  controls, or real node telemetry.

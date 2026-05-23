@@ -55,6 +55,7 @@ import {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
 const consoleRoot = path.join(repoRoot, 'public/operator-console');
+const shellRoot = path.join(repoRoot, 'public/shell');
 
 function jsonResponse(response, statusCode, value) {
   const body = JSON.stringify(value, null, 2);
@@ -407,9 +408,26 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
     const parts = url.pathname.split('/').filter(Boolean);
 
     try {
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/console')) {
+      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
+        response.writeHead(302, { location: '/shell/' });
+        response.end();
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/console') {
         response.writeHead(302, { location: '/console/' });
         response.end();
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/shell/')) {
+        const relativePath =
+          url.pathname === '/shell/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/shell/'.length));
+        const requestedPath = path.resolve(shellRoot, relativePath);
+        if (!requestedPath.startsWith(shellRoot)) {
+          return notFound(response, url.pathname);
+        }
+        await staticResponse(response, requestedPath);
         return;
       }
 
@@ -438,6 +456,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           routes: [
             'GET /health',
             'GET /api',
+            'GET /shell/',
             'GET /console/',
             'GET /api/dashboard',
             'GET /api/policies',

@@ -109,6 +109,11 @@ Implemented pieces:
   shell (Phase 2a §13 distribution path); (d) device-pairing scaffold
   (`src/phase1/device-pairing.mjs`) with deterministic recovery phrase
   and pairing payload for §7c phone migration.
+- Phase 1.43 user-facing vernacular shell at `/shell/` (`public/shell/`):
+  voice-first or text intent entry, persona-aware greetings, per-action result
+  cards, localized response rendering, recent activity, and a demo-safe device
+  claim model that treats persona switching as device re-initialization.
+  `/` now redirects to `/shell/`; `/console/` remains the operator surface.
 
 ## Quickstart
 
@@ -116,22 +121,30 @@ Implemented pieces:
 powershell -ExecutionPolicy Bypass -File scripts/test.ps1
 ```
 
-Run the bootstrap simulator:
+## Run the user-facing demo (Phase 1.43)
+
+```bash
+# 1. Seed a demo store with §9C vignettes (Sita / Ravi / Lakshmi / Aarav /
+#    Suresh / Priya / Rajesh / Anjali — consents, nodes, memory, orchestrations,
+#    worker authorization, bootstrap report).
+node scripts/seed-demo.mjs
+
+# 2. Start the API on the demo store. Binds to LAN so you can side-load
+#    to your phone over WiFi.
+node bin/bos-api.mjs --store .demo-bharat-os --host 0.0.0.0 --port 8787
+
+# 3. Open:
+#    http://127.0.0.1:8787/         user-facing shell (auto-redirects to /shell/)
+#    http://<laptop-LAN-IP>:8787/   side-load to your phone on the same WiFi
+#    http://127.0.0.1:8787/console/ operator console (admin / observability)
+#
+# 4. Install as PWA: Chrome > "Add to Home screen" on either surface.
+```
+
+Run the bootstrap simulator (legacy PowerShell entry):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/bos.ps1 simulate bootstrap --nodes 1000 --objects 100 --report-out .tmp/bootstrap.md --store .bharat-os
-```
-
-Run the local API for the future UI:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/api.ps1 --store .bharat-os --host 127.0.0.1 --port 8787
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8787/console/
 ```
 
 The test runner imports `src/BharatOS.Phase0/BharatOS.Phase0.psm1`, runs the
@@ -140,16 +153,30 @@ PowerShell behavioral tests, then runs the Node.js tests in `tests/node/`.
 ## Repository Layout
 
 ```text
-BHARAT_OS.md                         Canonical product and architecture reference
-src/BharatOS.Phase0/                 Phase 0 PowerShell module
-src/phase0/                          Phase 0.1 Node core and store
-bin/bos.mjs                          Phase 0.1 CLI
-bin/bos-api.mjs                      Phase 0.3 local API
-public/operator-console/             UI 0 operator console
-tests/                               Dependency-free test scripts
-scripts/test.ps1                     Test entry point
+BHARAT_OS.md                         Canonical product and architecture reference (§17 = live status)
+src/BharatOS.Phase0/                 Phase 0 PowerShell module (original executable spec)
+src/phase0/                          Phase 0.1 Node core, store, simulator, HTTP API
+src/phase1/                          Phase 1 modules:
+                                       policy.mjs, orchestrator.mjs, tools.mjs, skills.mjs,
+                                       vernacular.mjs, memory.mjs, integrity.mjs,
+                                       trust-passport.mjs, worker-authorization.mjs,
+                                       device-pairing.mjs, skill-trace.mjs
+bin/bos.mjs                          Comprehensive CLI (~30 commands; `node bin/bos.mjs help`)
+bin/bos-api.mjs                      Local HTTP API server entry
+public/shell/                        UI 2 — user-facing vernacular shell (Phase 1.43, PWA)
+public/operator-console/             UI 0 — operator observability console (PWA)
+scripts/seed-demo.mjs                Seed a demo store with §9C vignettes
+scripts/test.ps1, bos.ps1, api.ps1   PowerShell wrappers (use portable Node in `.tools/`)
+tests/node/                          11 test files, 133 tests
 docs/phase0/                         Phase 0 implementation notes
 docs/phase1/                         Phase 1 implementation notes
-docs/adr/                            Architecture decision records
+docs/adr/                            Architecture decision records (49 ADRs)
 docs/ui/                             UI roadmap
 ```
+
+## For contributors (Codex, future Claude, human)
+
+Read `BHARAT_OS.md` §0, §6, §15, §17 first. §17 is the live status board with
+the prioritized Phase 2a queue. Pick a feature, file an ADR in `docs/adr/`,
+keep tests green (`node --test tests/node/*.test.mjs`), update §17 inline as
+items close. Do not create a parallel status file (§16 binding).

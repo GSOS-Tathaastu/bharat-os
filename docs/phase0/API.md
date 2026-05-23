@@ -15,14 +15,16 @@ Open:
 ```text
 http://127.0.0.1:8787/health
 http://127.0.0.1:8787/api
+http://127.0.0.1:8787/shell/
 http://127.0.0.1:8787/console/
 ```
 
 ## Routes
 
 - `GET /health`
-- `GET /console/`
 - `GET /api`
+- `GET /shell/`
+- `GET /console/`
 - `GET /api/dashboard`
 - `GET /api/policies`
 - `GET /api/skills`
