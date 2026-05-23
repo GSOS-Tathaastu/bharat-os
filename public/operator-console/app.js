@@ -579,6 +579,8 @@ async function loadDashboard() {
     await loadServiceMarketplace();
     await loadWorkerAuthorizations();
     await loadFlagReports();
+    await loadFederatedRounds();
+    await loadAttestations();
     setApiStatus(true, 'Connected');
   } catch (error) {
     setApiStatus(false, 'Disconnected');
@@ -1611,5 +1613,178 @@ $('flagReportsTable').addEventListener('click', (event) => {
 
 $('flagStatusFilter').addEventListener('change', loadFlagReports);
 $('refreshFlagsButton').addEventListener('click', loadFlagReports);
+
+// ─── §7f Federated rounds — Phase 2a.23 catch-up ──────────────────────────
+function renderFederatedRounds(rounds) {
+  const table = $('federatedRoundsTable');
+  if (!table) return;
+  $('federatedRoundsCountLabel').textContent =
+    `${rounds.length} round${rounds.length === 1 ? '' : 's'}`;
+  if (rounds.length === 0) {
+    table.innerHTML = '<tr><td colspan="8">No rounds found.</td></tr>';
+    return;
+  }
+  table.innerHTML = rounds
+    .map((round) => {
+      const deadline = round.deadlineAt
+        ? new Date(round.deadlineAt).toLocaleString()
+        : '—';
+      const progress = `${round.updateCount}/${round.maxParticipants}`;
+      const epsilon = `${round.epsilonSpent.toFixed(3)} / ${round.maxEpsilon}`;
+      const payout = `₹${(round.payoutPaisePerUpdate / 100).toFixed(2)}`;
+      const canAggregate =
+        round.status === 'accepting_updates' && round.updateCount > 0;
+      const actions = canAggregate
+        ? `<button type="button" data-aggregate-round="${escapeHtml(round.roundId)}">Aggregate</button>`
+        : round.status === 'completed' && round.aggregatedModelHash
+          ? `<code title="${escapeHtml(round.aggregatedModelHash)}">${escapeHtml(round.aggregatedModelHash.slice(0, 12))}…</code>`
+          : '—';
+      return `
+        <tr>
+          <td><code>${escapeHtml(shortId(round.roundId))}</code></td>
+          <td>${escapeHtml(round.modelName)}</td>
+          <td><span class="status-pill status-${escapeHtml(round.status)}">${escapeHtml(round.status)}</span></td>
+          <td>${escapeHtml(progress)}</td>
+          <td>${escapeHtml(epsilon)}</td>
+          <td>${escapeHtml(payout)}</td>
+          <td>${escapeHtml(deadline)}</td>
+          <td>${actions}</td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+async function loadFederatedRounds() {
+  try {
+    const filter = $('federatedStatusFilter')?.value;
+    const response = await fetch('/api/federated/rounds');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    let rounds = data.rounds ?? [];
+    if (filter) rounds = rounds.filter((r) => r.status === filter);
+    renderFederatedRounds(rounds);
+  } catch (_error) {
+    renderFederatedRounds([]);
+  }
+}
+
+async function aggregateFederatedRound(roundId) {
+  if (!window.confirm(`Aggregate round ${shortId(roundId)}? This closes the round permanently.`)) return;
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/federated/rounds/${encodeURIComponent(roundId)}/aggregate`,
+      { method: 'POST' }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    $('decisionOutput').textContent = JSON.stringify(
+      {
+        roundId,
+        status: data.round?.status,
+        aggregatedModelHash: data.round?.aggregatedModelHash,
+        updateCount: data.round?.updateCount
+      },
+      null,
+      2
+    );
+    await loadFederatedRounds();
+  } catch (error) {
+    $('decisionOutput').textContent = `Aggregation failed: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+$('federatedRoundsTable')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-aggregate-round]');
+  if (!button || button.disabled) return;
+  aggregateFederatedRound(button.dataset.aggregateRound);
+});
+$('refreshFederatedButton')?.addEventListener('click', loadFederatedRounds);
+$('federatedStatusFilter')?.addEventListener('change', loadFederatedRounds);
+
+// ─── §13A #7 Attestations — Phase 2a.23 catch-up ──────────────────────────
+function renderAttestations(items) {
+  const table = $('attestationsTable');
+  if (!table) return;
+  $('attestationsCountLabel').textContent =
+    `${items.length} attestation${items.length === 1 ? '' : 's'}`;
+  if (items.length === 0) {
+    table.innerHTML = '<tr><td colspan="8">No attestations issued yet.</td></tr>';
+    return;
+  }
+  table.innerHTML = items
+    .map((a) => {
+      const issued = a.issuedAt ? new Date(a.issuedAt).toLocaleString() : '—';
+      const expires = a.expiresAt ? new Date(a.expiresAt).toLocaleString() : '—';
+      const expired = a.expiresAt && Date.parse(a.expiresAt) <= Date.now();
+      return `
+        <tr>
+          <td><code>${escapeHtml(shortId(a.attestationId))}</code></td>
+          <td><code>${escapeHtml(shortId(a.subjectId))}</code></td>
+          <td>${escapeHtml(a.verifierName ?? '—')}</td>
+          <td>${escapeHtml(a.purpose ?? '—')}</td>
+          <td>${escapeHtml(issued)}</td>
+          <td>${expired ? `<span class="status-pill status-expired">${escapeHtml(expires)}</span>` : escapeHtml(expires)}</td>
+          <td>${a.claimCount}</td>
+          <td>
+            <button type="button" data-verify-attestation="${escapeHtml(a.attestationId)}">Verify</button>
+            <a href="/verify/?attestationId=${encodeURIComponent(a.attestationId)}" target="_blank" rel="noopener">Open</a>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+async function loadAttestations() {
+  try {
+    const response = await fetch('/api/attestations');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderAttestations(data.attestations ?? []);
+  } catch (_error) {
+    renderAttestations([]);
+  }
+}
+
+async function verifyAttestation(attestationId) {
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/attestations/${encodeURIComponent(attestationId)}/verify`,
+      { method: 'POST' }
+    );
+    if (response.status === 404) {
+      $('decisionOutput').textContent = `Attestation not found: ${attestationId}`;
+      return;
+    }
+    const data = await response.json();
+    $('decisionOutput').textContent = JSON.stringify(
+      {
+        attestationId,
+        status: data.status,
+        reason: data.reason,
+        subject: data.subject,
+        claims: data.payload?.claims
+      },
+      null,
+      2
+    );
+  } catch (error) {
+    $('decisionOutput').textContent = `Verify failed: ${error.message}`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+$('attestationsTable')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-verify-attestation]');
+  if (!button || button.disabled) return;
+  verifyAttestation(button.dataset.verifyAttestation);
+});
+$('refreshAttestationsButton')?.addEventListener('click', loadAttestations);
 
 loadDashboard();

@@ -765,3 +765,34 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* Phase 2a.23 — federated + attestations panels */
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(139, 148, 167, 0.18);
+  color: var(--text-muted, #8b94a7);
+}
+
+.status-pill.status-accepting_updates,
+.status-pill.status-completed {
+  background: rgba(46, 160, 67, 0.18);
+  color: #2ea043;
+}
+
+.status-pill.status-expired {
+  background: rgba(229, 83, 75, 0.18);
+  color: #e5534b;
+}
+
+.status-pill.status-created {
+  background: rgba(210, 153, 34, 0.18);
+  color: #d29922;
+}
+

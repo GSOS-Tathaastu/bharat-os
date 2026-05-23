@@ -4,7 +4,7 @@
 // through Play Store. Offline-shell only — API calls always go to the
 // network so the policy/audit story stays live.
 
-const CACHE_NAME = 'bharat-os-console-v2';
+const CACHE_NAME = 'bharat-os-console-v3';
 const APP_SHELL = [
   '/console/',
   '/console/index.html',

@@ -29,6 +29,9 @@
           <a class="nav-item" href="#skills">Skills</a>
           <a class="nav-item" href="#identities">Identities</a>
           <a class="nav-item" href="#trust">Trust</a>
+          <a class="nav-item" href="#federated-rounds">Federated</a>
+          <a class="nav-item" href="#attestations">Attestations</a>
+          <a class="nav-item" href="#flag-reports">Flags</a>
           <a class="nav-item" href="#consents">Consents</a>
           <a class="nav-item" href="#memory">Memory</a>
           <a class="nav-item" href="#nodes">Nodes</a>
@@ -399,6 +402,82 @@
               <tbody id="workerAuthTable"></tbody>
             </table>
           </div>
+        </section>
+
+        <section id="federated-rounds" class="panel table-panel" aria-labelledby="federatedRoundsTitle">
+          <div class="panel-header">
+            <h3 id="federatedRoundsTitle">§7f Federated Rounds — Phase 3.0</h3>
+            <span id="federatedRoundsCountLabel">-- rounds</span>
+          </div>
+          <div class="filter-controls">
+            <label>
+              Status
+              <select id="federatedStatusFilter">
+                <option value="accepting_updates" selected>Accepting updates</option>
+                <option value="completed">Completed</option>
+                <option value="expired">Expired</option>
+                <option value="">All</option>
+              </select>
+            </label>
+            <button id="refreshFederatedButton" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Round</th>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Contributors</th>
+                  <th>ε spent / cap</th>
+                  <th>Payout / update</th>
+                  <th>Deadline</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="federatedRoundsTable"></tbody>
+            </table>
+          </div>
+          <p class="diagnostics-note" style="margin: 12px 16px 16px;">
+            §15 — server stores gradient hashes and DP ε, never raw
+            gradient vectors. Each accepted update mints a
+            <code>federated_round</code> mesh contribution event so
+            the operator earns UPI credits alongside inference / storage.
+          </p>
+        </section>
+
+        <section id="attestations" class="panel table-panel" aria-labelledby="attestationsTitle">
+          <div class="panel-header">
+            <h3 id="attestationsTitle">§13A #7 Trust Attestations — Phase 2a.22</h3>
+            <span id="attestationsCountLabel">-- attestations</span>
+          </div>
+          <div class="filter-controls">
+            <button id="refreshAttestationsButton" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Attestation</th>
+                  <th>Subject</th>
+                  <th>Verifier</th>
+                  <th>Purpose</th>
+                  <th>Issued</th>
+                  <th>Expires</th>
+                  <th>Claims</th>
+                  <th>Verify</th>
+                </tr>
+              </thead>
+              <tbody id="attestationsTable"></tbody>
+            </table>
+          </div>
+          <p class="diagnostics-note" style="margin: 12px 16px 16px;">
+            §15 selective disclosure — only bands and booleans are
+            ever in the envelope. The <em>Verify</em> action calls the
+            server-side signature verification and displays the
+            discriminated status (valid / expired / signature_invalid
+            / unknown_subject / malformed).
+          </p>
         </section>
 
         <section id="flag-reports" class="panel table-panel" aria-labelledby="flagReportsTitle">

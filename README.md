@@ -144,6 +144,15 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.23 **operator console catch-up** — `/console/` had drifted
+  behind the shell across Phase 2a.18 / 3.0 / 2a.22. Two new panels
+  added between Trust and Flags: *"§7f Federated Rounds — Phase 3.0"*
+  (status pills, contributor counts, ε spent/cap, *Aggregate* action)
+  and *"§13A #7 Trust Attestations — Phase 2a.22"* (claim-body-free
+  index with *Verify* and *Open* actions — the Open link opens the
+  exact same `/verify/?attestationId=…` URL a third-party verifier
+  would use). New `status-pill` CSS primitive. Sidebar nav extended.
+  249/249 tests unchanged. Console SW to v3. ADR 0073.
 - Phase 2a.22 **§13A #7 verifier round-trip** — closes the
   Trust-as-a-service loop end-to-end. New artifact
   `src/phase1/trust-attestation.mjs` with `signTrustAttestation` +
