@@ -144,6 +144,12 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.11 operator-console **§9A flag review panel** — new section
+  in `/console/` listing flag reports from the shell with status filter,
+  per-row Resolve / Dismiss buttons that prompt for reason + reviewer ID,
+  and a panel sort that surfaces open high-severity flags first. Closes
+  the §9A loop end-to-end: citizen files in shell → operator reviews in
+  console → resolution recomputes the L4 auto-block. ADR 0060.
 - Phase 2a.10 third §9B booking mode — **app handoff** to the user's
   already-installed Uber / Ola / Rapido / Namma Yatri / MakeMyTrip / OYO /
   Booking / IRCTC / Swiggy / Zomato / BigBasket / Blinkit / Urban Company.

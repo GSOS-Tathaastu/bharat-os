@@ -401,6 +401,45 @@
           </div>
         </section>
 
+        <section id="flag-reports" class="panel table-panel" aria-labelledby="flagReportsTitle">
+          <div class="panel-header">
+            <h3 id="flagReportsTitle">§9A Flag Reports — review queue</h3>
+            <span id="flagReportsCountLabel">-- flags</span>
+          </div>
+          <div class="filter-controls">
+            <label>
+              Status
+              <select id="flagStatusFilter">
+                <option value="open" selected>Open (pending + under_review)</option>
+                <option value="pending">Pending</option>
+                <option value="under_review">Under review</option>
+                <option value="resolved">Resolved</option>
+                <option value="dismissed">Dismissed</option>
+                <option value="">All</option>
+              </select>
+            </label>
+            <button id="refreshFlagsButton" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Flag</th>
+                  <th>Subject (reported against)</th>
+                  <th>Reporter</th>
+                  <th>Category</th>
+                  <th>Severity</th>
+                  <th>Summary</th>
+                  <th>Status</th>
+                  <th>Reported</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="flagReportsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section id="consents" class="panel table-panel" aria-labelledby="consentsTitle">
           <div class="panel-header">
             <h3 id="consentsTitle">Consent Timeline</h3>

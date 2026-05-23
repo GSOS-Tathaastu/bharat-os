@@ -578,6 +578,7 @@ async function loadDashboard() {
     await loadConsents();
     await loadServiceMarketplace();
     await loadWorkerAuthorizations();
+    await loadFlagReports();
     setApiStatus(true, 'Connected');
   } catch (error) {
     setApiStatus(false, 'Disconnected');
@@ -822,6 +823,140 @@ async function loadWorkerAuthorizations() {
     renderWorkerAuthorizations(data.authorizations ?? []);
   } catch (error) {
     renderWorkerAuthorizations([]);
+  }
+}
+
+// §9A flag review queue (Phase 2a.11). Operator sees flag reports the
+// citizen filed via /shell/, can resolve / dismiss with a reason, and the
+// audit ledger records the resolution. Three open high-severity flags
+// against an actor auto-block their sensitive actions via L4 policy;
+// resolving them unwinds the block.
+function flagSeverityClass(severity) {
+  if (severity === 'high') return 'bad';
+  if (severity === 'medium') return 'warn';
+  return 'good';
+}
+
+function flagStatusClass(status) {
+  if (status === 'pending') return 'warn';
+  if (status === 'under_review') return 'warn';
+  if (status === 'resolved') return 'good';
+  if (status === 'dismissed') return '';
+  return '';
+}
+
+function renderFlagReports(flags) {
+  state.flagReports = flags;
+  $('flagReportsCountLabel').textContent =
+    flags.length === 1 ? '1 flag' : `${flags.length} flags`;
+  if (flags.length === 0) {
+    $('flagReportsTable').innerHTML =
+      '<tr><td colspan="9">No flags match this filter. The §9A safeguard escalation surface is quiet.</td></tr>';
+    return;
+  }
+
+  // Open flags first, by severity (high → medium → low), then newest first.
+  const severityWeight = { high: 3, medium: 2, low: 1 };
+  const statusWeight = { pending: 4, under_review: 3, resolved: 2, dismissed: 1 };
+  const sorted = flags.slice().sort((left, right) => {
+    const sd = (statusWeight[right.status] ?? 0) - (statusWeight[left.status] ?? 0);
+    if (sd !== 0) return sd;
+    const sev = (severityWeight[right.severity] ?? 0) - (severityWeight[left.severity] ?? 0);
+    if (sev !== 0) return sev;
+    return String(right.reportedAt).localeCompare(String(left.reportedAt));
+  });
+
+  $('flagReportsTable').innerHTML = sorted
+    .map((flag) => {
+      const isOpen = flag.status === 'pending' || flag.status === 'under_review';
+      const actionButtons = isOpen
+        ? `
+          <button class="row-action" type="button" data-flag-resolve="${escapeHtml(flag.flagId)}" data-resolution="resolved">Resolve</button>
+          <button class="row-action" type="button" data-flag-resolve="${escapeHtml(flag.flagId)}" data-resolution="dismissed">Dismiss</button>
+        `
+        : `<span class="row-action-meta">${escapeHtml(flag.review?.resolvedBy ?? '--')}</span>`;
+      const summaryText = flag.summary ?? '';
+      return `
+        <tr>
+          <td class="mono" title="${escapeHtml(flag.flagId)}">${escapeHtml(shortId(flag.flagId))}</td>
+          <td class="mono" title="${escapeHtml(flag.subjectActorId)}">${escapeHtml(shortId(flag.subjectActorId))}</td>
+          <td class="mono" title="${escapeHtml(flag.reporterId)}">${escapeHtml(shortId(flag.reporterId))}</td>
+          <td>${escapeHtml(flag.category)}</td>
+          <td><span class="tag ${flagSeverityClass(flag.severity)}">${escapeHtml(flag.severity)}</span></td>
+          <td title="${escapeHtml(summaryText)}">${escapeHtml(summaryText.length > 60 ? summaryText.slice(0, 60) + '…' : summaryText)}</td>
+          <td><span class="tag ${flagStatusClass(flag.status)}">${escapeHtml(flag.status)}</span></td>
+          <td>${flag.reportedAt ? new Date(flag.reportedAt).toLocaleString() : '--'}</td>
+          <td class="row-actions">${actionButtons}</td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+async function loadFlagReports() {
+  try {
+    const statusFilter = $('flagStatusFilter').value;
+    let url = '/api/flags';
+    if (statusFilter && statusFilter !== 'open') {
+      url += `?status=${encodeURIComponent(statusFilter)}`;
+    }
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    let flags = data.flags ?? [];
+    if (statusFilter === 'open') {
+      flags = flags.filter((flag) => flag.status === 'pending' || flag.status === 'under_review');
+    }
+    renderFlagReports(flags);
+  } catch (error) {
+    renderFlagReports([]);
+  }
+}
+
+async function resolveFlagReport(flagId, resolution) {
+  const reason = window.prompt(
+    resolution === 'resolved'
+      ? 'Resolution reason — what was done? (e.g., "NGO mediation completed, contractor released wages")'
+      : 'Dismissal reason — why is this not actionable? (e.g., "duplicate of earlier report")'
+  );
+  if (!reason || reason.trim().length < 3) {
+    return;
+  }
+  const resolvedBy = window.prompt(
+    'Reviewer identifier (operator id, NGO, etc.)',
+    'bos:operator:console'
+  );
+  if (!resolvedBy) return;
+
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/flags/${encodeURIComponent(flagId)}/resolve`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: resolution, reason: reason.trim(), resolvedBy: resolvedBy.trim() })
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    $('decisionOutput').textContent = JSON.stringify(
+      {
+        flagId,
+        status: data.flag?.status,
+        resolvedBy: data.flag?.review?.resolvedBy,
+        reason: data.flag?.review?.reason,
+        threshold: 'Subject\'s §9A auto-block recomputes on the next orchestration.'
+      },
+      null,
+      2
+    );
+    await loadFlagReports();
+  } catch (error) {
+    $('decisionOutput').textContent = error.message;
+    setApiStatus(false, 'Flag resolve failed');
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1466,5 +1601,15 @@ $('workerAuthTable').addEventListener('click', (event) => {
   if (!verifyButton || verifyButton.disabled) return;
   verifyWorkerAuth(verifyButton.dataset.workerAuthVerify);
 });
+
+$('flagReportsTable').addEventListener('click', (event) => {
+  const resolveButton = event.target.closest('[data-flag-resolve]');
+  if (!resolveButton || resolveButton.disabled) return;
+  const resolution = resolveButton.dataset.resolution ?? 'resolved';
+  resolveFlagReport(resolveButton.dataset.flagResolve, resolution);
+});
+
+$('flagStatusFilter').addEventListener('change', loadFlagReports);
+$('refreshFlagsButton').addEventListener('click', loadFlagReports);
 
 loadDashboard();
