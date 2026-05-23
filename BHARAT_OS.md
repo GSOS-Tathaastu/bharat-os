@@ -2138,6 +2138,9 @@ Closed in Phase 2a.17 (ADR 0066):
 Closed in Phase 2a.18 (ADR 0067):
 1. ✅ **§9C vignette coverage — `trust_attestation` + `daily_brief`** — closes the §9C user-facing gap (16 / 18 → 18 / 18). Two new action types, tools (`trust_passport_attestation`, `daily_brief_compose`), skills, orchestration templates, vernacular aliases across all six languages + English (en-IN / hi-IN / hi-Latn-IN / mr-IN / bho-IN / ta-IN / bn-IN), and shell rendering. Trust attestation = §13A #7 Trust-as-a-service: signed time-bound envelope with band-or-boolean selective disclosure (raw PII never exposed, `shareDays ∈ [1, 90]`, verifier pays). Daily brief = §9C vignette 16b: on-device only (`runtime: 'on_device_only'`, `networkLegs: 0`, `horizonHours ∈ [1, 168]`), citizen-facing with no revenue line. 220 / 220 tests (+10 new). SW cache to v14.
 
+Closed in Phase 2a.19 (ADR 0068):
+1. ✅ **Daily brief on-device composer** — `src/phase1/daily-brief.mjs` with `gatherDailyBriefSignals` (reads orchestrations / mesh events / expiring consents / open §9A flags from the active profile's records, horizon-bounded) + `renderDailyBrief` (locale-aware template renderer producing vernacular text in en-IN / hi-IN / hi-Latn-IN / mr-IN / bho-IN / ta-IN / bn-IN with greeting / mesh / recent / consents / §9A-flag sections + a §7e on-device footer in every locale). Orchestration API auto-gathers signals for `daily_brief` requests and threads them via `metadata.signals`; tool adapter embeds the rendered brief on the receipt with `renderer: 'template_v0'` + an explicit `rendererNote` that names the Tier 4 SLM swap. Shell renders the brief text in a `<pre class="daily-brief-body" lang="…">` block above the metadata grid. 228 / 228 tests (+8 new). SW cache to v15.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

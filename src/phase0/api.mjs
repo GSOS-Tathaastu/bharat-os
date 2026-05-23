@@ -72,6 +72,7 @@ import {
   recordSdp
 } from '../phase1/pairing-session.mjs';
 import { generateRecoveryPhrase } from '../phase1/device-pairing.mjs';
+import { gatherDailyBriefSignals } from '../phase1/daily-brief.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -755,7 +756,34 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           const consents = await store.listConsents();
           const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
           const flags = await store.listFlagReports();
-          const orchestration = orchestrateIntent(body, consents, {
+
+          // §9C vignette 16b — daily_brief needs the on-device signals
+          // gathered (recent activity, mesh earnings, expiring consents,
+          // open §9A flags) before the tool can render the brief. This
+          // is the server stand-in for the Phase 2b on-device gather
+          // step; the §15 binding (no PII leaves the user's profile
+          // boundary) is preserved because the signals only ever live
+          // inside the orchestration response back to the same client.
+          let augmentedBody = body;
+          if (body.actionType === 'daily_brief' && body.actorId) {
+            const horizonHours = Number(body.metadata?.horizonHours ?? 24);
+            const signals = await gatherDailyBriefSignals(store, body.actorId, {
+              horizonHours
+            }).catch(() => null);
+            const subjectIdentity = await store
+              .readIdentity(body.actorId)
+              .catch(() => null);
+            augmentedBody = {
+              ...body,
+              metadata: {
+                ...(body.metadata ?? {}),
+                signals,
+                subjectDisplayName: subjectIdentity?.displayName ?? null
+              }
+            };
+          }
+
+          const orchestration = orchestrateIntent(augmentedBody, consents, {
             execute: Boolean(body.execute),
             publicRecords,
             flags

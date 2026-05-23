@@ -144,6 +144,17 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.19 **daily brief on-device composer** — `src/phase1/daily-brief.mjs`
+  gathers structured signals (recent orchestrations / mesh contribution
+  events / expiring consents / open §9A flags) horizon-bounded, and a
+  locale-aware template renderer (en-IN / hi-IN / hi-Latn-IN / mr-IN /
+  bho-IN / ta-IN / bn-IN) emits vernacular brief text. The orchestration
+  API auto-threads signals into `metadata.signals` for `daily_brief`
+  requests; the tool adapter embeds the rendered brief on the receipt
+  with `renderer: 'template_v0'` and an explicit `rendererNote` that
+  names the Tier 4 SLM swap. Shell renders the brief body in a
+  `<pre class="daily-brief-body">` block. 228/228 tests (+8 new).
+  SW cache to v15. ADR 0068.
 - Phase 2a.18 **§9C vignette coverage: trust attestation + daily brief**
   — two new action types close the §9C user-facing gap from 16/18 to
   18/18. `trust_passport_attestation` (§9C #15, §13A #7

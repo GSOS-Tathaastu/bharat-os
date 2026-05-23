@@ -1,6 +1,7 @@
 import { sha256Hex, stableStringify } from '../phase0/core.mjs';
 import { createAbhaStructuredUploadReceipt } from './health-document.mjs';
 import { evaluateDecision } from './policy.mjs';
+import { renderDailyBrief } from './daily-brief.mjs';
 
 export const TOOL_PROTOCOL_VERSION = 'bos.phase1.tools.v0';
 
@@ -615,8 +616,11 @@ function trustPassportAttestation(request) {
 
 // §9C vignette 16b — Priya's morning brief. No network leg; the
 // brief is composed by the §7e router on-device, reading from
-// memory + activity + mesh-earnings. The tool returns the brief
-// metadata only; the actual text is rendered by the shell.
+// memory + activity + mesh-earnings. Phase 2a.19 wires the actual
+// template-rendered text in addition to the envelope metadata.
+// The orchestration API gathers `metadata.signals` from the local
+// store before calling the tool, and the renderer produces a short
+// vernacular brief in the user's locale.
 function dailyBriefCompose(request) {
   const metadata = request.metadata ?? {};
   const horizonHours = Math.min(Math.max(Number(metadata.horizonHours ?? 24), 1), 168);
@@ -624,6 +628,26 @@ function dailyBriefCompose(request) {
     ? metadata.sections
     : ['calendar', 'mesh_earnings', 'reminders', 'unread'];
   const now = nowIso();
+  const locale = metadata.locale ?? request.metadata?.detectedLocale ?? 'en-IN';
+  const displayName = metadata.subjectDisplayName ?? null;
+
+  let brief = null;
+  if (metadata.signals) {
+    try {
+      brief = renderDailyBrief({
+        signals: metadata.signals,
+        locale,
+        displayName
+      });
+    } catch (error) {
+      brief = {
+        renderer: 'failed',
+        error: error.message,
+        text: null
+      };
+    }
+  }
+
   return {
     toolId: 'daily_brief_compose',
     status: 'brief_composed',
@@ -639,6 +663,7 @@ function dailyBriefCompose(request) {
     horizonHours,
     sections,
     issuedAt: now,
+    brief,
     rawPiiReturned: false,
     revenueLine: 'none — citizen-facing (§15 binding)'
   };
