@@ -132,6 +132,26 @@ export const VERNACULAR_INTENT_ALIASES = [
       /\b(cab|taxi|gaadi|hotel|kamra|ticket|khana|ration|kirana|book\s*kar(o|do|de)|mangwa(o|do|de))\b/i
     ]
   },
+  {
+    languageId: 'hi',
+    actionType: 'trust_attestation',
+    label: 'Hindi trust attestation intent',
+    hints: ['attestation', 'verification', 'landlord', 'tenant', 'reference'],
+    patterns: [
+      /(प्रमाण\s*पत्र|विश्वास|सत्यापन|किरायेदार|मकान\s*मालिक|पासपोर्ट|अटेस्टेशन)/,
+      /\b(attestation|verify\s*me|landlord|tenant|trust\s*passport|reference\s*letter|kiraayedaar|makaan\s*maalik)\b/i
+    ]
+  },
+  {
+    languageId: 'hi',
+    actionType: 'daily_brief',
+    label: 'Hindi daily brief intent',
+    hints: ['brief', 'morning', 'today', 'summary', 'agenda'],
+    patterns: [
+      /(आज\s*का|आज|सुबह\s*का|ब्रीफ|सारांश|एजेंडा)/,
+      /\b(aaj\s*ka|aaj|subah\s*ka|brief|saaransh|summary|agenda|update\s*do)\b/i
+    ]
+  },
 
   // ─── Marathi ────────────────────────────────────────────────────────────
   {
@@ -192,6 +212,26 @@ export const VERNACULAR_INTENT_ALIASES = [
     patterns: [
       /(टॅक्सी|कॅब|गाडी|हॉटेल|खोली|तिकीट|जेवण|किराणा|बुक)/,
       /\b(taxi|cab|gaadi|hotel|kholi|tiket|jevan|kirana|book\s*kar)\b/i
+    ]
+  },
+  {
+    languageId: 'mr',
+    actionType: 'trust_attestation',
+    label: 'Marathi trust attestation intent',
+    hints: ['attestation', 'landlord', 'tenant', 'verification'],
+    patterns: [
+      /(विश्वास|प्रमाणपत्र|मकान\s*मालक|भाडेकरू|पडताळणी)/,
+      /\b(vishwas|pramanpatra|makan\s*malak|bhadekru|attestation|verification)\b/i
+    ]
+  },
+  {
+    languageId: 'mr',
+    actionType: 'daily_brief',
+    label: 'Marathi daily brief intent',
+    hints: ['brief', 'today', 'morning', 'summary'],
+    patterns: [
+      /(आजचा|आज|सकाळचा|संक्षेप|ब्रीफ)/,
+      /\b(aajcha|aaj|sakaalcha|sankshep|brief)\b/i
     ]
   },
 
@@ -256,6 +296,26 @@ export const VERNACULAR_INTENT_ALIASES = [
       /\b(taxi|gaadi|hotel|tikat|khana|book\s*kara)\b/i
     ]
   },
+  {
+    languageId: 'bho',
+    actionType: 'trust_attestation',
+    label: 'Bhojpuri trust attestation intent',
+    hints: ['attestation', 'landlord', 'tenant', 'verification'],
+    patterns: [
+      /(भरोसा|प्रमाण-पत्र|मकान\s*मालिक|किरायेदार|जाँच)/,
+      /\b(bharosa|pramaan|makan\s*malik|kirayedaar|attestation)\b/i
+    ]
+  },
+  {
+    languageId: 'bho',
+    actionType: 'daily_brief',
+    label: 'Bhojpuri daily brief intent',
+    hints: ['brief', 'today', 'morning', 'summary'],
+    patterns: [
+      /(आज\s*के|आज|सबेरे|सुबह|ब्रीफ|सार)/,
+      /\b(aaj\s*ke|aaj|sabere|subah|brief|saar)\b/i
+    ]
+  },
 
   // ─── Tamil ──────────────────────────────────────────────────────────────
   {
@@ -316,6 +376,26 @@ export const VERNACULAR_INTENT_ALIASES = [
     patterns: [
       /(டாக்ஸி|கேப்|வண்டி|ஹோட்டல்|அறை|டிக்கெட்|உணவு|புக்)/,
       /\b(taxi|cab|vandi|hotel|arai|ticket|unavu|book\s*pannu)\b/i
+    ]
+  },
+  {
+    languageId: 'ta',
+    actionType: 'trust_attestation',
+    label: 'Tamil trust attestation intent',
+    hints: ['attestation', 'landlord', 'tenant', 'verification', 'trust'],
+    patterns: [
+      /(நம்பிக்கை|சான்றிதழ்|வீட்டு\s*உரிமையாளர்|குடியிருப்பவர்|சரிபார்ப்பு)/,
+      /\b(nambikkai|saandridhal|veetu\s*urimaiyalar|veriffication|trust\s*passport)\b/i
+    ]
+  },
+  {
+    languageId: 'ta',
+    actionType: 'daily_brief',
+    label: 'Tamil daily brief intent',
+    hints: ['brief', 'today', 'morning', 'summary'],
+    patterns: [
+      /(இன்றைய|இன்று|காலை|சுருக்கம்|ப்ரீஃப்)/,
+      /\b(indraiya|indru|kaalai|surukkam|brief|today\s*summary)\b/i
     ]
   },
 
@@ -379,10 +459,32 @@ export const VERNACULAR_INTENT_ALIASES = [
       /(ট্যাক্সি|গাড়ি|হোটেল|ঘর|টিকিট|খাবার|বুক)/,
       /\b(taxi|cab|gari|hotel|ghor|tikit|khabar|book\s*koro)\b/i
     ]
+  },
+  {
+    languageId: 'bn',
+    actionType: 'trust_attestation',
+    label: 'Bengali trust attestation intent',
+    hints: ['attestation', 'landlord', 'verification', 'tenant'],
+    patterns: [
+      /(বিশ্বাস|সনদ|বাড়িওয়ালা|ভাড়াটে|যাচাই|প্রমাণপত্র)/,
+      /\b(bishwas|sanad|bariwala|bhadate|jachai|attestation|verification)\b/i
+    ]
+  },
+  {
+    languageId: 'bn',
+    actionType: 'daily_brief',
+    label: 'Bengali daily brief intent',
+    hints: ['brief', 'today', 'morning', 'summary'],
+    patterns: [
+      /(আজকের|আজ|সকাল|সংক্ষেপ|ব্রিফ)/,
+      /\b(aajker|aaj|sokal|sankshep|brief|today\s*summary)\b/i
+    ]
   }
 ];
 
 const INTENT_PATTERNS = [
+  { actionType: 'daily_brief', pattern: /\b(brief|briefing|summary|today|morning|update me|catch\s*up|recap)\b/i },
+  { actionType: 'trust_attestation', pattern: /\b(attest\w*|verify(ing)? me|landlord|tenant|rental|verification|trust\s*passport|reference\s*letter)\b/i },
   { actionType: 'health_record_read', pattern: /\b(health|abha|diabetes|medical|record)\b/i },
   { actionType: 'labor_match_post', pattern: /\b(labou?r\w*|worker\w*|job|wage|escrow|brick)\b/i },
   { actionType: 'scheme_delivery', pattern: /\b(scheme|benefit|subsidy|eligib|ration|dbt)\b/i },
@@ -568,6 +670,64 @@ export const VERNACULAR_RESPONSES = {
       'bho-IN': 'बुकिंग पक्का हो गइल।',
       'ta-IN': 'பதிவு உறுதி செய்யப்பட்டது.',
       'bn-IN': 'বুকিং নিশ্চিত হয়েছে।'
+    }
+  },
+  trust_attestation: {
+    planned: {
+      'en-IN': 'Trust attestation request is ready — selective disclosure only.',
+      'hi-IN': 'विश्वास प्रमाण-पत्र तैयार है — चुनिंदा जानकारी ही साझा होगी।',
+      'hi-Latn-IN': 'Trust attestation taiyar hai — sirf chuninda jaankari share hogi.',
+      'mr-IN': 'विश्वास प्रमाणपत्र तयार आहे — फक्त निवडक माहिती दिली जाईल.',
+      'bho-IN': 'विश्वास प्रमाण-पत्र तइयार बा — चुनल जानकारी ही साझा होई।',
+      'ta-IN': 'நம்பிக்கை சான்றிதழ் தயார் — தேர்ந்தெடுக்கப்பட்ட தகவல்கள் மட்டுமே.',
+      'bn-IN': 'বিশ্বাস সনদ প্রস্তুত — বাছাই করা তথ্য শেয়ার করা হবে।'
+    },
+    blocked: {
+      'en-IN': 'Trust attestation blocked — consent required.',
+      'hi-IN': 'प्रमाण-पत्र के लिए सहमति आवश्यक है।',
+      'hi-Latn-IN': 'Attestation ke liye consent zaroori hai.',
+      'mr-IN': 'प्रमाणपत्रासाठी संमती आवश्यक आहे.',
+      'bho-IN': 'प्रमाण-पत्र खातिर सहमति चाहीं।',
+      'ta-IN': 'சான்றிதழுக்கு ஒப்புதல் தேவை.',
+      'bn-IN': 'সনদের জন্য সম্মতি প্রয়োজন।'
+    },
+    completed: {
+      'en-IN': 'Attestation minted — verifier can confirm against your public key.',
+      'hi-IN': 'प्रमाण-पत्र जारी हो गया — सत्यापनकर्ता आपकी पब्लिक की से जांच सकते हैं।',
+      'hi-Latn-IN': 'Attestation jaari ho gayi — verifier public key se verify kar sakte hain.',
+      'mr-IN': 'प्रमाणपत्र जारी झाले — पडताळणीकर्ता तुमच्या पब्लिक की वरून तपासू शकतात.',
+      'bho-IN': 'प्रमाण-पत्र जारी हो गइल — सत्यापनकर्ता राउर पब्लिक की से जाँच सकेला।',
+      'ta-IN': 'சான்றிதழ் வழங்கப்பட்டது — சரிபார்ப்பாளர் உங்கள் பொது விசையில் சரிபார்க்கலாம்.',
+      'bn-IN': 'সনদ ইস্যু হয়েছে — যাচাইকর্তা আপনার পাবলিক কী দিয়ে যাচাই করতে পারেন।'
+    }
+  },
+  daily_brief: {
+    planned: {
+      'en-IN': 'Composing your brief on-device — no data leaves your phone.',
+      'hi-IN': 'आपका ब्रीफ आपके फोन पर बन रहा है — कोई डेटा बाहर नहीं जाएगा।',
+      'hi-Latn-IN': 'Aapka brief device par taiyar ho raha hai — koi data bahar nahi jayega.',
+      'mr-IN': 'तुमचा संक्षेप तुमच्या फोनवरच तयार होतो आहे — काहीही बाहेर जात नाही.',
+      'bho-IN': 'राउर ब्रीफ राउर फोन पर बन रहल बा — कुछो बाहर ना जाई।',
+      'ta-IN': 'உங்கள் சுருக்கம் தொலைபேசியில் தயாராகிறது — எதுவும் வெளியே போகாது.',
+      'bn-IN': 'আপনার সংক্ষেপ ফোনেই তৈরি হচ্ছে — কোনো তথ্য বাইরে যাবে না।'
+    },
+    blocked: {
+      'en-IN': 'Daily brief blocked — memory consent required.',
+      'hi-IN': 'दैनिक ब्रीफ के लिए मेमोरी सहमति आवश्यक है।',
+      'hi-Latn-IN': 'Daily brief ke liye memory consent zaroori hai.',
+      'mr-IN': 'दैनंदिन संक्षेपासाठी मेमरी संमती आवश्यक आहे.',
+      'bho-IN': 'दैनिक ब्रीफ खातिर मेमोरी सहमति चाहीं।',
+      'ta-IN': 'தினசரி சுருக்கத்திற்கு நினைவக ஒப்புதல் தேவை.',
+      'bn-IN': 'দৈনিক সংক্ষেপের জন্য মেমরি সম্মতি প্রয়োজন।'
+    },
+    completed: {
+      'en-IN': 'Your brief is ready — composed entirely on-device.',
+      'hi-IN': 'आपका ब्रीफ तैयार है — पूरी तरह आपके फोन पर बना।',
+      'hi-Latn-IN': 'Aapka brief taiyar hai — poori tarah device par bana.',
+      'mr-IN': 'तुमचा संक्षेप तयार आहे — संपूर्णपणे फोनवरच बनवलेला.',
+      'bho-IN': 'राउर ब्रीफ तइयार बा — पूरा तरह फोन पर बनल।',
+      'ta-IN': 'உங்கள் சுருக்கம் தயார் — முழுவதும் தொலைபேசியில் தயாராக்கப்பட்டது.',
+      'bn-IN': 'আপনার সংক্ষেপ প্রস্তুত — সম্পূর্ণভাবে ফোনেই তৈরি।'
     }
   }
 };

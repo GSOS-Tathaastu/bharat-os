@@ -14,56 +14,56 @@ const SUGGESTIONS_BY_LANG = {
     'मुझे ₹50,000 का छोटा कारोबारी लोन चाहिए',
     'ऑफिस से घर तक टैक्सी बुक करो',
     'मेरा HbA1c रिकॉर्ड दिखाओ',
-    'मुनार में दो रात का होटल बुक करो',
-    'मुझे सरकारी योजना का लाभ चाहिए',
+    'मुझे मकान मालिक के लिए विश्वास प्रमाण-पत्र चाहिए',
+    'आज का ब्रीफ सुनाओ',
     'कल रात बैंगलोर से हैदराबाद की ट्रेन बुक करो'
   ],
   'hi-Latn-IN': [
     'Mujhe ₹50,000 ka chhota karza chahiye',
     'Office se ghar tak cab book karo',
     'Mera health record dikhao',
-    'Munnar mein do raat ka hotel book karo',
-    'Mujhe sarkari yojana ke labh chahiye',
+    'Landlord ke liye trust attestation chahiye',
+    'Aaj ka brief sunao',
     'Bangalore se Hyderabad ki train book karo'
   ],
   'mr-IN': [
     'मला छोटा व्यवसाय कर्ज हवे',
     'ऑफिस ते घर टॅक्सी बुक कर',
     'माझा आरोग्य रेकॉर्ड दाखव',
-    'गोव्यात दोन रात्रींचे हॉटेल बुक कर',
-    'मला सरकारी योजना हवी',
+    'मला मकान मालकासाठी विश्वास प्रमाणपत्र हवे',
+    'आजचा संक्षेप सांग',
     'पुणे ते मुंबई ट्रेन बुक कर'
   ],
   'ta-IN': [
     'எனக்கு ₹50,000 சிறு வணிக கடன் வேண்டும்',
     'அலுவலகத்திலிருந்து வீட்டுக்கு டாக்ஸி புக் பண்ணு',
     'என் சர்க்கரை நோய் பதிவு காட்டு',
-    'ஊட்டியில் இரண்டு இரவு ஹோட்டல் புக் பண்ணு',
-    'எனக்கு அரசு திட்டம் வேண்டும்',
+    'வீட்டு உரிமையாளருக்கு நம்பிக்கை சான்றிதழ் வேண்டும்',
+    'இன்றைய சுருக்கம் சொல்',
     'பெங்களூரிலிருந்து சென்னை ரயில் புக் பண்ணு'
   ],
   'bn-IN': [
     'আমার ছোট ব্যবসার জন্য ৫০,০০০ টাকার ঋণ দরকার',
     'অফিস থেকে বাড়ি ট্যাক্সি বুক করো',
     'আমার স্বাস্থ্য রেকর্ড দেখাও',
-    'দার্জিলিং-এ দুই রাত হোটেল বুক করো',
-    'আমার সরকারি প্রকল্প দরকার',
+    'বাড়িওয়ালার জন্য বিশ্বাস সনদ দাও',
+    'আজকের সংক্ষেপ বলো',
     'কলকাতা থেকে দিল্লি ট্রেন বুক করো'
   ],
   'bho-IN': [
     'हमरा छोटा करजा चाहीं',
     'ऑफिस से घर ले टैक्सी बुक करा',
     'सेहत के रिकार्ड देखावा',
-    'दू रात के होटल बुक करा',
-    'हमरा सरकारी योजना चाहीं',
+    'मकान मालिक खातिर भरोसा के प्रमाण-पत्र दा',
+    'आज के ब्रीफ सुनावा',
     'पटना से दिल्ली के ट्रेन बुक करा'
   ],
   'en-IN': [
     'I want a ₹50,000 small business loan',
     'Book a cab from office to home',
     'Show me my health record',
-    'Book a hotel in Munnar for two nights',
-    'I want to apply for a government scheme',
+    'Generate a trust attestation for my landlord',
+    'Give me my morning brief',
     'Book a Bangalore to Hyderabad train for tomorrow night'
   ]
 };
@@ -84,7 +84,9 @@ const ACTION_ICON_BY_TYPE = {
   health_record_read: '🩺',
   labor_match_post: '🛠️',
   service_booking: '🚖',
-  mesh_storage: '💾'
+  mesh_storage: '💾',
+  trust_attestation: '🛡️',
+  daily_brief: '📋'
 };
 
 const ACTION_LABEL_BY_TYPE = {
@@ -93,7 +95,9 @@ const ACTION_LABEL_BY_TYPE = {
   health_record_read: 'Health record',
   labor_match_post: 'Labor matching',
   service_booking: 'Service booking',
-  mesh_storage: 'Mesh storage'
+  mesh_storage: 'Mesh storage',
+  trust_attestation: 'Trust attestation',
+  daily_brief: 'Daily brief'
 };
 
 // localStorage keys for the device model. A real Bharat OS device knows
@@ -713,6 +717,45 @@ function renderActionDetail(actionType, receipt, orchestration) {
         <dt>Placement</dt><dd>${escapeHtml(receipt.placementPolicy ?? '--')}</dd>
         <dt>Payload</dt><dd>${receipt.payloadIncluded === false ? 'Pointer-not-payload (§15)' : '--'}</dd>
       </dl>
+    `;
+  }
+  if (actionType === 'trust_attestation') {
+    const claims = Array.isArray(receipt.claims) ? receipt.claims : [];
+    const expiresAt = receipt.expiresAt
+      ? new Date(receipt.expiresAt).toLocaleString()
+      : '--';
+    return `
+      <dl class="result-detail-grid">
+        <dt>Verifier</dt><dd>${escapeHtml(receipt.verifierName ?? '--')}</dd>
+        <dt>Purpose</dt><dd>${escapeHtml(receipt.purpose ?? '--')}</dd>
+        <dt>Share window</dt><dd>${receipt.shareDays ?? '--'} days · expires ${escapeHtml(expiresAt)}</dd>
+        <dt>Attestation</dt><dd><code>${escapeHtml(shortId(receipt.attestationId ?? ''))}</code></dd>
+        <dt>Raw PII</dt><dd>${receipt.rawPiiReturned === false ? 'Not exposed — selective disclosure (§15)' : '--'}</dd>
+      </dl>
+      <div class="attestation-claims">
+        <div class="attestation-claims-label">Disclosed claims (bands or booleans only):</div>
+        <ul class="attestation-claims-list">
+          ${claims.map((c) => `<li><strong>${escapeHtml(c.claim)}</strong>: ${escapeHtml(String(c.value))}</li>`).join('') || '<li>none</li>'}
+        </ul>
+      </div>
+    `;
+  }
+  if (actionType === 'daily_brief') {
+    const sections = Array.isArray(receipt.sections) ? receipt.sections : [];
+    return `
+      <dl class="result-detail-grid">
+        <dt>Runtime</dt><dd>${escapeHtml(receipt.runtime ?? '--')}</dd>
+        <dt>Network legs</dt><dd>${receipt.networkLegs ?? '--'} (composed on-device)</dd>
+        <dt>Horizon</dt><dd>${receipt.horizonHours ?? '--'} hours</dd>
+        <dt>Sections</dt><dd>${sections.map((s) => escapeHtml(s)).join(' · ') || '--'}</dd>
+        <dt>Brief ref</dt><dd><code>${escapeHtml(shortId(receipt.briefId ?? ''))}</code></dd>
+      </dl>
+      <p class="diagnostics-note" style="margin: 8px 0 0;">
+        Composed under §7e on-device routing. The brief reads your local
+        calendar / mesh-earnings / ABHA reminders and never leaves the
+        device. The vernacular text would be generated by the Tier 4 SLM
+        once installed; today the shell shows the brief envelope.
+      </p>
     `;
   }
   return `<pre class="result-detail-grid">${escapeHtml(JSON.stringify(receipt, null, 2))}</pre>`;

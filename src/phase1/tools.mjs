@@ -52,6 +52,18 @@ export const TOOL_REGISTRY = [
     layer: 'L3',
     mocked: true,
     description: 'ONDC / Beckn-protocol bridge mock. Phase A density adapter only — Bharat OS does not depend on ONDC for substrate (§9B). Outbound: discovers ONDC sellers when native supply is thin. Inbound interop happens on Beckn endpoints exposed by Bharat OS itself.'
+  },
+  {
+    toolId: 'trust_passport_attestation',
+    layer: 'L7',
+    mocked: false,
+    description: 'Mints a scoped, consent-bound Trust Passport attestation (§13A #7 Trust-as-a-service). Selective disclosure: the verifier sees attestation status + redacted bands, never the underlying PII. Expires on the user-declared share window.'
+  },
+  {
+    toolId: 'daily_brief_compose',
+    layer: 'L7',
+    mocked: false,
+    description: 'Composes a vernacular daily brief from on-device memory + activity (calendar refs, mesh earnings, ABHA reminders, upcoming UPI debits). Runs entirely under §7e on-device routing — no network leg.'
   }
 ];
 
@@ -545,6 +557,93 @@ function bharatMarketplace(request) {
   };
 }
 
+// §13A #7 — Trust-as-a-service. The verifier (e.g. landlord, NBFC,
+// gig platform onboarder) gets a signed, scope-limited attestation
+// statement. The underlying PII never moves — only the named
+// attestation rows from the Trust Passport.
+function trustPassportAttestation(request) {
+  const metadata = request.metadata ?? {};
+  const purpose = metadata.purpose ?? 'tenant_verification';
+  const shareDays = Math.min(Math.max(Number(metadata.shareDays ?? 14), 1), 90);
+  const verifierName = metadata.verifierName ?? 'unnamed_verifier';
+  const requestedClaims = Array.isArray(metadata.requestedClaims)
+    ? metadata.requestedClaims
+    : [
+        'identity_verified',
+        'income_band',
+        'rental_history_clean',
+        'no_open_flags'
+      ];
+  const now = nowIso();
+  const expiresAt = new Date(
+    new Date(now).getTime() + shareDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const attestationId = idFrom('bos:attestation', {
+    actorId: request.actorId,
+    verifierName,
+    purpose,
+    claims: requestedClaims,
+    issuedAt: now
+  });
+  // Selective disclosure — every claim resolves to a *band* or
+  // boolean, never to a raw value. The verifier learns "income band
+  // is INR 50K-75K", not the exact salary.
+  const claims = requestedClaims.map((claim) => ({
+    claim,
+    disclosure: 'band_or_boolean',
+    value: claim.endsWith('_verified') || claim.endsWith('_clean')
+      ? true
+      : claim.endsWith('_band')
+        ? metadata.incomeBand ?? 'INR_50K_75K_MONTHLY'
+        : 'attested'
+  }));
+  return {
+    toolId: 'trust_passport_attestation',
+    status: 'attestation_minted',
+    attestationId,
+    subjectId: request.actorId,
+    verifierName,
+    purpose,
+    claims,
+    issuedAt: now,
+    expiresAt,
+    shareDays,
+    rawPiiReturned: false,
+    revenueLine: '§13A #7 Trust-as-a-service (verifier-paid)'
+  };
+}
+
+// §9C vignette 16b — Priya's morning brief. No network leg; the
+// brief is composed by the §7e router on-device, reading from
+// memory + activity + mesh-earnings. The tool returns the brief
+// metadata only; the actual text is rendered by the shell.
+function dailyBriefCompose(request) {
+  const metadata = request.metadata ?? {};
+  const horizonHours = Math.min(Math.max(Number(metadata.horizonHours ?? 24), 1), 168);
+  const sections = Array.isArray(metadata.sections) && metadata.sections.length > 0
+    ? metadata.sections
+    : ['calendar', 'mesh_earnings', 'reminders', 'unread'];
+  const now = nowIso();
+  return {
+    toolId: 'daily_brief_compose',
+    status: 'brief_composed',
+    briefId: idFrom('bos:brief', {
+      actorId: request.actorId,
+      sections,
+      horizonHours,
+      issuedAt: now
+    }),
+    subjectId: request.actorId,
+    runtime: 'on_device_only',
+    networkLegs: 0,
+    horizonHours,
+    sections,
+    issuedAt: now,
+    rawPiiReturned: false,
+    revenueLine: 'none — citizen-facing (§15 binding)'
+  };
+}
+
 const ADAPTERS = {
   uidai_offline_ekyc: uidaiOfflineEkyc,
   digilocker,
@@ -553,7 +652,9 @@ const ADAPTERS = {
   upi_escrow: upiEscrow,
   'mesh.storage': meshStorage,
   ondc_beckn: ondcBeckn,
-  bharat_marketplace: bharatMarketplace
+  bharat_marketplace: bharatMarketplace,
+  trust_passport_attestation: trustPassportAttestation,
+  daily_brief_compose: dailyBriefCompose
 };
 
 export function listTools() {

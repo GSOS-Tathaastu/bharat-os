@@ -101,6 +101,26 @@ const SKILL_DEFINITIONS = [
     summary: 'Outbound bridge to the ONDC / Beckn open commerce network. Used by the native marketplace as one discovery source during Phase A density bootstrap. Not the substrate (§9B).',
     requiredScopes: ['service.book', 'consent.record', 'upi.settle'],
     dataExposure: 'booking_reference_only'
+  },
+  {
+    skillId: 'bos:skill:trust-passport-attestation',
+    name: 'Trust Passport Attestation',
+    category: 'trust',
+    actionType: 'trust_attestation',
+    toolId: 'trust_passport_attestation',
+    summary: 'Mints a scoped, time-bound Trust Passport attestation from the user\'s consented evidence (Aadhaar status band, income band, rental/payment history clean flag, open §9A flags). Selective disclosure only — verifier sees bands or booleans, never raw values. §13A #7 Trust-as-a-service.',
+    requiredScopes: ['trust.attest', 'consent.record'],
+    dataExposure: 'attestation_bands_only'
+  },
+  {
+    skillId: 'bos:skill:daily-brief-compose',
+    name: 'On-device Daily Brief',
+    category: 'agent',
+    actionType: 'daily_brief',
+    toolId: 'daily_brief_compose',
+    summary: 'Composes a vernacular daily brief from local memory + activity references. Runs entirely under §7e on-device routing — zero network legs. No revenue line (§15 citizen-facing).',
+    requiredScopes: ['memory.read', 'consent.record'],
+    dataExposure: 'on_device_summary_only'
   }
 ];
 

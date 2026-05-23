@@ -2135,6 +2135,9 @@ Closed in Phase 2a.16 (ADR 0065):
 Closed in Phase 2a.17 (ADR 0066):
 1. ✅ **§7c encrypted vault transfer** — `src/phase1/vault-transfer.mjs` canonical artifact with `createVaultBundle` / `decryptVaultBundle` (AES-GCM-256 under PBKDF2-HMAC-SHA-256(phrase, 200k iters, 16-byte random salt)). New `/api/identities/:id/recovery-phrase` + `/api/identities/:id/vault-snapshot` endpoints; the snapshot endpoint carries an explicit demo-only `warning` (production Phase 2b keeps the privateKeyPem in the device hardware keystore). Pairing bundle bumped `v0 → v1` carrying both `publicIdentity` + `encryptedVault`; the recovery phrase never crosses the wire; receiver prompts the user with up to three attempts; wrong phrase fails via GCM auth-tag rejection. Module aliased at `/shell/vault-transfer.mjs` so the browser imports the same canonical file the tests cover (no duplication). Backward-compatible — older bundles without `encryptedVault` still claim as public-only. 210 / 210 tests (+9 new). SW cache to v13.
 
+Closed in Phase 2a.18 (ADR 0067):
+1. ✅ **§9C vignette coverage — `trust_attestation` + `daily_brief`** — closes the §9C user-facing gap (16 / 18 → 18 / 18). Two new action types, tools (`trust_passport_attestation`, `daily_brief_compose`), skills, orchestration templates, vernacular aliases across all six languages + English (en-IN / hi-IN / hi-Latn-IN / mr-IN / bho-IN / ta-IN / bn-IN), and shell rendering. Trust attestation = §13A #7 Trust-as-a-service: signed time-bound envelope with band-or-boolean selective disclosure (raw PII never exposed, `shareDays ∈ [1, 90]`, verifier pays). Daily brief = §9C vignette 16b: on-device only (`runtime: 'on_device_only'`, `networkLegs: 0`, `horizonHours ∈ [1, 168]`), citizen-facing with no revenue line. 220 / 220 tests (+10 new). SW cache to v14.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

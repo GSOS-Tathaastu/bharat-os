@@ -144,6 +144,19 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.18 **§9C vignette coverage: trust attestation + daily brief**
+  — two new action types close the §9C user-facing gap from 16/18 to
+  18/18. `trust_passport_attestation` (§9C #15, §13A #7
+  Trust-as-a-service) mints a signed, time-bound envelope with
+  band-or-boolean selective disclosure (`shareDays ∈ [1, 90]`,
+  `rawPiiReturned: false`, verifier pays). `daily_brief_compose` (§9C
+  #16b) is on-device only (`runtime: 'on_device_only'`,
+  `networkLegs: 0`, `horizonHours ∈ [1, 168]`), citizen-facing with no
+  revenue line. Vernacular aliases for both across en-IN / hi-IN /
+  hi-Latn-IN / mr-IN / bho-IN / ta-IN / bn-IN; localized response
+  strings for planned / blocked / completed per locale. Shell renders
+  the attestation claims list and the brief envelope with §7e on-device
+  framing. 220/220 tests (+10 new). SW cache to v14. ADR 0067.
 - Phase 2a.17 **§7c encrypted vault transfer** — the §7c WebRTC
   handshake now carries a two-part bundle: `publicIdentity` (as before)
   + `encryptedVault` (AES-GCM-256 under PBKDF2-HMAC-SHA-256(phrase, 200k

@@ -77,6 +77,41 @@ export const ORCHESTRATION_TEMPLATES = {
     identity: { aadhaarRequired: false, fallbackAvailable: true },
     plan: ['classify_payload', 'select_storage_policy', 'route_to_mesh', 'write_receipt']
   },
+  trust_attestation: {
+    // §9C vignette 15 — Sneha shares a Trust Passport attestation with a
+    // landlord. Selective disclosure only; the verifier sees bands and
+    // booleans, never the raw values. §13A #7 Trust-as-a-service.
+    label: 'Trust Passport attestation',
+    tool: 'trust_passport_attestation',
+    regulated: true,
+    scopes: ['trust.attest', 'consent.record'],
+    piiHandling: 'attestation_only',
+    identity: { aadhaarRequired: false, fallbackAvailable: true },
+    money: { amount: 0, currency: 'INR', limit: 0, workerPays: false, escrow: false },
+    plan: [
+      'parse_attestation_request',
+      'select_claims_for_disclosure',
+      'mint_signed_attestation',
+      'write_receipt'
+    ]
+  },
+  daily_brief: {
+    // §9C vignette 16b — Priya's morning brief, composed entirely
+    // on-device by the §7e router. No network leg, no revenue line
+    // (§15 citizen-facing binding).
+    label: 'On-device daily brief',
+    tool: 'daily_brief_compose',
+    regulated: false,
+    scopes: ['memory.read', 'consent.record'],
+    piiHandling: 'on_device_only',
+    identity: { aadhaarRequired: false, fallbackAvailable: true },
+    plan: [
+      'parse_brief_request',
+      'gather_local_signals',
+      'compose_on_device',
+      'write_receipt'
+    ]
+  },
   service_booking: {
     // §9B service brokering: the user's agent books a third-party service
     // through Bharat OS's own L6 marketplace. ONDC bridge is an internal
