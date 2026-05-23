@@ -1,3 +1,5 @@
+import * as ondeviceSlm from './ondevice-slm.mjs';
+
 // Bharat OS — vernacular shell prototype.
 // The user-facing surface. Voice-first or text. Picks a persona, sends
 // intent to the same /api/orchestrations the operator console uses.
@@ -461,13 +463,54 @@ async function sendIntent() {
   $('flowConfidence').textContent = '';
   $('resultSection').hidden = true;
 
+  // If the on-device SLM is loaded, run a real on-device intent
+  // classification first. Surface the top-action and confidence with the
+  // orchestration so the result card shows what the local model thought.
+  let onDeviceClassification = null;
+  if (slmState.enabled && ondeviceSlm.isReady()) {
+    try {
+      $('flowList').innerHTML =
+        '<li>L8 on-device SLM: classifying intent via multilingual MiniLM…</li>';
+      const result = await ondeviceSlm.classifyIntent(intent);
+      onDeviceClassification = {
+        topAction: result.top.action,
+        topSimilarity: Number(result.top.similarity.toFixed(4)),
+        scores: result.scores.map((score) => ({
+          action: score.action,
+          similarity: Number(score.similarity.toFixed(4))
+        })),
+        modelId: result.modelId,
+        runtime: result.runtime
+      };
+      slmState.lastClassification = onDeviceClassification;
+    } catch (error) {
+      console.warn('on-device SLM classification failed', error);
+    }
+  }
+
   try {
+    const payload = buildIntentPayload(intent);
+    if (onDeviceClassification) {
+      payload.metadata = {
+        ...payload.metadata,
+        onDeviceClassification
+      };
+      // If the local model is confident, honor its action choice. We
+      // require a meaningful margin over the runner-up so deterministic
+      // L7 still wins on ambiguous intents.
+      const top = onDeviceClassification.scores[0];
+      const second = onDeviceClassification.scores[1];
+      const margin = top && second ? top.similarity - second.similarity : 0;
+      if (top && top.similarity > 0.55 && margin > 0.04) {
+        payload.actionType = top.action;
+      }
+    }
     const data = await fetchJson('/api/orchestrations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(buildIntentPayload(intent))
+      body: JSON.stringify(payload)
     });
-    renderOrchestration(data.orchestration);
+    renderOrchestration(data.orchestration, { onDeviceClassification });
     await loadRecent();
   } catch (error) {
     $('flowDetected').textContent = 'Network error';
@@ -478,7 +521,7 @@ async function sendIntent() {
   }
 }
 
-function renderOrchestration(o) {
+function renderOrchestration(o, { onDeviceClassification = null } = {}) {
   if (!o) return;
   const intent = o.intent ?? {};
   const action = o.actionRequest ?? {};
@@ -487,6 +530,12 @@ function renderOrchestration(o) {
   $('flowDetected').textContent = `${ACTION_LABEL_BY_TYPE[action.actionType] ?? action.actionType} · ${detected} (${lang})`;
   $('flowConfidence').textContent = `confidence ${(Math.round(((intent.languageConfidence ?? 0) * 100)))}%`;
 
+  const slmRow = onDeviceClassification
+    ? `<li class="complete">
+         <span>L8 on-device SLM · ${escapeHtml(onDeviceClassification.topAction.replace(/_/g, ' '))} ${(onDeviceClassification.topSimilarity * 100).toFixed(0)}%</span>
+         <span class="flow-layer">${escapeHtml(onDeviceClassification.modelId.split('/').pop())} · ${escapeHtml(onDeviceClassification.runtime)}</span>
+       </li>`
+    : '';
   const planRows = (o.plan ?? [])
     .map((step) => {
       const cls = step.status === 'passed' || step.status === 'complete' || step.status === 'ready_or_executed' ? 'complete' :
@@ -499,7 +548,7 @@ function renderOrchestration(o) {
       `;
     })
     .join('');
-  $('flowList').innerHTML = planRows;
+  $('flowList').innerHTML = slmRow + planRows;
 
   // Result card
   const section = $('resultSection');
@@ -1323,7 +1372,22 @@ const DIAGNOSTICS = [
 function renderDiagnostics() {
   const list = $('diagnosticsList');
   if (!list) return;
-  list.innerHTML = DIAGNOSTICS.map((d) => {
+  const live = DIAGNOSTICS.map((d) => {
+    if (d.id === '2a.7') {
+      if (ondeviceSlm.isReady()) {
+        return {
+          ...d,
+          status: 'real',
+          detail: `Multilingual MiniLM L12 v2 loaded in-browser via transformers.js (WASM). Cosine-similarity intent classification across the six canonical action types. Cached after first download (~120 MB).`
+        };
+      }
+      if (ondeviceSlm.isLoading()) {
+        return { ...d, status: 'partial', detail: 'Loading the multilingual MiniLM model into browser cache (~120 MB)…' };
+      }
+    }
+    return d;
+  });
+  list.innerHTML = live.map((d) => {
     const cls = d.status === 'real' ? 'good' : d.status === 'placeholder' ? 'bad' : 'warn';
     const label = d.status === 'real' ? 'real' : d.status === 'real-client' ? 'real (client)' : d.status === 'partial' ? 'partial' : 'placeholder';
     return `
@@ -1341,6 +1405,105 @@ function renderDiagnostics() {
 renderDiagnostics();
 
 $('flagReportSubmit').addEventListener('click', submitFlagReport);
+
+// ─── On-device SLM intent classifier (Phase 2a.12) ────────────────────────
+// Lazy-loaded multilingual MiniLM embedding model via transformers.js.
+// One-tap warm-up; subsequent intents get a real on-device classification
+// in addition to the deterministic L8 vernacular module.
+
+const slmState = {
+  enabled: false,
+  lastClassification: null
+};
+
+function setSlmStatus(label, { progress, busy, ready, error } = {}) {
+  const button = $('slmLoadButton');
+  const labelEl = $('slmLoadLabel');
+  const progressEl = $('slmProgress');
+  const statusEl = $('slmStatus');
+
+  if (busy !== undefined) button.disabled = Boolean(busy);
+  if (label !== undefined) labelEl.textContent = label;
+  if (ready) button.classList.add('ready');
+  else button.classList.remove('ready');
+
+  if (progress !== undefined) {
+    progressEl.hidden = progress === null;
+    if (progress !== null) progressEl.value = Math.max(0, Math.min(100, progress));
+  }
+
+  if (error) {
+    statusEl.hidden = false;
+    statusEl.textContent = error;
+    statusEl.dataset.tone = 'bad';
+  } else if (ready) {
+    statusEl.hidden = false;
+    statusEl.textContent = 'Multilingual MiniLM ready on this device.';
+    statusEl.dataset.tone = 'good';
+  } else {
+    statusEl.hidden = true;
+  }
+}
+
+async function loadOnDeviceSlm() {
+  if (slmState.enabled) return;
+  setSlmStatus('Connecting to model registry…', { busy: true, progress: 0 });
+
+  try {
+    let lastFile = '';
+    await ondeviceSlm.warmUp((event) => {
+      if (event.status === 'progress' && event.file) {
+        const pct = event.total
+          ? Math.round((event.loaded / event.total) * 100)
+          : null;
+        if (event.file !== lastFile) {
+          lastFile = event.file;
+        }
+        setSlmStatus(`Downloading ${event.file} ${pct ?? '–'}%`, {
+          busy: true,
+          progress: pct ?? 0
+        });
+      } else if (event.status === 'ready' || event.status === 'done') {
+        setSlmStatus('Warming up action templates…', { busy: true, progress: 95 });
+      }
+    });
+    slmState.enabled = true;
+    setSlmStatus('🧠 On-device AI ready — cached for next load', {
+      busy: false,
+      progress: 100,
+      ready: true
+    });
+    renderDiagnostics();
+    // Tell the API our local model is ready so the on-device runtime
+    // metadata in subsequent orchestrations reflects reality.
+    try {
+      await fetch('/api/on-device/model-packs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          modelId: ondeviceSlm.SLM_CONFIG.modelId,
+          family: 'paraphrase-multilingual-MiniLM-L12-v2',
+          runtime: 'wasm_transformersjs',
+          bytes: ondeviceSlm.SLM_CONFIG.approxBytes,
+          capabilities: ['intent_planning'],
+          localeCoverage: ['hi-IN', 'mr-IN', 'bho-IN', 'ta-IN', 'bn-IN', 'en-IN'],
+          source: 'browser-cache'
+        })
+      });
+    } catch (_error) {
+      // Non-fatal — the model is still local and usable.
+    }
+  } catch (error) {
+    slmState.enabled = false;
+    setSlmStatus('Load on-device AI (≈120 MB, cached after)', {
+      busy: false,
+      progress: null,
+      error: `Could not load model: ${error.message}. The shell falls back to deterministic L8 — your intent still works.`
+    });
+  }
+}
+
+$('slmLoadButton').addEventListener('click', loadOnDeviceSlm);
 
 // App handoff fallback: if the deep link doesn't open the installed app
 // within a short window, navigate to the web fallback URL. This is a

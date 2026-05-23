@@ -59,6 +59,15 @@
         </div>
 
         <div class="suggestion-row" id="suggestionRow"></div>
+
+        <div class="slm-row" id="slmRow">
+          <button id="slmLoadButton" class="slm-load-button" type="button">
+            <span class="slm-icon" aria-hidden="true">🧠</span>
+            <span class="slm-label" id="slmLoadLabel">Load on-device AI (≈120 MB, cached after)</span>
+          </button>
+          <progress id="slmProgress" value="0" max="100" hidden></progress>
+          <span id="slmStatus" class="slm-status" hidden></span>
+        </div>
       </section>
 
       <section class="capture-card profile-auth-card" id="profileAuthSection">

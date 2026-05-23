@@ -225,6 +225,80 @@ body {
   gap: 6px;
 }
 
+.slm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.slm-load-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.slm-load-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.slm-load-button.ready {
+  background: rgba(46, 160, 67, 0.12);
+  border-color: var(--good);
+  color: var(--good);
+}
+
+.slm-load-button:disabled {
+  cursor: progress;
+  opacity: 0.8;
+}
+
+.slm-icon {
+  font-size: 18px;
+}
+
+.slm-label {
+  flex: 1;
+  font-weight: 600;
+}
+
+#slmProgress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+}
+
+#slmProgress::-webkit-progress-bar {
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+#slmProgress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.slm-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.slm-status[data-tone='good'] { color: var(--good); }
+.slm-status[data-tone='bad'] { color: var(--bad); }
+
 .chip {
   background: var(--surface);
   border: 1px solid var(--border);
