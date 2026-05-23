@@ -144,6 +144,20 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.17 **§7c encrypted vault transfer** — the §7c WebRTC
+  handshake now carries a two-part bundle: `publicIdentity` (as before)
+  + `encryptedVault` (AES-GCM-256 under PBKDF2-HMAC-SHA-256(phrase, 200k
+  iters, 16-byte random salt)). New `src/phase1/vault-transfer.mjs`
+  canonical artifact, aliased at `/shell/vault-transfer.mjs` so the
+  browser imports the same file the tests cover. The initiator shows
+  the 6-digit code **and** the 12-word recovery phrase; the receiver
+  prompts for the phrase (three attempts) and decrypts locally. The
+  recovery phrase never crosses the wire. New endpoints:
+  `GET /api/identities/:id/recovery-phrase`,
+  `GET /api/identities/:id/vault-snapshot` (with an explicit demo-only
+  warning — production keeps `privateKeyPem` in the device hardware
+  keystore in Phase 2b). 210/210 tests (+9 new). SW cache to v13.
+  ADR 0066.
 - Phase 2a.16 **demo readiness pass** — suggestion chips expanded to six
   per locale (loan / cab / health record / hotel / scheme / train) and
   every chip verified end-to-end to classify to a real action type; the

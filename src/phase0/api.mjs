@@ -71,6 +71,7 @@ import {
   lookupByClaimCode,
   recordSdp
 } from '../phase1/pairing-session.mjs';
+import { generateRecoveryPhrase } from '../phase1/device-pairing.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -464,6 +465,16 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       }
 
       if (request.method === 'GET' && url.pathname.startsWith('/shell/')) {
+        // §7c vault transfer module is shared with `src/phase1` (canonical
+        // artifact tested by node:test) — alias the shell-import path so we
+        // don't have two copies.
+        if (url.pathname === '/shell/vault-transfer.mjs') {
+          await staticResponse(
+            response,
+            path.join(repoRoot, 'src/phase1/vault-transfer.mjs')
+          );
+          return;
+        }
         const relativePath =
           url.pathname === '/shell/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/shell/'.length));
         const requestedPath = path.resolve(shellRoot, relativePath);
@@ -559,6 +570,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities',
             'POST /api/identities',
             'GET /api/identities/:identityId/contribution',
+            'GET /api/identities/:identityId/recovery-phrase',
+            'GET /api/identities/:identityId/vault-snapshot',
             'GET /api/worker-authorizations',
             'POST /api/worker-authorizations',
             'GET /api/worker-authorizations/:authorizationId',
@@ -1692,6 +1705,72 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const identityId = decodeURIComponent(parts[2]);
         const contribution = await store.computeContribution(identityId);
         jsonResponse(response, 200, { contribution });
+        return;
+      }
+
+      // §7c recovery phrase — deterministic from publicKey, exposed
+      // so the initiator can present it to the user and seal the
+      // vault under it. Reuses the CLI helper.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'recovery-phrase'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        jsonResponse(response, 200, { recovery: generateRecoveryPhrase(identity) });
+        return;
+      }
+
+      // §7c vault snapshot — Phase 2a.17.
+      //
+      // Returns the secret material the §7c initiator needs to build an
+      // encrypted vault bundle: the identity's `privateKeyPem`, its
+      // `vaultKeyBase64`, and a list of memory-record refs (no
+      // ciphertexts, no plaintexts — just the manifest IDs the receiver
+      // can fetch later under a fresh consent grant).
+      //
+      // DEMO-ONLY caveat: a production deployment must NOT expose
+      // private key material via a network endpoint. The Phase 2b
+      // AOSP shell will keep the private key in the device hardware
+      // keystore; this endpoint exists only because Phase 2a stores
+      // identities on the demo server so multi-tab/multi-device
+      // pairing works in a browser. Documented in ADR 0066.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'vault-snapshot'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const allRecords = await store.listMemoryRecords();
+        const memoryRecordRefs = allRecords
+          .filter((record) => record.ownerId === identityId)
+          .map((record) => ({
+            recordId: record.recordId,
+            manifestId: record.manifestId ?? null,
+            label: record.label ?? null,
+            createdAt: record.createdAt ?? null
+          }));
+        jsonResponse(response, 200, {
+          identity: {
+            id: identity.id,
+            displayName: identity.displayName,
+            publicKeyPem: identity.publicKeyPem,
+            privateKeyPem: identity.privateKeyPem,
+            vaultKeyBase64: identity.vaultKeyBase64,
+            attestations: identity.attestations ?? {}
+          },
+          memoryRecordRefs,
+          warning:
+            'Demo endpoint. Production Bharat OS keeps privateKeyPem in the device hardware keystore (Phase 2b AOSP shell). See ADR 0066.'
+        });
         return;
       }
 

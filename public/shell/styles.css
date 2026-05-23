@@ -648,15 +648,43 @@ body {
 }
 
 .pairing-code {
+  padding: 10px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: center;
+}
+
+.pairing-code-line {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pairing-code-value {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 4px;
   color: var(--accent);
-  text-align: center;
-  padding: 8px;
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
+}
+
+.pairing-phrase {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.pairing-phrase-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.6;
+  word-spacing: 4px;
 }
 
 .pairing-card .capture-meta[data-tone='good'] { color: var(--good); }

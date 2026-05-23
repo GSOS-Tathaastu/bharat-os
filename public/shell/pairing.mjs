@@ -8,13 +8,21 @@
 //     session, builds its own peer connection + data channel, creates
 //     an SDP answer, posts it back.
 //
-// Once the data channel opens, the initiator sends a JSON identity
-// bundle (public identity record only — the vault encryption is a §7c
-// hardening item). Receiver stores the bundle in localStorage as a new
-// household member.
+// Phase 2a.17 ADR 0066: the data channel carries a two-part bundle:
+//   • `publicIdentity` — public record (id, name, publicKeyPem,
+//     attestations).
+//   • `encryptedVault` — AES-GCM ciphertext under a PBKDF2 key derived
+//     from the 12-word recovery phrase. The plaintext contains the
+//     identity's privateKeyPem, vaultKeyBase64, and memory-record refs
+//     — the secret material the receiver needs to *be* the same
+//     person.
 //
+// The recovery phrase never crosses the wire. The receiver re-enters
+// it locally; AES-GCM's auth tag rejects a wrong phrase outright.
 // The server is signaling-only — it never sees the bundle. §15
 // pointer-not-payload.
+
+import { createVaultBundle, decryptVaultBundle } from '/shell/vault-transfer.mjs';
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -53,10 +61,14 @@ async function fetchJson(url, options) {
 export async function startInitiator({
   identity,
   fingerprint,
+  recoveryPhrase,
   onProgress,
   ttlSeconds = 600
 }) {
   if (!identity?.id) throw new Error('identity is required.');
+  if (!recoveryPhrase) {
+    throw new Error('recoveryPhrase is required to seal the vault bundle.');
+  }
 
   onProgress?.({ phase: 'create_session' });
   const { session } = await fetchJson('/api/pairing/sessions', {
@@ -135,11 +147,28 @@ export async function startInitiator({
 
   onProgress?.({ phase: 'channel_open' });
 
-  // Send the identity bundle. Phase 2a.14: public identity only — vault
-  // encryption + recovery-phrase-driven decryption is a §7c hardening
-  // step. The bundle shape stays forward-compatible.
+  // Phase 2a.17 ADR 0066 — two-part bundle:
+  //   1. `publicIdentity` — public record (id, name, publicKeyPem,
+  //      attestations).
+  //   2. `encryptedVault` — AES-GCM ciphertext wrapping the
+  //      privateKeyPem, vaultKeyBase64, and memory-record refs. The
+  //      key is derived from the user's 12-word recovery phrase via
+  //      PBKDF2; the phrase never crosses the wire.
+  onProgress?.({ phase: 'fetching_vault_snapshot' });
+  const snapshot = await fetchJson(
+    `/api/identities/${encodeURIComponent(identity.id)}/vault-snapshot`
+  );
+  const fullIdentity = snapshot.identity;
+
+  onProgress?.({ phase: 'encrypting_vault', recordCount: snapshot.memoryRecordRefs.length });
+  const encryptedVault = await createVaultBundle({
+    identity: fullIdentity,
+    recoveryPhrase,
+    memoryRecordRefs: snapshot.memoryRecordRefs ?? []
+  });
+
   const bundle = {
-    protocolVersion: 'bos.phase2a.pairing-bundle.v0',
+    protocolVersion: 'bos.phase2a.pairing-bundle.v1',
     transferredAt: new Date().toISOString(),
     publicIdentity: {
       id: identity.id,
@@ -147,7 +176,8 @@ export async function startInitiator({
       publicKeyPem: identity.publicKeyPem,
       attestations: identity.attestations ?? {}
     },
-    note: 'Public identity record only. Vault keys + memory plaintext are NOT transferred in this scaffold.'
+    encryptedVault,
+    note: 'publicIdentity + encryptedVault. The receiver must enter the recovery phrase to decrypt the vault. Plaintext never crosses the wire.'
   };
   const bundleText = JSON.stringify(bundle);
   channel.send(bundleText);
@@ -190,12 +220,21 @@ export async function startInitiator({
 }
 
 // Receiver side — new device claiming an identity transfer.
+//
+// `promptForRecoveryPhrase` is an async callback the shell supplies;
+// it must return the 12-word phrase the user reads aloud / scans from
+// the old device. Decryption is local — the phrase never leaves the
+// receiver's browser.
 export async function startReceiver({
   claimCode,
   receiverFingerprint,
+  promptForRecoveryPhrase,
   onProgress
 }) {
   if (!claimCode) throw new Error('claimCode is required.');
+  if (typeof promptForRecoveryPhrase !== 'function') {
+    throw new Error('promptForRecoveryPhrase callback is required.');
+  }
 
   onProgress?.({ phase: 'lookup' });
   const { session } = await fetchJson(
@@ -255,6 +294,34 @@ export async function startReceiver({
   channel.send(JSON.stringify({ ack: 'received', at: new Date().toISOString() }));
   onProgress?.({ phase: 'bundle_received', bundle });
 
+  // Phase 2a.17 — decrypt the vault on the receiver. If the bundle
+  // doesn't carry an `encryptedVault` (older sender), we still surface
+  // the public identity so existing pairings keep working.
+  let decryptedVault = null;
+  if (bundle?.encryptedVault) {
+    onProgress?.({ phase: 'awaiting_recovery_phrase' });
+    let lastError = null;
+    for (let attempt = 0; attempt < 3 && !decryptedVault; attempt += 1) {
+      const phrase = await promptForRecoveryPhrase({
+        attempt,
+        lastError: lastError ? String(lastError.message ?? lastError) : null
+      });
+      if (!phrase) {
+        throw new Error('Receiver cancelled before entering the recovery phrase.');
+      }
+      try {
+        decryptedVault = await decryptVaultBundle(bundle.encryptedVault, phrase);
+      } catch (error) {
+        lastError = error;
+        onProgress?.({ phase: 'recovery_phrase_rejected', reason: error.message });
+      }
+    }
+    if (!decryptedVault) {
+      throw new Error('Recovery phrase rejected three times — pairing aborted.');
+    }
+    onProgress?.({ phase: 'vault_decrypted', recordCount: decryptedVault.memoryRecordRefs?.length ?? 0 });
+  }
+
   try {
     channel.close();
     pc.close();
@@ -262,5 +329,5 @@ export async function startReceiver({
     // already closed
   }
 
-  return { session, bundle };
+  return { session, bundle, decryptedVault };
 }

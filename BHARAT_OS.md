@@ -2132,6 +2132,9 @@ Closed in Phase 2a.15 (ADR 0064):
 Closed in Phase 2a.16 (ADR 0065):
 1. ✅ **Demo readiness pass** — suggestion chips expanded to six per locale covering four action types (loan, cab, health record, hotel, scheme, train); Hinglish loan regex hardened to match `karza` / `karzaa` / `karja` / `business` / `nbfc` and the Devanagari side extended with कारोबारी / कारोबार / व्यवसाय (no more silent mis-classification as `mesh_storage`); first-run onboarding overlay shown once per browser with three coach-mark steps (intent → mesh ticker → more controls + diagnostics) and a *Replay tour* link in More controls. SW cache to v12.
 
+Closed in Phase 2a.17 (ADR 0066):
+1. ✅ **§7c encrypted vault transfer** — `src/phase1/vault-transfer.mjs` canonical artifact with `createVaultBundle` / `decryptVaultBundle` (AES-GCM-256 under PBKDF2-HMAC-SHA-256(phrase, 200k iters, 16-byte random salt)). New `/api/identities/:id/recovery-phrase` + `/api/identities/:id/vault-snapshot` endpoints; the snapshot endpoint carries an explicit demo-only `warning` (production Phase 2b keeps the privateKeyPem in the device hardware keystore). Pairing bundle bumped `v0 → v1` carrying both `publicIdentity` + `encryptedVault`; the recovery phrase never crosses the wire; receiver prompts the user with up to three attempts; wrong phrase fails via GCM auth-tag rejection. Module aliased at `/shell/vault-transfer.mjs` so the browser imports the same canonical file the tests cover (no duplication). Backward-compatible — older bundles without `encryptedVault` still claim as public-only. 210 / 210 tests (+9 new). SW cache to v13.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

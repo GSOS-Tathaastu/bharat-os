@@ -143,10 +143,14 @@
             </div>
             <p class="diagnostics-note" style="margin: 0;">
               §15 — identity is the person, not the device. Two halves: start
-              a session on your <em>current</em> phone, then claim it from
-              your <em>new</em> phone. Direct browser-to-browser via WebRTC;
-              the server relays only SDP. To try locally: open <code>/shell/</code>
-              in a second tab and use the claim code.
+              a session on your <em>current</em> phone (shows a 6-digit
+              code + 12-word recovery phrase), then claim it from your
+              <em>new</em> phone (enter code, then enter phrase when
+              prompted). Direct browser-to-browser via WebRTC; the server
+              relays only SDP. The vault is AES-GCM-256-encrypted under the
+              phrase before it ever leaves the old device. To try locally:
+              open <code>/shell/</code> in a second tab and use the code +
+              phrase.
             </p>
             <div class="pairing-grid">
               <div class="pairing-half">

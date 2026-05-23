@@ -1745,24 +1745,44 @@ async function startPairingInitiator() {
   const button = $('pairingInitiateButton');
   button.disabled = true;
   $('pairingResult').hidden = true;
-  setPairingStatus('Creating session…');
+  setPairingStatus('Fetching recovery phrase…');
 
   try {
     const identity = state.activeIdentity;
     const fingerprint = identity.publicKeyPem
       ? await hashString(identity.publicKeyPem)
       : 'demo-fingerprint';
+
+    // Phase 2a.17 — fetch the deterministic 12-word phrase. It
+    // displays alongside the 6-digit claim code so the user can
+    // read both to the new device.
+    const phraseResponse = await fetchJson(
+      `/api/identities/${encodeURIComponent(identity.id)}/recovery-phrase`
+    );
+    const recoveryPhrase = phraseResponse?.recovery?.phrase;
+    if (!recoveryPhrase) {
+      throw new Error('Could not fetch recovery phrase from server.');
+    }
+
     let displayedCode = false;
+    setPairingStatus('Creating session…');
     const result = await pairing.startInitiator({
       identity,
       fingerprint,
+      recoveryPhrase,
       onProgress: (event) => {
         if (event.phase === 'session_created' && !displayedCode) {
           displayedCode = true;
           const display = $('pairingCodeDisplay');
           display.hidden = false;
-          display.textContent = `Code · ${event.session.claimCode}`;
+          display.innerHTML = `
+            <div class="pairing-code-line">Code · <span class="pairing-code-value">${escapeHtml(event.session.claimCode)}</span></div>
+            <div class="pairing-phrase">Recovery phrase (read to the new device):</div>
+            <div class="pairing-phrase-value">${escapeHtml(recoveryPhrase)}</div>
+          `;
           setPairingStatus('Waiting for new device to claim…');
+        } else if (event.phase === 'fetching_vault_snapshot') {
+          setPairingStatus('Sealing vault under recovery phrase…', { tone: 'good' });
         } else if (event.phase === 'channel_open') {
           setPairingStatus('Data channel open — transferring…', { tone: 'good' });
         } else if (event.phase === 'completed') {
@@ -1774,6 +1794,7 @@ async function startPairingInitiator() {
       ['Session', shortId(result.session.sessionId)],
       ['Code', result.session.claimCode],
       ['Bytes sent', String(result.bytesSent)],
+      ['Vault encryption', 'AES-GCM-256 under PBKDF2(phrase, 200k iters)'],
       ['Server saw', 'SDP only (zero identity bytes — §15)']
     ], { tone: 'good' });
     $('pairingCodeDisplay').hidden = true;
@@ -1802,26 +1823,53 @@ async function claimPairingFromCode() {
     const result = await pairing.startReceiver({
       claimCode: code,
       receiverFingerprint,
+      promptForRecoveryPhrase: async ({ attempt, lastError }) => {
+        const lead =
+          attempt === 0
+            ? 'Recovery phrase from the old device (12 words separated by spaces):'
+            : `Recovery phrase did not decrypt the vault${lastError ? ` (${lastError})` : ''}. Try again:`;
+        // Browser prompt() is synchronous; wrap in microtask so the
+        // status string can paint first.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const phrase = window.prompt(lead, '');
+        return phrase?.trim() ?? null;
+      },
       onProgress: (event) => {
         if (event.phase === 'session_found') setPairingStatus('Session found — exchanging SDP…');
         if (event.phase === 'channel_open') setPairingStatus('Data channel open — receiving…', { tone: 'good' });
-        if (event.phase === 'bundle_received') setPairingStatus('Identity bundle received', { tone: 'good' });
+        if (event.phase === 'bundle_received') setPairingStatus('Bundle received — decrypting vault…', { tone: 'good' });
+        if (event.phase === 'awaiting_recovery_phrase') setPairingStatus('Awaiting recovery phrase…');
+        if (event.phase === 'recovery_phrase_rejected') setPairingStatus(`Phrase rejected: ${event.reason}`, { tone: 'bad' });
+        if (event.phase === 'vault_decrypted') setPairingStatus(`Vault decrypted (${event.recordCount} record refs)`, { tone: 'good' });
       }
     });
 
     // Persist the incoming identity as a household member on this device.
+    // If the vault decrypted, the public identity is now backed by real
+    // private-key material on the receiver side (in a real Phase 2b
+    // build, that material would land in the hardware keystore here).
     const incoming = result.bundle.publicIdentity;
     if (incoming?.id && !state.identities.some((i) => i.id === incoming.id)) {
       state.identities.push(incoming);
       addHouseholdMember(incoming.id);
     }
 
-    renderPairingResult('Identity received and added to household', [
+    const rows = [
       ['Incoming identity', incoming?.displayName ?? '--'],
       ['ID', shortId(incoming?.id ?? '')],
       ['Bundle bytes', String(JSON.stringify(result.bundle).length)],
       ['Server saw', 'SDP only — direct peer transfer over WebRTC']
-    ], { tone: 'good' });
+    ];
+    if (result.decryptedVault) {
+      rows.push([
+        'Vault',
+        `Decrypted — ${result.decryptedVault.memoryRecordRefs?.length ?? 0} memory refs, private key + vault key recovered`
+      ]);
+    } else {
+      rows.push(['Vault', 'No encrypted vault in bundle (public-only)']);
+    }
+
+    renderPairingResult('Identity received and added to household', rows, { tone: 'good' });
     $('pairingClaimInput').value = '';
   } catch (error) {
     setPairingStatus('Claim failed', { tone: 'bad' });
