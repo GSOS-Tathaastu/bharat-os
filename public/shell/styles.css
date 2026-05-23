@@ -715,6 +715,49 @@ body {
   }
 }
 
+.more-controls {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+}
+
+.more-controls summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.more-controls summary::-webkit-details-marker { display: none; }
+.more-controls summary::after {
+  content: '▾';
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.more-controls[open] summary::after { content: '▴'; }
+
+.more-controls-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-align: right;
+  flex: 1;
+}
+
+.more-controls-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 12px 14px;
+}
+
 .capture-card {
   background: var(--surface);
   border: 1px solid var(--border);

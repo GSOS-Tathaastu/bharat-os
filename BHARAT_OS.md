@@ -2105,6 +2105,30 @@ Closed in Phase 2a.6 (ADR 0055):
 Closed in Phase 2a.7 (ADR 0056):
 1. ✅ **On-device SLM runtime scaffold** — `on-device-model.mjs`, `on-device-model-packs` persistence, `GET /api/on-device/runtime`, `GET/POST /api/on-device/model-packs`, and shell orchestration metadata for local model readiness. Current inference remains deterministic until a WebGPU / llama.cpp.wasm model pack is installed.
 
+Closed in Phase 2a.8 (ADR 0057):
+1. ✅ **Tesseract.js wired for real Indic OCR** — eng/hin/tam language data lazy-loaded from CDN on first health-document capture; cached after; auto-fills the OCR text area; falls back to manual textarea if offline. Deterministic structured field extraction (HbA1c, BP, meds, follow-up) on top of the OCR output.
+
+Closed in Phase 2a.9 (ADR 0058):
+1. ✅ **§9A flag report ledger** — `src/phase1/flag-report.mjs` (signed by the reporter), `policy.report.flag_review_threshold` auto-blocks any subject with ≥ 3 open high-severity flags, `/api/flags*` routes, `bos flag` CLI, and a shell card to file reports. Operator console gained a flag-review panel to resolve / dismiss.
+
+Closed in Phase 2a.10 (ADR 0059):
+1. ✅ **App handoff for cab/hotel/ticket/food/grocery** — `APP_HANDOFF_REGISTRY` in `src/phase1/tools.mjs` plus shell result-card chips. Transparent handoff via deep links (uber://, olacabs://, makemytrip://, swiggy://, …); §15 binding preserved (no scraping, no impersonation).
+
+Closed in Phase 2a.11 (ADR 0060):
+1. ✅ **Operator console flag-review panel** — surfaces pending high-severity reports, lets a reviewer resolve / dismiss with a signed evidence trail.
+
+Closed in Phase 2a.12 (ADR 0061):
+1. ✅ **Real on-device SLM via transformers.js** — `Xenova/paraphrase-multilingual-MiniLM-L12-v2` (~120 MB) running entirely in-browser via WASM. User-triggered warm-up + visible progress + IndexedDB cache. Real cosine-similarity intent classification across six canonical action templates; surfaces top action + scores in the flow card. Tier 4 generative SLM (Sarvam-1 q4 / Gemma 2 q4) remains opt-in future work.
+
+Closed in Phase 2a.13 (ADR 0062):
+1. ✅ **L2 mesh contribution loop** — `src/phase1/mesh-contribution.mjs` with signed contribution events (inference + storage_serve + storage_store), per-event operator payout computed from §13B rates, persistence + ledger, `/api/mesh/contributions*` routes, `store.computeContribution` now folds events into NCS dynamically, and a `/shell/` **Mesh node** card with a live earnings ticker (8s ticks). Periodic Background Sync registered best-effort for hidden-tab continuation.
+
+Closed in Phase 2a.14 (ADR 0063):
+1. ✅ **§7c WebRTC device-pairing real handshake** — `src/phase1/pairing-session.mjs` (signed session lifecycle: pending → claimed → completed/expired with 6-digit claim code), `/api/pairing/sessions*` as signaling-only relay (server never sees the identity bundle), and a real `RTCPeerConnection` + `RTCDataChannel` handshake in `public/shell/pairing.mjs`. The shell pairing card lets the old device start a session (shows the code) and the new device claim it (enters the code, receives the bundle browser-to-browser, adds it to its household). §15 binding: server only sees SDP + claim code, identity transits the data channel directly.
+
+Closed in Phase 2a.15 (ADR 0064):
+1. ✅ **Shell polish pass** — reordered `/shell/` so the intent loop and the live §13B mesh ticker sit above the fold; auxiliary surfaces (pairing, passkey, alerts, health document, §9A flag report) collapsed into a single "More controls" `<details>` block with a meta line that lists what's one click away. No behavioural change; HTML + CSS only. Service worker cache bumped to v11.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

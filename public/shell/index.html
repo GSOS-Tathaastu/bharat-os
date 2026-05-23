@@ -70,31 +70,18 @@
         </div>
       </section>
 
-      <section class="capture-card pairing-card" id="pairingSection">
-        <div class="capture-header">
-          <span>📲 Pair another device (§7c)</span>
-          <span id="pairingStatus" class="capture-meta">Ready</span>
+      <section class="flow" id="flowSection" hidden>
+        <div class="flow-header">
+          <span class="flow-step" id="flowDetected">Detecting…</span>
+          <span class="flow-confidence" id="flowConfidence"></span>
         </div>
-        <p class="diagnostics-note" style="margin: 0;">
-          §15 binding — identity is the person, not the device. Two halves:
-          start a session on your <em>current</em> phone, then claim it from
-          your <em>new</em> phone. The transfer is direct browser-to-browser
-          via WebRTC; the server only relays SDP. To try locally: open
-          <code>/shell/</code> in a second tab and use the claim code.
-        </p>
-        <div class="pairing-grid">
-          <div class="pairing-half">
-            <strong>Old device → New device</strong>
-            <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
-            <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
-          </div>
-          <div class="pairing-half">
-            <strong>Claim on new device</strong>
-            <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
-            <button id="pairingClaimButton" class="secondary-button" type="button">Claim & receive</button>
-          </div>
-        </div>
-        <div id="pairingResult" class="capture-result" hidden></div>
+        <ol class="flow-list" id="flowList"></ol>
+      </section>
+
+      <section class="result" id="resultSection" hidden>
+        <div class="result-header" id="resultHeader"></div>
+        <div class="result-body" id="resultBody"></div>
+        <div class="result-evidence" id="resultEvidence"></div>
       </section>
 
       <section class="capture-card mesh-node-card" id="meshNodeSection">
@@ -130,65 +117,6 @@
         <div id="meshLastEvent" class="capture-result" hidden></div>
       </section>
 
-      <section class="capture-card profile-auth-card" id="profileAuthSection">
-        <div class="capture-header">
-          <span>Profile security</span>
-          <span id="profileAuthStatus" class="capture-meta">No passkey</span>
-        </div>
-        <div class="passkey-actions">
-          <button id="profileAuthBindButton" class="secondary-button" type="button">Bind passkey</button>
-          <button id="profileAuthVerifyButton" class="link-button" type="button">Verify passkey</button>
-        </div>
-        <div id="profileAuthResult" class="capture-result" hidden></div>
-      </section>
-
-      <section class="capture-card worker-alert-card" id="workerAlertSection">
-        <div class="capture-header">
-          <span>Worker alerts</span>
-          <span id="workerAlertStatus" class="capture-meta">Off</span>
-        </div>
-        <div class="passkey-actions">
-          <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
-          <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
-        </div>
-        <div id="workerAlertResult" class="capture-result" hidden></div>
-      </section>
-
-      <section class="flow" id="flowSection" hidden>
-        <div class="flow-header">
-          <span class="flow-step" id="flowDetected">Detecting…</span>
-          <span class="flow-confidence" id="flowConfidence"></span>
-        </div>
-        <ol class="flow-list" id="flowList"></ol>
-      </section>
-
-      <section class="result" id="resultSection" hidden>
-        <div class="result-header" id="resultHeader"></div>
-        <div class="result-body" id="resultBody"></div>
-        <div class="result-evidence" id="resultEvidence"></div>
-      </section>
-
-      <section class="capture-card" id="healthCaptureSection">
-        <div class="capture-header">
-          <span>Health document</span>
-          <label class="file-action">
-            <input id="healthDocFile" type="file" accept="image/*" capture="environment" />
-            <span>Camera</span>
-          </label>
-        </div>
-        <textarea
-          id="healthDocText"
-          rows="3"
-          placeholder="OCR text from prescription or lab report"
-          aria-label="Health document OCR text"
-        ></textarea>
-        <div class="capture-actions">
-          <span id="healthDocFileMeta" class="capture-meta">No image selected</span>
-          <button id="healthDocUploadButton" class="link-button" type="button">Upload to ABHA</button>
-        </div>
-        <div id="healthDocResult" class="capture-result" hidden></div>
-      </section>
-
       <section class="recent" id="recentSection">
         <div class="recent-header">
           <span>Recent activity</span>
@@ -199,49 +127,129 @@
         </ul>
       </section>
 
-      <section class="capture-card flag-report-card" id="flagReportSection">
-        <div class="capture-header">
-          <span>Report a problem (§9A)</span>
-          <span id="flagReportStatus" class="capture-meta">Open to file a flag</span>
+      <details class="more-controls" id="moreControlsSection">
+        <summary>
+          <span>More controls</span>
+          <span class="more-controls-meta">device pairing · passkey · alerts · health doc · §9A flag</span>
+        </summary>
+        <div class="more-controls-grid">
+          <section class="capture-card pairing-card" id="pairingSection">
+            <div class="capture-header">
+              <span>📲 Pair another device (§7c)</span>
+              <span id="pairingStatus" class="capture-meta">Ready</span>
+            </div>
+            <p class="diagnostics-note" style="margin: 0;">
+              §15 — identity is the person, not the device. Two halves: start
+              a session on your <em>current</em> phone, then claim it from
+              your <em>new</em> phone. Direct browser-to-browser via WebRTC;
+              the server relays only SDP. To try locally: open <code>/shell/</code>
+              in a second tab and use the claim code.
+            </p>
+            <div class="pairing-grid">
+              <div class="pairing-half">
+                <strong>Old device → New device</strong>
+                <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
+                <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
+              </div>
+              <div class="pairing-half">
+                <strong>Claim on new device</strong>
+                <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
+                <button id="pairingClaimButton" class="secondary-button" type="button">Claim & receive</button>
+              </div>
+            </div>
+            <div id="pairingResult" class="capture-result" hidden></div>
+          </section>
+
+          <section class="capture-card profile-auth-card" id="profileAuthSection">
+            <div class="capture-header">
+              <span>Profile security</span>
+              <span id="profileAuthStatus" class="capture-meta">No passkey</span>
+            </div>
+            <div class="passkey-actions">
+              <button id="profileAuthBindButton" class="secondary-button" type="button">Bind passkey</button>
+              <button id="profileAuthVerifyButton" class="link-button" type="button">Verify passkey</button>
+            </div>
+            <div id="profileAuthResult" class="capture-result" hidden></div>
+          </section>
+
+          <section class="capture-card worker-alert-card" id="workerAlertSection">
+            <div class="capture-header">
+              <span>Worker alerts</span>
+              <span id="workerAlertStatus" class="capture-meta">Off</span>
+            </div>
+            <div class="passkey-actions">
+              <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
+              <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
+            </div>
+            <div id="workerAlertResult" class="capture-result" hidden></div>
+          </section>
+
+          <section class="capture-card" id="healthCaptureSection">
+            <div class="capture-header">
+              <span>Health document</span>
+              <label class="file-action">
+                <input id="healthDocFile" type="file" accept="image/*" capture="environment" />
+                <span>Camera</span>
+              </label>
+            </div>
+            <textarea
+              id="healthDocText"
+              rows="3"
+              placeholder="OCR text from prescription or lab report"
+              aria-label="Health document OCR text"
+            ></textarea>
+            <div class="capture-actions">
+              <span id="healthDocFileMeta" class="capture-meta">No image selected</span>
+              <button id="healthDocUploadButton" class="link-button" type="button">Upload to ABHA</button>
+            </div>
+            <div id="healthDocResult" class="capture-result" hidden></div>
+          </section>
+
+          <section class="capture-card flag-report-card" id="flagReportSection">
+            <div class="capture-header">
+              <span>Report a problem (§9A)</span>
+              <span id="flagReportStatus" class="capture-meta">Open to file a flag</span>
+            </div>
+            <p class="diagnostics-note" style="margin: 0;">
+              A signed report from your profile against another actor. Three
+              open high-severity reports auto-block that actor's sensitive
+              actions until a human review resolves them.
+            </p>
+            <select id="flagSubjectSelect" aria-label="Report against">
+              <option value="">— Choose who you're reporting —</option>
+            </select>
+            <div class="flag-report-row">
+              <select id="flagCategorySelect" aria-label="Category">
+                <option value="advance_fee">Asked me to pay (advance fee)</option>
+                <option value="wage_non_payment">Wages not paid</option>
+                <option value="unsafe_conditions">Unsafe conditions</option>
+                <option value="underage_worker">Child labour suspected</option>
+                <option value="no_show">No-show</option>
+                <option value="fraud">Fraud / fake job</option>
+                <option value="exploitation">Exploitation / trafficking</option>
+                <option value="abuse">Abuse</option>
+                <option value="other">Other</option>
+              </select>
+              <select id="flagSeveritySelect" aria-label="Severity">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <textarea
+              id="flagSummary"
+              rows="2"
+              placeholder="What happened? (min 4 chars)"
+              aria-label="Report summary"
+            ></textarea>
+            <div class="capture-actions">
+              <span id="flagReportMeta" class="capture-meta"></span>
+              <button id="flagReportSubmit" class="link-button" type="button">File report</button>
+            </div>
+            <div id="flagReportResult" class="capture-result" hidden></div>
+          </section>
         </div>
-        <p class="diagnostics-note" style="margin: 0;">
-          A signed report from your profile against another actor. Three open
-          high-severity reports auto-block that actor's sensitive actions until
-          a human review resolves them. §9A safeguard.
-        </p>
-        <select id="flagSubjectSelect" aria-label="Report against">
-          <option value="">— Choose who you're reporting —</option>
-        </select>
-        <div class="flag-report-row">
-          <select id="flagCategorySelect" aria-label="Category">
-            <option value="advance_fee">Asked me to pay (advance fee)</option>
-            <option value="wage_non_payment">Wages not paid</option>
-            <option value="unsafe_conditions">Unsafe conditions</option>
-            <option value="underage_worker">Child labour suspected</option>
-            <option value="no_show">No-show</option>
-            <option value="fraud">Fraud / fake job</option>
-            <option value="exploitation">Exploitation / trafficking</option>
-            <option value="abuse">Abuse</option>
-            <option value="other">Other</option>
-          </select>
-          <select id="flagSeveritySelect" aria-label="Severity">
-            <option value="low">Low</option>
-            <option value="medium" selected>Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        <textarea
-          id="flagSummary"
-          rows="2"
-          placeholder="What happened? (min 4 chars)"
-          aria-label="Report summary"
-        ></textarea>
-        <div class="capture-actions">
-          <span id="flagReportMeta" class="capture-meta"></span>
-          <button id="flagReportSubmit" class="link-button" type="button">File report</button>
-        </div>
-        <div id="flagReportResult" class="capture-result" hidden></div>
-      </section>
+      </details>
 
       <section class="diagnostics" id="diagnosticsSection">
         <details>

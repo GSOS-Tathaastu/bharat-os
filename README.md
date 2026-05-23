@@ -144,6 +144,12 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.15 **shell polish pass** — `/shell/` reordered so the intent
+  loop + the live §13B mesh ticker sit above the fold; the auxiliary
+  cards (pairing, passkey, alerts, health document, §9A flag report)
+  collapsed into a single "More controls" `<details>` block with a meta
+  line listing what's one click away. No behavioural change; HTML + CSS
+  only. Service worker cache bumped to v11. ADR 0064.
 - Phase 2a.14 **WebRTC device pairing handshake** — §7c portability made
   demoable. New `src/phase1/pairing-session.mjs` artifact (signed session
   with 6-digit claim code, lifecycle pending → claimed → completed /
