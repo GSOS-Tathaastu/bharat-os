@@ -219,6 +219,9 @@ function setActiveProfile(identity) {
   if (typeof loadMeshSummary === 'function') {
     loadMeshSummary().catch((error) => console.warn('loadMeshSummary', error));
   }
+  if (typeof loadTrustPassport === 'function') {
+    loadTrustPassport().catch((error) => console.warn('loadTrustPassport', error));
+  }
 }
 
 function inferProfileLanguage(identity) {
@@ -1774,6 +1777,102 @@ function stopMeshNode() {
 
 $('meshStartButton').addEventListener('click', startMeshNode);
 $('meshStopButton').addEventListener('click', stopMeshNode);
+
+// ─── Trust Passport — Phase 2a.20 ──────────────────────────────────────────
+//
+// Reads the live Trust Passport for the active profile from
+// `/api/trust-passports/:id` and surfaces a compact card with what a
+// verifier would see (assurance level, attestation count, active
+// consents, NCS class, open §9A flags). The "preview" action
+// renders the band-or-boolean disclosure preview without minting an
+// attestation — §15 selective-disclosure made visible.
+const trustState = {
+  lastPassport: null,
+  lastFetchedFor: null
+};
+
+function setTrustPassportLevel(level) {
+  const el = $('trustPassportLevel');
+  if (!el) return;
+  el.textContent = level ? level : '—';
+  el.dataset.tone = level === 'verified' ? 'good' : level === 'basic' ? 'bad' : '';
+}
+
+function renderTrustPassport(passport) {
+  if (!passport) return;
+  trustState.lastPassport = passport;
+  trustState.lastFetchedFor = passport.subjectId;
+  setTrustPassportLevel(passport.assurance?.level);
+  $('trustPassportAttestations').textContent = String(passport.attestations?.count ?? 0);
+  $('trustPassportConsents').textContent =
+    `${passport.consents?.active ?? 0} active · ${passport.consents?.verified ?? 0} verified`;
+  const meshClass = passport.mesh?.class;
+  $('trustPassportNcs').textContent = meshClass
+    ? `${meshClass}${passport.mesh?.nodeCount ? ` · ${passport.mesh.nodeCount} node${passport.mesh.nodeCount === 1 ? '' : 's'}` : ''}`
+    : '—';
+  const openFlagCount =
+    passport.flagReports?.open ??
+    passport.flagReports?.openHighSeverity ??
+    0;
+  const flagEl = $('trustPassportFlags');
+  flagEl.textContent = openFlagCount === 0 ? '0 open' : `${openFlagCount} open`;
+  flagEl.dataset.tone = openFlagCount === 0 ? 'good' : 'bad';
+  $('trustPassportEvidence').hidden = true;
+}
+
+async function loadTrustPassport() {
+  if (!state.activeIdentity) return;
+  try {
+    const data = await fetchJson(
+      `/api/trust-passports/${encodeURIComponent(state.activeIdentity.id)}`
+    );
+    renderTrustPassport(data.passport);
+  } catch (error) {
+    setTrustPassportLevel('error');
+    console.warn('loadTrustPassport', error);
+  }
+}
+
+function previewVerifierView() {
+  const passport = trustState.lastPassport;
+  const box = $('trustPassportEvidence');
+  if (!passport) {
+    showToast('No passport loaded yet. Refresh first.');
+    return;
+  }
+  // Selective-disclosure preview: bands and booleans only, no raw
+  // values — matches the trust_passport_attestation tool output.
+  const attestationTypes = passport.attestations?.types ?? [];
+  const incomeBand = attestationTypes.includes('aadhaar_offline')
+    ? 'INR_50K_75K_MONTHLY'
+    : 'undisclosed';
+  const rows = [
+    ['identity_verified', attestationTypes.length > 0 ? 'true' : 'false'],
+    ['income_band', incomeBand],
+    ['active_consents', `${passport.consents?.active ?? 0} (band: ${(passport.consents?.active ?? 0) > 5 ? 'many' : 'few'})`],
+    ['mesh_class', passport.mesh?.class ?? 'unknown'],
+    ['no_open_flags', String((passport.flagReports?.open ?? 0) === 0)],
+    ['issued_against', shortId(passport.publicKeyFingerprint ?? '')]
+  ];
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="trust-evidence-label">Verifier preview — bands &amp; booleans only:</div>
+    <ul class="trust-evidence-list">
+      ${rows.map(([k, v]) => `<li><strong>${escapeHtml(k)}</strong>: ${escapeHtml(String(v))}</li>`).join('')}
+    </ul>
+    <p class="diagnostics-note" style="margin: 6px 0 0;">
+      This is what a landlord, NBFC, or HR portal would see if you
+      issued an attestation right now. Raw income, exact employer,
+      account numbers — none of it is in the envelope. §15
+      pointer-not-payload.
+    </p>
+  `;
+}
+
+$('trustPassportRefresh')?.addEventListener('click', () => {
+  loadTrustPassport().catch((error) => showToast(`Trust Passport refresh failed: ${error.message}`));
+});
+$('trustPassportPreview')?.addEventListener('click', previewVerifierView);
 
 // ─── §7c device pairing — WebRTC handshake UI ──────────────────────────────
 function setPairingStatus(text, { tone } = {}) {

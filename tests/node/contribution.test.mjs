@@ -130,6 +130,32 @@ test('Trust Passport mesh block prefers a pre-computed contribution argument', a
   assert.equal(passport.mesh.nodeCount, 3);
 });
 
+test('Trust Passport surfaces a flagReports block (open / openHighSeverity / resolved / dismissed)', () => {
+  const identity = createIdentity({ displayName: 'Flag actor' });
+  const flagReports = [
+    { subjectId: identity.id, status: 'pending', severity: 'high' },
+    { subjectId: identity.id, status: 'under_review', severity: 'medium' },
+    { subjectId: identity.id, status: 'resolved', severity: 'low' },
+    { subjectId: identity.id, status: 'dismissed', severity: 'low' },
+    { subjectId: 'someone-else', status: 'pending', severity: 'high' }
+  ];
+  const passport = createTrustPassport(identity, { flagReports });
+  assert.ok(passport.flagReports, 'passport exposes flagReports block');
+  assert.equal(passport.flagReports.total, 4);
+  assert.equal(passport.flagReports.open, 2);
+  assert.equal(passport.flagReports.openHighSeverity, 1);
+  assert.equal(passport.flagReports.resolved, 1);
+  assert.equal(passport.flagReports.dismissed, 1);
+});
+
+test('Trust Passport flagReports block defaults to zeros when no reports provided', () => {
+  const identity = createIdentity({ displayName: 'No flag actor' });
+  const passport = createTrustPassport(identity, {});
+  assert.equal(passport.flagReports.total, 0);
+  assert.equal(passport.flagReports.open, 0);
+  assert.equal(passport.flagReports.openHighSeverity, 0);
+});
+
 test('CLI: bos contribution show returns the NCS block for an identity', async () => {
   const { root, store } = await freshStore('contribution-cli');
   const identity = createIdentity({ displayName: 'CLI actor' });

@@ -279,7 +279,8 @@ async function trustPassportContext(store) {
     toolExecutions: await store.listToolExecutions(),
     ledgerEvents: await store.listLedger({ limit: undefined }),
     publicRecords: publicRecordsFromIdentities(identities),
-    nodes: await store.listNodes()
+    nodes: await store.listNodes(),
+    flagReports: await store.listFlagReports().catch(() => [])
   };
 }
 

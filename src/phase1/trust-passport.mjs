@@ -105,6 +105,7 @@ export function createTrustPassport(
     publicRecords = [],
     nodes = null,
     contribution = null,
+    flagReports = [],
     generatedAt = new Date().toISOString()
   } = {}
 ) {
@@ -215,6 +216,25 @@ export function createTrustPassport(
           nodeCount: 0,
           memoryRecordCount: 0
         },
+    flagReports: (() => {
+      const subjectFlags = (flagReports ?? []).filter(
+        (flag) => flag.subjectId === identity.id
+      );
+      const openStatuses = new Set(['pending', 'under_review']);
+      const open = subjectFlags.filter((flag) => openStatuses.has(flag.status)).length;
+      const openHighSeverity = subjectFlags.filter(
+        (flag) => openStatuses.has(flag.status) && flag.severity === 'high'
+      ).length;
+      const resolved = subjectFlags.filter((flag) => flag.status === 'resolved').length;
+      const dismissed = subjectFlags.filter((flag) => flag.status === 'dismissed').length;
+      return {
+        total: subjectFlags.length,
+        open,
+        openHighSeverity,
+        resolved,
+        dismissed
+      };
+    })(),
     privacy: {
       exposure: 'public_metadata_only',
       privateKeyIncluded: false,
@@ -246,6 +266,7 @@ export function canonicalTrustPassportPayload(passport) {
     skillInvocations: passport.skillInvocations,
     ledger: passport.ledger,
     mesh: passport.mesh,
+    flagReports: passport.flagReports,
     privacy: passport.privacy,
     evidenceHash: passport.evidenceHash
   };

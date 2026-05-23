@@ -2141,6 +2141,9 @@ Closed in Phase 2a.18 (ADR 0067):
 Closed in Phase 2a.19 (ADR 0068):
 1. ✅ **Daily brief on-device composer** — `src/phase1/daily-brief.mjs` with `gatherDailyBriefSignals` (reads orchestrations / mesh events / expiring consents / open §9A flags from the active profile's records, horizon-bounded) + `renderDailyBrief` (locale-aware template renderer producing vernacular text in en-IN / hi-IN / hi-Latn-IN / mr-IN / bho-IN / ta-IN / bn-IN with greeting / mesh / recent / consents / §9A-flag sections + a §7e on-device footer in every locale). Orchestration API auto-gathers signals for `daily_brief` requests and threads them via `metadata.signals`; tool adapter embeds the rendered brief on the receipt with `renderer: 'template_v0'` + an explicit `rendererNote` that names the Tier 4 SLM swap. Shell renders the brief text in a `<pre class="daily-brief-body" lang="…">` block above the metadata grid. 228 / 228 tests (+8 new). SW cache to v15.
 
+Closed in Phase 2a.20 (ADR 0069):
+1. ✅ **Trust Passport shell card** — new *"🛡️ Trust Passport — what a verifier would see"* card sits above-the-fold with four tiles (attestations, active consents, NCS class, §9A flags) and a *"Show me what a landlord would see"* preview that renders the band-or-boolean selective-disclosure envelope inline before any attestation is minted. `createTrustPassport` artifact gains a `flagReports` block (`total / open / openHighSeverity / resolved / dismissed`) so the §9A safeguard escalation (ADR 0058) is finally user-visible in the passport itself. `trustPassportContext` threads `flagReports` from the store; `canonicalTrustPassportPayload` includes the block so signed snapshots cover it. 230 / 230 tests (+2 new). SW cache to v16.
+
 ### Phase 2a queue — what's PWA-buildable next (no OEM, no funding gate)
 
 §13 makes explicit that ~85% of §6 is PWA-buildable. This is the

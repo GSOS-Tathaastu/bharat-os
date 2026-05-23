@@ -84,6 +84,42 @@
         <div class="result-evidence" id="resultEvidence"></div>
       </section>
 
+      <section class="capture-card trust-passport-card" id="trustPassportSection">
+        <div class="capture-header">
+          <span>🛡️ Trust Passport — what a verifier would see</span>
+          <span id="trustPassportLevel" class="capture-meta">—</span>
+        </div>
+        <div class="trust-passport-grid">
+          <div class="trust-stat">
+            <span class="trust-stat-label">Attestations</span>
+            <span class="trust-stat-value" id="trustPassportAttestations">—</span>
+          </div>
+          <div class="trust-stat">
+            <span class="trust-stat-label">Active consents</span>
+            <span class="trust-stat-value" id="trustPassportConsents">—</span>
+          </div>
+          <div class="trust-stat">
+            <span class="trust-stat-label">NCS class</span>
+            <span class="trust-stat-value" id="trustPassportNcs">—</span>
+          </div>
+          <div class="trust-stat">
+            <span class="trust-stat-label">§9A flags</span>
+            <span class="trust-stat-value" id="trustPassportFlags">—</span>
+          </div>
+        </div>
+        <div id="trustPassportEvidence" class="trust-evidence" hidden></div>
+        <p class="diagnostics-note" style="margin: 0;">
+          The verifier never sees the underlying data — only this
+          passport (bands and booleans only). Tap *"Show me what a
+          landlord would see"* to preview the attestation envelope.
+          §13A #7 Trust-as-a-service; §15 selective disclosure.
+        </p>
+        <div class="passkey-actions">
+          <button id="trustPassportRefresh" class="secondary-button" type="button">Refresh</button>
+          <button id="trustPassportPreview" class="link-button" type="button">Show me what a landlord would see</button>
+        </div>
+      </section>
+
       <section class="capture-card mesh-node-card" id="meshNodeSection">
         <div class="capture-header">
           <span>💎 Mesh node — §13B fair-use lever</span>

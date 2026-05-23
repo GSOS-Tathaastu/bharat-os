@@ -144,6 +144,15 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.20 **Trust Passport shell card** — `/shell/` gains a
+  *"🛡️ Trust Passport — what a verifier would see"* card with four
+  tiles (attestations, active consents, NCS class, §9A flags) above
+  the fold, plus a *"Show me what a landlord would see"* preview
+  rendering the band-or-boolean selective-disclosure envelope inline
+  before any attestation is minted. `createTrustPassport` artifact
+  gains a `flagReports` block so the §9A safeguard escalation
+  (ADR 0058) is finally user-visible in the passport itself.
+  230/230 tests (+2 new). SW cache to v16. ADR 0069.
 - Phase 2a.19 **daily brief on-device composer** — `src/phase1/daily-brief.mjs`
   gathers structured signals (recent orchestrations / mesh contribution
   events / expiring consents / open §9A flags) horizon-bounded, and a
