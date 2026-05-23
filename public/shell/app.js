@@ -222,6 +222,9 @@ function setActiveProfile(identity) {
   if (typeof loadTrustPassport === 'function') {
     loadTrustPassport().catch((error) => console.warn('loadTrustPassport', error));
   }
+  if (typeof loadFederatedRounds === 'function') {
+    loadFederatedRounds().catch((error) => console.warn('loadFederatedRounds', error));
+  }
 }
 
 function inferProfileLanguage(identity) {
@@ -1777,6 +1780,150 @@ function stopMeshNode() {
 
 $('meshStartButton').addEventListener('click', startMeshNode);
 $('meshStopButton').addEventListener('click', stopMeshNode);
+
+// ─── §7f federated rounds — Phase 3.0 ─────────────────────────────────────
+//
+// Lists active rounds the user can join, and a one-tap join button.
+// The actual on-device training is a Phase 3.1+ commitment (TF.js /
+// ONNX Runtime Web); the join action here ships a placeholder
+// gradient hash with the round's max-epsilon DP noise label and
+// records the donation consent. Earns UPI credits via the §7f mesh
+// workload class.
+
+async function loadFederatedRounds() {
+  if (!state.activeIdentity) return;
+  try {
+    const data = await fetchJson('/api/federated/rounds');
+    const rounds = (data.rounds ?? []).filter(
+      (r) => r.status === 'accepting_updates'
+    );
+    renderFederatedRounds(rounds);
+  } catch (error) {
+    $('federatedRoundsStatus').textContent = `Error: ${error.message.slice(0, 40)}`;
+  }
+}
+
+function renderFederatedRounds(rounds) {
+  const list = $('federatedRoundsList');
+  const status = $('federatedRoundsStatus');
+  if (rounds.length === 0) {
+    status.textContent = 'No active rounds';
+    list.innerHTML = `<li class="federated-empty">No active rounds. Tap *Refresh* to check again.</li>`;
+    return;
+  }
+  status.textContent = `${rounds.length} active`;
+  list.innerHTML = rounds
+    .map((round) => {
+      const payout = `₹${(round.payoutPaisePerUpdate / 100).toFixed(2)}`;
+      const deadline = round.deadlineAt
+        ? new Date(round.deadlineAt).toLocaleString()
+        : '—';
+      const progress = `${round.updateCount}/${round.maxParticipants}`;
+      const epsilon = round.maxEpsilon;
+      return `
+        <li class="federated-row" data-round-id="${escapeHtml(round.roundId)}" data-baseline="${escapeHtml(round.baselineModelHash)}" data-epsilon="${escapeHtml(String(epsilon))}">
+          <div class="federated-row-head">
+            <strong>${escapeHtml(round.modelName)}</strong>
+            <span class="federated-payout">${escapeHtml(payout)} / update</span>
+          </div>
+          <div class="federated-row-meta">
+            ε ≤ ${escapeHtml(String(epsilon))} · ${escapeHtml(progress)} contributors · deadline ${escapeHtml(deadline)}
+          </div>
+          <button type="button" class="secondary-button" data-join-round="${escapeHtml(round.roundId)}">
+            Join round
+          </button>
+          <div class="federated-row-result" hidden></div>
+        </li>
+      `;
+    })
+    .join('');
+}
+
+async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
+  if (!sanityCheckActor()) return;
+  const li = document.querySelector(`[data-round-id="${CSS.escape(roundId)}"]`);
+  const result = li?.querySelector('.federated-row-result');
+  if (result) {
+    result.hidden = false;
+    result.textContent = 'Granting donation consent + composing update…';
+  }
+
+  try {
+    // 1) Mint a fresh donation consent for this round and sign it.
+    //    The server stores it; the federated-round artifact checks
+    //    for it on update submission.
+    const consentResponse = await fetchJson('/api/consents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        subjectId: state.activeIdentity.id,
+        granteeId: 'bharat-os-orchestrator',
+        scopes: ['training.donate', 'consent.record'],
+        purpose: 'federated_donation',
+        ttlSeconds: 6 * 60 * 60,
+        constraints: { roundId },
+        signWithIdentityId: state.activeIdentity.id,
+        signRole: 'subject'
+      })
+    });
+    if (!consentResponse?.ok && !consentResponse?.consent) {
+      throw new Error('Could not mint donation consent.');
+    }
+
+    // 2) Compose a placeholder gradient hash (real on-device
+    //    training is Phase 3.1+). Phase 3.0 ships the substrate;
+    //    the hash carries the round id + a per-device nonce.
+    const seed = `${roundId}:${state.activeIdentity.id}:${Date.now()}`;
+    const seedBytes = new TextEncoder().encode(seed);
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', seedBytes);
+    const gradientHash = `sha256:${hexFromBuffer(digest)}`;
+
+    // 3) Build + sign the update on the server (the demo doesn't
+    //    have the contributor private key in the browser yet — the
+    //    `/api/federated/rounds/:id/updates` route signs on behalf
+    //    of the contributor identity it reads from the store).
+    const updateResponse = await fetchJson(
+      `/api/federated/rounds/${encodeURIComponent(roundId)}/updates/sign-and-submit`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contributorId: state.activeIdentity.id,
+          baselineModelHash,
+          gradientHash,
+          differentialPrivacyEpsilon: Number(epsilon),
+          sampleCount: 256
+        })
+      }
+    );
+
+    if (result) {
+      const payout = updateResponse?.update?.payoutPaise
+        ? `+₹${(updateResponse.update.payoutPaise / 100).toFixed(2)}`
+        : '';
+      result.textContent = `Joined — update accepted ${payout}. Earnings ticked the mesh ledger.`;
+    }
+    // Refresh mesh summary so the new federated_round earning shows.
+    loadMeshSummary?.().catch(() => {});
+    loadFederatedRounds().catch(() => {});
+  } catch (error) {
+    if (result) result.textContent = `Failed: ${error.message}`;
+  }
+}
+
+$('federatedRoundsRefresh')?.addEventListener('click', () => {
+  loadFederatedRounds().catch(() => {});
+});
+
+$('federatedRoundsList')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-join-round]');
+  if (!button) return;
+  const li = button.closest('[data-round-id]');
+  joinFederatedRound(button.dataset.joinRound, {
+    baselineModelHash: li.dataset.baseline,
+    epsilon: li.dataset.epsilon
+  });
+});
 
 // ─── Trust Passport — Phase 2a.20 ──────────────────────────────────────────
 //

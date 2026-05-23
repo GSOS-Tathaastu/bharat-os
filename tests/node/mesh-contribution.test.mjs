@@ -23,8 +23,13 @@ async function freshStore(name) {
   return { store };
 }
 
-test('MESH_WORKLOAD_TYPES covers §13B Product 1 + Product 2', () => {
-  assert.deepEqual(MESH_WORKLOAD_TYPES.sort(), ['inference', 'storage_serve', 'storage_store'].sort());
+test('MESH_WORKLOAD_TYPES covers §13B Product 1 + Product 2 plus §7f federated rounds', () => {
+  // Phase 3.0 (ADR 0071) added 'federated_round' for §7f mesh
+  // participation in federated learning rounds.
+  assert.deepEqual(
+    [...MESH_WORKLOAD_TYPES].sort(),
+    ['federated_round', 'inference', 'storage_serve', 'storage_store'].sort()
+  );
 });
 
 test('MESH_PAYOUT_RATES exposes the §13B operator-payout midpoints', () => {

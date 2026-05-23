@@ -120,6 +120,26 @@
         </div>
       </section>
 
+      <section class="capture-card federated-card" id="federatedRoundsSection">
+        <div class="capture-header">
+          <span>🧪 Federated rounds — §7f opt-in training</span>
+          <span id="federatedRoundsStatus" class="capture-meta">—</span>
+        </div>
+        <p class="diagnostics-note" style="margin: 0;">
+          When you join a round, your phone trains a gradient on
+          <em>your</em> data on-device and uploads only a hashed
+          update plus differential-privacy noise. Each accepted
+          update earns UPI credits via the §13B mesh. You say yes,
+          you get paid. §15 binding — never silent harvesting.
+        </p>
+        <ul class="federated-list" id="federatedRoundsList">
+          <li class="federated-empty">No active rounds. Tap *Refresh* to check again.</li>
+        </ul>
+        <div class="passkey-actions">
+          <button id="federatedRoundsRefresh" class="link-button" type="button">Refresh</button>
+        </div>
+      </section>
+
       <section class="capture-card mesh-node-card" id="meshNodeSection">
         <div class="capture-header">
           <span>💎 Mesh node — §13B fair-use lever</span>

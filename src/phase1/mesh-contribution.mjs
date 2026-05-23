@@ -19,7 +19,16 @@ import {
 
 export const MESH_CONTRIBUTION_PROTOCOL_VERSION = 'bos.phase2a.mesh-contribution.v0';
 
-export const MESH_WORKLOAD_TYPES = ['inference', 'storage_serve', 'storage_store'];
+export const MESH_WORKLOAD_TYPES = [
+  'inference',
+  'storage_serve',
+  'storage_store',
+  // §7f Phase 3.0 — federated training participation. Per-update
+  // payout is set by the round (see `federated-round.mjs`), so this
+  // workload type carries an explicit `payoutPaise` rather than
+  // deriving one from tokens/bytes.
+  'federated_round'
+];
 
 // §13B midpoint operator payouts. Stored in paise (1 INR = 100 paise) so
 // arithmetic stays integer and the shell ticker can show ₹X.YZ without
@@ -36,7 +45,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function computePayoutPaise({ workloadType, tokens, bytes }) {
+function computePayoutPaise({ workloadType, tokens, bytes, payoutPaise }) {
   if (workloadType === 'inference') {
     const t = Math.max(0, Number(tokens ?? 0));
     return Math.round((t / 1_000_000) * PAYOUT_PAISE_PER_MILLION_TOKENS);
@@ -52,6 +61,10 @@ function computePayoutPaise({ workloadType, tokens, bytes }) {
     const b = Math.max(0, Number(bytes ?? 0));
     return Math.round((b / (1024 ** 4)) * (PAYOUT_PAISE_PER_TERABYTE_STORED_MONTH / (30 * 24 * 60)));
   }
+  if (workloadType === 'federated_round') {
+    // Payout is set by the round (caller passes explicit `payoutPaise`).
+    return Math.max(0, Number(payoutPaise ?? 0));
+  }
   return 0;
 }
 
@@ -65,6 +78,10 @@ export function createMeshContributionEvent({
   charging = true,
   wifi = true,
   batteryPercent = 100,
+  // §7f federated rounds carry their per-update payout from the
+  // round, not from tokens/bytes; the caller passes it explicitly.
+  payoutPaise: explicitPayoutPaise,
+  roundId,
   at = nowIso()
 }) {
   if (!operatorId) throw new Error('operatorId is required.');
@@ -74,11 +91,20 @@ export function createMeshContributionEvent({
   if (workloadType === 'inference' && !Number.isFinite(Number(tokens))) {
     throw new Error('inference events require a numeric tokens count.');
   }
-  if (workloadType !== 'inference' && !Number.isFinite(Number(bytes))) {
+  if (
+    workloadType !== 'inference' &&
+    workloadType !== 'federated_round' &&
+    !Number.isFinite(Number(bytes))
+  ) {
     throw new Error('storage events require a numeric bytes count.');
   }
 
-  const payoutPaise = computePayoutPaise({ workloadType, tokens, bytes });
+  const payoutPaise = computePayoutPaise({
+    workloadType,
+    tokens,
+    bytes,
+    payoutPaise: explicitPayoutPaise
+  });
 
   const core = {
     protocolVersion: MESH_CONTRIBUTION_PROTOCOL_VERSION,
@@ -87,8 +113,12 @@ export function createMeshContributionEvent({
     nodeId: nodeId ?? null,
     workloadType,
     tokens: workloadType === 'inference' ? Number(tokens) : null,
-    bytes: workloadType === 'inference' ? null : Number(bytes),
+    bytes:
+      workloadType === 'inference' || workloadType === 'federated_round'
+        ? null
+        : Number(bytes),
     peerId: peerId ?? null,
+    roundId: workloadType === 'federated_round' ? (roundId ?? null) : null,
     deviceState: {
       charging: Boolean(charging),
       wifi: Boolean(wifi),

@@ -73,6 +73,15 @@ import {
 } from '../phase1/pairing-session.mjs';
 import { generateRecoveryPhrase } from '../phase1/device-pairing.mjs';
 import { gatherDailyBriefSignals } from '../phase1/daily-brief.mjs';
+import {
+  aggregateRound,
+  createFederatedRound,
+  createGradientUpdate,
+  describeRound,
+  FEDERATED_ROUND_WORKLOAD,
+  openRound,
+  submitGradientUpdate
+} from '../phase1/federated-round.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -586,6 +595,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/mesh/contributions',
             'POST /api/mesh/contributions',
             'GET /api/mesh/contributions/summary/:operatorId',
+            'GET /api/federated/rounds',
+            'POST /api/federated/rounds',
+            'POST /api/federated/rounds/:roundId/updates',
+            'POST /api/federated/rounds/:roundId/updates/sign-and-submit',
+            'POST /api/federated/rounds/:roundId/aggregate',
             'GET /api/mesh/rates',
             'POST /api/pairing/sessions',
             'GET /api/pairing/sessions/:sessionId',
@@ -1605,6 +1619,178 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // §7f Phase 3.0 federated learning rounds — ADR 0071.
+      // Researchers create rounds, contributors submit signed
+      // gradient updates under a per-round donation consent. The
+      // control plane stores hashes + DP epsilon only, never the
+      // gradient vector itself (§15 pointer-not-payload).
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'federated' &&
+        parts[2] === 'rounds' &&
+        parts.length === 3
+      ) {
+        if (request.method === 'GET') {
+          const rounds = await store.listFederatedRounds();
+          jsonResponse(response, 200, {
+            rounds: rounds.map(describeRound)
+          });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const round = openRound(
+            createFederatedRound({
+              createdBy: body.createdBy,
+              modelName: body.modelName,
+              baselineModelHash: body.baselineModelHash,
+              maxParticipants: body.maxParticipants,
+              maxEpsilon: body.maxEpsilon,
+              payoutPaisePerUpdate: body.payoutPaisePerUpdate,
+              deadlineSecondsFromNow: body.deadlineSecondsFromNow
+            })
+          );
+          await store.saveFederatedRound(round);
+          jsonResponse(response, 201, { ok: true, round });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // Demo-mode convenience: sign + submit in one call. The
+      // contributor private key still lives on the server (Phase 2a
+      // limitation per ADR 0066 — Phase 2b moves it to the device
+      // hardware keystore, at which point this route goes away in
+      // favour of client-side signing).
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'federated' &&
+        parts[2] === 'rounds' &&
+        parts.length === 6 &&
+        parts[4] === 'updates' &&
+        parts[5] === 'sign-and-submit'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const roundId = decodeURIComponent(parts[3]);
+        const round = await store.readFederatedRound(roundId).catch(() => null);
+        if (!round) return notFound(response);
+        const body = await readRequestJson(request);
+        const contributor = await store.readIdentity(body.contributorId).catch(() => null);
+        if (!contributor) return notFound(response);
+        const update = signGradientUpdate(
+          createGradientUpdate({
+            roundId,
+            contributorId: contributor.id,
+            baselineModelHash: body.baselineModelHash,
+            gradientHash: body.gradientHash,
+            differentialPrivacyEpsilon: body.differentialPrivacyEpsilon,
+            sampleCount: body.sampleCount
+          }),
+          contributor
+        );
+        const consents = await store.listConsents();
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const { round: nextRound, update: accepted } = submitGradientUpdate({
+          round,
+          update,
+          consents,
+          publicRecords
+        });
+        await store.saveFederatedRound(nextRound);
+        await store.saveFederatedUpdate(accepted);
+        let meshEvent = null;
+        if (accepted.payoutPaise > 0) {
+          meshEvent = createMeshContributionEvent({
+            operatorId: accepted.contributorId,
+            workloadType: FEDERATED_ROUND_WORKLOAD,
+            payoutPaise: accepted.payoutPaise,
+            roundId: nextRound.roundId
+          });
+          await store.saveMeshContributionEvent(meshEvent);
+        }
+        jsonResponse(response, 201, {
+          ok: true,
+          round: nextRound,
+          update: accepted,
+          meshContributionEvent: meshEvent
+        });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'federated' &&
+        parts[2] === 'rounds' &&
+        parts.length === 5 &&
+        parts[4] === 'updates'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const roundId = decodeURIComponent(parts[3]);
+        const round = await store.readFederatedRound(roundId).catch(() => null);
+        if (!round) return notFound(response);
+
+        const body = await readRequestJson(request);
+        if (!body?.update?.signature) {
+          throw new Error('signed `update` payload is required.');
+        }
+        const consents = await store.listConsents();
+        const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const { round: nextRound, update: accepted } = submitGradientUpdate({
+          round,
+          update: body.update,
+          consents,
+          publicRecords
+        });
+        await store.saveFederatedRound(nextRound);
+        await store.saveFederatedUpdate(accepted);
+
+        // The accepted update pays the contributor via the §7f
+        // mesh workload class. The mesh-contribution event surfaces
+        // in the operator's earnings ticker alongside inference /
+        // storage events.
+        let meshEvent = null;
+        if (accepted.payoutPaise > 0) {
+          meshEvent = createMeshContributionEvent({
+            operatorId: accepted.contributorId,
+            nodeId: body.nodeId ?? null,
+            workloadType: FEDERATED_ROUND_WORKLOAD,
+            payoutPaise: accepted.payoutPaise,
+            roundId: nextRound.roundId,
+            charging: body.charging ?? true,
+            wifi: body.wifi ?? true,
+            batteryPercent: body.batteryPercent
+          });
+          await store.saveMeshContributionEvent(meshEvent);
+        }
+        jsonResponse(response, 201, {
+          ok: true,
+          round: nextRound,
+          update: accepted,
+          meshContributionEvent: meshEvent
+        });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'federated' &&
+        parts[2] === 'rounds' &&
+        parts.length === 5 &&
+        parts[4] === 'aggregate'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const roundId = decodeURIComponent(parts[3]);
+        const round = await store.readFederatedRound(roundId).catch(() => null);
+        if (!round) return notFound(response);
+        const updates = (await store.listFederatedUpdates()).filter(
+          (u) => u.roundId === roundId && u.accepted
+        );
+        const aggregated = aggregateRound(round, updates);
+        await store.saveFederatedRound(aggregated);
+        jsonResponse(response, 200, { ok: true, round: aggregated });
+        return;
       }
 
       // §7c device-pairing sessions — WebRTC signaling relay only.

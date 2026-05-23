@@ -57,6 +57,8 @@ export class BosStore {
     this.voiceModelPacksPath = path.join(rootPath, 'voice-model-packs');
     this.ttsModelPacksPath = path.join(rootPath, 'tts-model-packs');
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
+    this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
+    this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -84,6 +86,8 @@ export class BosStore {
     await fs.mkdir(this.voiceModelPacksPath, { recursive: true });
     await fs.mkdir(this.ttsModelPacksPath, { recursive: true });
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
+    await fs.mkdir(this.federatedRoundsPath, { recursive: true });
+    await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.appendFile(this.ledgerPath, '');
   }
 
@@ -521,6 +525,58 @@ export class BosStore {
 
   async listMeshContributionEvents() {
     return listJson(this.meshContributionsPath);
+  }
+
+  // §7f federated learning rounds + updates — ADR 0071.
+
+  federatedRoundFile(roundId) {
+    return path.join(this.federatedRoundsPath, `${safeName(roundId)}.json`);
+  }
+
+  federatedUpdateFile(updateId) {
+    return path.join(this.federatedUpdatesPath, `${safeName(updateId)}.json`);
+  }
+
+  async saveFederatedRound(round) {
+    await this.init();
+    await writeJson(this.federatedRoundFile(round.roundId), round);
+    await this.appendLedger({
+      type: 'federated_round.saved',
+      roundId: round.roundId,
+      status: round.status,
+      modelName: round.modelName,
+      updateCount: round.updateCount,
+      at: new Date().toISOString()
+    });
+    return round;
+  }
+
+  async readFederatedRound(roundId) {
+    return readJson(this.federatedRoundFile(roundId));
+  }
+
+  async listFederatedRounds() {
+    return listJson(this.federatedRoundsPath);
+  }
+
+  async saveFederatedUpdate(update) {
+    await this.init();
+    await writeJson(this.federatedUpdateFile(update.updateId), update);
+    await this.appendLedger({
+      type: 'federated_update.saved',
+      updateId: update.updateId,
+      roundId: update.roundId,
+      contributorId: update.contributorId,
+      accepted: update.accepted,
+      epsilon: update.differentialPrivacyEpsilon,
+      payoutPaise: update.payoutPaise,
+      at: new Date().toISOString()
+    });
+    return update;
+  }
+
+  async listFederatedUpdates() {
+    return listJson(this.federatedUpdatesPath);
   }
 
   async savePairingSession(session) {

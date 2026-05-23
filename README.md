@@ -144,6 +144,20 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 3.0 **§7f federated learning round substrate** — first Phase 3
+  commitment kicks off. `src/phase1/federated-round.mjs` ships the
+  round lifecycle (created → accepting_updates → completed/expired),
+  Ed25519-signed gradient updates (hash-only — no gradient vectors on
+  the control plane), donation-purpose consent enforcement (workflow
+  consents rejected), DP epsilon cap per round with running
+  `epsilonSpent` totals, and deterministic aggregation. New
+  `federated_round` mesh workload class so participation earns fiat
+  UPI credits via the existing §13B ticker. Four routes
+  (`/api/federated/rounds*`) plus a demo-mode `/sign-and-submit`
+  shortcut. Shell card *"🧪 Federated rounds — §7f opt-in training"*
+  shows active rounds with payout, ε cap, contributor count, and a
+  one-tap join. §15 bindings preserved end-to-end. 241/241 tests
+  (+11 new). SW cache to v18. ADR 0071.
 - Phase 2a.21 **QR-code pairing** — collapses the §7c receiver flow
   from *"type 6-digit code + read 12 words aloud + type 12 words"*
   into one scan. Initiator renders a QR (`{ v: 'bos.qr.v1', code, phrase }`)
