@@ -1,0 +1,14 @@
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+.cache/
+.bharat-os/
+.tools/
+.tmp/
+node_modules/
+coverage/
+dist/
+build/
+out/

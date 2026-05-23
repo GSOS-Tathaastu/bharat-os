@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bharat OS Operator Console</title>
+    <link rel="stylesheet" href="/console/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">B</div>
+          <div>
+            <h1>Bharat OS</h1>
+            <p>Phase 1 control</p>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="Console views">
+          <a class="nav-item active" href="#overview">Overview</a>
+          <a class="nav-item" href="#policy">Policy</a>
+          <a class="nav-item" href="#skills">Skills</a>
+          <a class="nav-item" href="#identities">Identities</a>
+          <a class="nav-item" href="#trust">Trust</a>
+          <a class="nav-item" href="#consents">Consents</a>
+          <a class="nav-item" href="#memory">Memory</a>
+          <a class="nav-item" href="#nodes">Nodes</a>
+          <a class="nav-item" href="#reports">Reports</a>
+          <a class="nav-item" href="#audit">Audit</a>
+        </nav>
+        <div class="status-strip">
+          <span class="status-dot" id="apiStatusDot"></span>
+          <span id="apiStatusText">Connecting</span>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Operator Console</p>
+            <h2>Mesh Bootstrap Control Plane</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh dashboard" title="Refresh dashboard">
+              &#8635;
+            </button>
+            <button class="primary-button" id="runButton" type="button">Run Bootstrap</button>
+          </div>
+        </header>
+
+        <section class="toolbar" aria-label="Simulation controls">
+          <label>
+            Nodes
+            <input id="nodesInput" type="number" min="1" step="1" value="1000" />
+          </label>
+          <label>
+            Objects
+            <input id="objectsInput" type="number" min="1" step="1" value="100" />
+          </label>
+          <label>
+            Object Bytes
+            <input id="objectBytesInput" type="number" min="1" step="1" value="65536" />
+          </label>
+          <label>
+            Replication
+            <input id="replicationInput" type="number" min="1" step="1" value="3" />
+          </label>
+          <label class="check-label">
+            <input id="kycInput" type="checkbox" checked />
+            Require KYC
+          </label>
+        </section>
+
+        <section id="overview" class="metric-grid" aria-label="Bootstrap metrics">
+          <article class="metric">
+            <span>Success Rate</span>
+            <strong id="successRate">--</strong>
+          </article>
+          <article class="metric">
+            <span>Eligible Nodes</span>
+            <strong id="eligibleNodes">--</strong>
+          </article>
+          <article class="metric">
+            <span>Stored Objects</span>
+            <strong id="storedObjects">--</strong>
+          </article>
+          <article class="metric">
+            <span>Eligible Storage</span>
+            <strong id="eligibleStorage">--</strong>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <section class="panel" aria-labelledby="meshHealthTitle">
+            <div class="panel-header">
+              <h3 id="meshHealthTitle">Mesh Health</h3>
+              <span id="reportIdLabel">No report</span>
+            </div>
+            <div class="health-layout">
+              <div class="donut" id="eligibilityDonut" style="--value: 0">
+                <span id="donutValue">0%</span>
+              </div>
+              <div class="health-copy">
+                <div class="bar-row">
+                  <span>Utilization</span>
+                  <div class="bar-track"><div class="bar-fill" id="utilizationBar"></div></div>
+                  <b id="utilizationValue">0%</b>
+                </div>
+                <div class="bar-row">
+                  <span>Replication</span>
+                  <div class="bar-track"><div class="bar-fill accent" id="replicationBar"></div></div>
+                  <b id="replicationValue">0x</b>
+                </div>
+                <p id="verdictText" class="verdict">Waiting for bootstrap data.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="rejectionTitle">
+            <div class="panel-header">
+              <h3 id="rejectionTitle">Rejection Reasons</h3>
+              <span id="rejectedCount">-- rejected</span>
+            </div>
+            <div id="rejectionList" class="reason-list"></div>
+          </section>
+        </section>
+
+        <section id="policy" class="content-grid policy-grid">
+          <section class="panel" aria-labelledby="policyTitle">
+            <div class="panel-header">
+              <h3 id="policyTitle">Policy & Consent</h3>
+              <span id="phase1Status">Phase 1.36</span>
+            </div>
+            <div class="phase1-metrics">
+              <div>
+                <span>Policies</span>
+                <strong id="policyCount">--</strong>
+              </div>
+              <div>
+                <span>Skills</span>
+                <strong id="skillCount">--</strong>
+              </div>
+              <div>
+                <span>Active Consents</span>
+                <strong id="activeConsentCount">--</strong>
+              </div>
+              <div>
+                <span>Revoked</span>
+                <strong id="revokedConsentCount">--</strong>
+              </div>
+              <div>
+                <span>Expired</span>
+                <strong id="expiredConsentCount">--</strong>
+              </div>
+              <div>
+                <span>Signed Consents</span>
+                <strong id="signedConsentCount">--</strong>
+              </div>
+              <div>
+                <span>Decisions</span>
+                <strong id="decisionCount">--</strong>
+              </div>
+              <div>
+                <span>Tool Runs</span>
+                <strong id="toolExecutionCount">--</strong>
+              </div>
+              <div>
+                <span>Orchestrations</span>
+                <strong id="orchestrationCount">--</strong>
+              </div>
+              <div>
+                <span>Preflights</span>
+                <strong id="skillPreflightCount">--</strong>
+              </div>
+              <div>
+                <span>Memory</span>
+                <strong id="memoryRecordCount">--</strong>
+              </div>
+              <div>
+                <span>Integrity</span>
+                <strong id="integrityStatus">--</strong>
+              </div>
+            </div>
+            <div class="consent-actions">
+              <button class="primary-button warning-action" id="revokeConsentButton" type="button">Revoke Latest Consent</button>
+              <span id="latestConsentText">No active consent.</span>
+            </div>
+            <p id="latestDecisionText" class="verdict">No decision evaluations yet.</p>
+            <p id="latestToolText" class="verdict">No tool executions yet.</p>
+            <p id="latestOrchestrationText" class="verdict">No orchestrations yet.</p>
+            <p id="latestSkillPreflightText" class="verdict">No skill preflights yet.</p>
+            <p id="latestMemoryText" class="verdict">No memory records yet.</p>
+          </section>
+
+          <section class="panel" aria-labelledby="decisionTitle">
+            <div class="panel-header">
+              <h3 id="decisionTitle">Decision Dry-Run</h3>
+              <span>L7 + L4</span>
+            </div>
+            <div class="decision-form">
+              <label class="wide-field">
+                Intent
+                <input id="intentInput" type="text" value="Open a current account for my exports business" />
+              </label>
+              <label>
+                Language
+                <select id="intentLocaleInput">
+                  <option value="en-IN">English</option>
+                  <option value="hi-Latn-IN">Hinglish</option>
+                  <option value="hi-IN">Hindi</option>
+                </select>
+              </label>
+              <label>
+                Actor ID
+                <input id="decisionActorInput" type="text" placeholder="bos:person:..." />
+              </label>
+              <label>
+                Action
+                <select id="decisionActionInput">
+                  <option value="regulated_onboarding">Regulated onboarding</option>
+                  <option value="scheme_delivery">Scheme delivery</option>
+                  <option value="health_record_read">Health record read</option>
+                  <option value="labor_match_post">Labor match post</option>
+                  <option value="mesh_storage">Mesh storage</option>
+                </select>
+              </label>
+              <label>
+                Scopes
+                <input id="decisionScopesInput" type="text" value="identity.verify,consent.record,regulated.workflow" />
+              </label>
+              <label>
+                PII Handling
+                <select id="decisionPiiInput">
+                  <option value="tokenized">Tokenized</option>
+                  <option value="summary">Summary</option>
+                  <option value="none">None</option>
+                  <option value="raw">Raw</option>
+                </select>
+              </label>
+              <label>
+                Tool
+                <select id="toolInput">
+                  <option value="">Auto</option>
+                  <option value="uidai_offline_ekyc">UIDAI offline eKYC</option>
+                  <option value="digilocker">DigiLocker</option>
+                  <option value="account_aggregator">Account Aggregator</option>
+                  <option value="abha">ABHA</option>
+                  <option value="upi_escrow">UPI escrow</option>
+                  <option value="mesh.storage">Mesh storage</option>
+                </select>
+              </label>
+              <label class="check-label inline-check">
+                <input id="decisionRegulatedInput" type="checkbox" checked />
+                Regulated
+              </label>
+              <button class="primary-button" id="decisionButton" type="button">Evaluate</button>
+              <button class="primary-button secondary-action" id="toolButton" type="button">Execute Tool</button>
+              <button class="primary-button orchestration-action" id="orchestrateButton" type="button">Orchestrate</button>
+              <button class="primary-button secondary-action" id="preflightGrantButton" type="button">Grant Consent</button>
+              <button class="primary-button orchestration-action" id="preflightExecuteButton" type="button">Execute Preflight</button>
+              <button class="primary-button secondary-action" id="preflightTraceButton" type="button">Trace</button>
+            </div>
+            <pre id="decisionOutput" class="decision-output">Waiting for a decision dry-run.</pre>
+          </section>
+        </section>
+
+        <section id="skills" class="panel table-panel" aria-labelledby="skillsTitle">
+          <div class="panel-header">
+            <h3 id="skillsTitle">Skill Registry</h3>
+            <span id="skillRegistryCountLabel">-- skills</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Skill</th>
+                  <th>Version</th>
+                  <th>Category</th>
+                  <th>Tool</th>
+                  <th>Consent</th>
+                  <th>Data Exposure</th>
+                  <th>Sandbox</th>
+                  <th>Manifest</th>
+                  <th>Developer</th>
+                  <th>Preflight</th>
+                </tr>
+              </thead>
+              <tbody id="skillsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="identities" class="panel table-panel" aria-labelledby="identitiesTitle">
+          <div class="panel-header">
+            <h3 id="identitiesTitle">Identity Profiles</h3>
+            <span id="identityCountLabel">-- identities</span>
+          </div>
+          <div class="identity-controls">
+            <label>
+              Display Name
+              <input id="identityNameInput" type="text" value="Local Bharat OS User" />
+            </label>
+            <button class="primary-button secondary-action" id="identityCreateButton" type="button">Create</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Identity</th>
+                  <th>Attestations</th>
+                  <th>Public Key</th>
+                  <th>Created</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="identitiesTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="trust" class="panel table-panel" aria-labelledby="trustTitle">
+          <div class="panel-header">
+            <h3 id="trustTitle">Trust Passports</h3>
+            <span id="trustPassportCountLabel">-- passports</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Identity</th>
+                  <th>Level</th>
+                  <th>Attestations</th>
+                  <th>Active Consent</th>
+                  <th>Signed</th>
+                  <th>Memory</th>
+                  <th>Skills</th>
+                  <th>Evidence</th>
+                  <th>Generated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="trustPassportsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="consents" class="panel table-panel" aria-labelledby="consentsTitle">
+          <div class="panel-header">
+            <h3 id="consentsTitle">Consent Timeline</h3>
+            <span id="consentTimelineCountLabel">-- consents</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Subject</th>
+                  <th>Grantee</th>
+                  <th>Scopes</th>
+                  <th>Purpose</th>
+                  <th>Signed</th>
+                  <th>Expires</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="consentsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="memory" class="panel table-panel" aria-labelledby="memoryTitle">
+          <div class="panel-header">
+            <h3 id="memoryTitle">Memory Provenance</h3>
+            <span id="memorySearchCountLabel">-- records</span>
+          </div>
+          <div class="memory-controls">
+            <label>
+              Query
+              <input id="memorySearchInput" type="text" value="" />
+            </label>
+            <button class="primary-button secondary-action" id="memorySearchButton" type="button">Search</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Owner</th>
+                  <th>Tags</th>
+                  <th>Source</th>
+                  <th>Manifest</th>
+                  <th>Bytes</th>
+                  <th>Created</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="memoryTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="nodes" class="panel table-panel" aria-labelledby="nodesTitle">
+          <div class="panel-header">
+            <h3 id="nodesTitle">Top Active Nodes</h3>
+            <span id="nodeCountLabel">-- nodes</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th>KYC</th>
+                  <th>Power</th>
+                  <th>Battery</th>
+                  <th>Trust</th>
+                  <th>Used</th>
+                </tr>
+              </thead>
+              <tbody id="nodesTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="reports" class="panel table-panel" aria-labelledby="reportsTitle">
+          <div class="panel-header">
+            <h3 id="reportsTitle">Report History</h3>
+            <span id="reportCountLabel">-- reports</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Report</th>
+                  <th>Seed</th>
+                  <th>Objects</th>
+                  <th>Success</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="reportsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="audit" class="panel table-panel" aria-labelledby="auditTitle">
+          <div class="panel-header">
+            <h3 id="auditTitle">Audit Ledger</h3>
+            <span id="ledgerCountLabel">-- events</span>
+          </div>
+          <div class="ledger-controls">
+            <label>
+              Event Type
+              <input id="ledgerTypeInput" type="text" value="" />
+            </label>
+            <label>
+              Limit
+              <input id="ledgerLimitInput" type="number" min="1" max="500" step="1" value="50" />
+            </label>
+            <button class="primary-button secondary-action" id="ledgerFilterButton" type="button">Filter</button>
+            <button class="primary-button secondary-action" id="ledgerExportButton" type="button">Export</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Artifact</th>
+                  <th>Decision</th>
+                  <th>Status</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/console/app.js" type="module"></script>
+  </body>
+</html>

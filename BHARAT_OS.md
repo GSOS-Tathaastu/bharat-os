@@ -187,7 +187,7 @@ actually uses.
 │ L7 — INTENT → DECISION ORCHESTRATOR                            │
 │      policy reasoning · consent interpretation · tool selection│
 ├──────────────────────────────────────────────────────────────┤
-│ L6 — SKILL / AGENT MARKETPLACE (MCP-native, KYC'd developers)  │
+│ L6 — SKILL MARKETPLACE (MCP) + SERVICE MARKETPLACE (§9B native)│
 ├──────────────────────────────────────────────────────────────┤
 │ L5 — IDENTITY-ANCHORED MEMORY (E2EE, Aadhaar-bound, optional)  │
 ├──────────────────────────────────────────────────────────────┤
@@ -214,8 +214,14 @@ What each layer does:
   policy, interprets consent, selects tools, plans multi-step execution. This is
   what turns a "smart UI" into an actual decision engine. (Originated as the
   "UIDAI decision layer" idea — see §7d.)
-- **L6 — Skill / Agent Marketplace.** MCP-native, signed, sandboxed, KYC'd
-  developers. Skills replace apps; this is the ecosystem network effect.
+- **L6 — Skill / Agent Marketplace + Service Marketplace.** Two things live
+  here, both Bharat OS-owned. (1) Skill marketplace — MCP-native, signed,
+  sandboxed, KYC'd developers; skills replace apps. (2) Service marketplace —
+  the native L6 substrate for booking real-world services (cabs, hotels,
+  tickets, food, groceries, professional services); see §9B for the
+  substrate-ownership principle and the role of the ONDC bridge. The skill
+  marketplace replaces the app store; the service marketplace replaces the
+  aggregator. Both are the ecosystem network effect.
 - **L5 — Identity-Anchored Memory.** E2EE, user-owned, optionally bound to a
   verified Aadhaar attestation. **Pointer, not payload** — memory objects are
   chunk-manifest pointers + summaries, never raw files. Master key in the device
@@ -329,6 +335,39 @@ is one cryptographic identity** (a root keypair that owns the keys, vault, and
 permissions, portable across devices) — Aadhaar/email/phone are recovery and
 attestation mechanisms, not the identity itself.
 
+**Phone migration / device pairing — designed in, not yet built.** Because
+identity is the person and not the device (§15), switching phones must be
+a first-class flow:
+
+1. **Pair new device.** New phone scans a QR shown by the old phone.
+2. **Encrypted transfer over local WiFi or Bluetooth.** Identity root
+   keypair, L5 encrypted memory vault, consent artifacts, Trust Passport
+   evidence, mesh-operator NCS history, and skill marketplace receipts
+   all move device-to-device. No cloud round-trip; nothing crosses an
+   unauthenticated server.
+3. **Recovery phrase fallback.** A BIP-39-style 12 / 24-word recovery
+   phrase is generated at identity creation and shown to the user once;
+   storing it is the user's responsibility. Required only when the old
+   phone is lost / broken / unavailable for pairing.
+4. **Multi-device coexistence (optional).** A user can pair the same
+   identity across two devices (phone + tablet, or personal + work) with
+   independent per-device session keys. Loss of one device revokes only
+   that device's session.
+5. **What does NOT carry over automatically.** Platform-bound regulator
+   tokens (DigiLocker, AA, ABHA bind to device fingerprints by their
+   issuers' design) need re-authentication on the new device through the
+   normal IndiaStack auth flow. This is regulatory, not architectural.
+
+The structural advantage this creates: Bharat OS portability works
+*across OEMs*, because the identity is the substrate. Apple's iCloud
+restore requires an Apple device + Apple ID; Google's restore requires a
+Google account; Bharat OS's restore requires only the user's own
+cryptographic identity. No platform lock-in.
+
+**Status (§17).** Device pairing and the recovery-phrase flow are
+unbuilt today; this is a Phase 1 gap the §17 status section flags
+explicitly under L5.
+
 ### 7d. The decision orchestrator + IndiaStack (L7 + L3/L4)
 
 This is what makes the whole stack defensible. A generic "user-owned crypto
@@ -360,6 +399,258 @@ breach protocol); Aadhaar Act §7 → Aadhaar must be *optional* with PAN-only /
 DigiLocker-only fallbacks; MeitY data localization (which the thesis wants anyway);
 RBI rules on UPI payouts (TDS, KYC, limits); DigiLocker/AA empanelment (2–4 weeks);
 ABHA HIU registration (4–8 weeks).
+
+### 7e. The Adaptive Model Router (L2) — local SLM, peer compute, cloud
+
+§6 commits the OS to a model router that picks per request between a local
+small language model on the device, a KYC'd peer node on the mesh, and a
+frontier model in the cloud. §5 calls model routing one of the "real, not
+fantasy" components of generative computing. This subsection makes that
+commitment concrete: why the router exists, what runs where, and what the
+trade-offs are.
+
+#### Why this matters — neither Brain.ai nor Apple can do it
+- **Brain.ai's Natural OS is structurally cloud-only.** Intent goes to their
+  US cloud; UI comes back. That is why it works on a thin SoftBank Android —
+  the device is doing very little. The on-device privacy story is whatever
+  the cloud says it is.
+- **Apple Intelligence is structurally on-device-only** (with a private-cloud
+  fallback under tight constraints). High floor, low ceiling: it cannot
+  reach for a 400B-class model when an intent needs it.
+- **Bharat OS routes per request.** Neither incumbent can copy this without
+  rebuilding their architecture, because both *chose once* at the platform
+  level. Routing is the OS-level lever that lets Bharat OS keep regulated
+  workflows local while still reaching for cloud quality on the long tail.
+
+#### The three tiers
+1. **Local SLM on the device (L2 / L8 boundary).** Small language model
+   resident on the phone — ~1–7B parameters, 4-bit quantized,
+   ~1.5–4GB on disk. Handles vernacular intent parsing (L8), short-context
+   reasoning, on-device memory recall and summaries, deterministic tool
+   selection for the canonical action types, redaction of PII before
+   anything escalates.
+2. **KYC'd peer node on the mesh (L2).** A nearby device with spare capacity
+   and a TEE attestation, paid in fiat credits via UPI (§7b, §13B). Handles
+   medium-complexity reasoning that the local SLM cannot — multi-step plans
+   for unfamiliar intents, longer-context summarization, batch inference —
+   without leaving Indian devices. The mesh's regulatory class (§7d) makes
+   sure regulated data never crosses an unverified peer.
+3. **Cloud frontier model (L2 escape hatch).** A hosted frontier model
+   (whichever provider; not exclusive) for the long tail: rare languages
+   under-represented in the SLM, complex multi-document reasoning, novel
+   tool plans, anything where SLM quality is structurally inadequate. Used
+   sparingly; never for regulated data without explicit consent (L4); the
+   audit ledger records every cloud escalation.
+
+#### Local SLM capability catalog — what works on-device today
+
+A 1–7B parameter SLM, 4-bit quantized, on a 2023+ phone NPU is more capable
+than the "thin client" framing suggests. The capability profile is
+sharp-edged, not flat — here is what is in-scope on-device and what is not.
+
+**Strong on-device capabilities (no escalation needed):**
+1. **Voice ↔ text in 22 Indian languages.** IndicWhisper (ASR) + IndicTTS
+   (TTS) run real-time on-device. The full L8 voice loop closes without a
+   network round-trip.
+2. **Intent parsing and classification** for the canonical action types
+   (regulated onboarding, scheme delivery, health, labor, service booking,
+   mesh storage). Reliability ~90–95% on trained domains; handles
+   code-mixed input ("Mujhe ek cab book karo").
+3. **Named entity extraction** — PANs, Aadhaars, amounts, dates, locations,
+   names — for auto-filling regulated forms.
+4. **PII redaction before escalation.** Sensitive tokens are stripped
+   on-device before anything routes to a peer or the cloud. This is what
+   makes the §7e privacy story real, not aspirational.
+5. **Indic ↔ Indic and Indic ↔ English translation** via IndicTrans2 — good
+   enough for conversational and short-document use.
+6. **Short summarization** (1–4 K tokens in → 1–3 sentence out): WhatsApp
+   threads, notifications, single-page documents.
+7. **Q&A over L5 encrypted memory.** *"When did I last book a doctor?",
+   "What was my last electricity bill?"* — the SLM reasons over the user's
+   own memory chunks; the data never crosses the device boundary.
+8. **Calendar / date parsing across languages.** *"अगले मंगलवार",
+   "after Diwali", "Friday raat"* → ISO timestamps.
+9. **Vernacular response generation.** Template filling in the user's
+   language; Phase 1.37 `localizeResponse` is the seam this plugs into.
+10. **Tool calling for ~10 well-defined tools.** Choosing between the
+    canonical action types reliably. Degrades sharply past ~20 tools.
+11. **Short conversational continuity** (3–5 turn context). Enough for
+    "yes confirm / show other options / how much was that."
+12. **Spelling and romanized-Indic typo correction** before the orchestrator
+    sees the text.
+
+**Capability by model tier:**
+
+| Tier | Models | Hardware floor | What it adds beyond the tier below |
+|---|---|---|---|
+| 1–2B | Llama 3.2 1B, Gemma 2 2B | Most 2022+ phones, even mid-range | Voice loop, NER, translation, basic intent classification |
+| 3–4B | Phi-3.5-mini, Llama 3.2 3B | Snapdragon 7-series, Tensor G2+ | Reasonable tool calling, 3–5 step conversational reasoning |
+| 7B | Sarvam-1, AI4Bharat-tuned | Snapdragon 8 Gen 2+, Tensor G3+, Dimensity 9000+ | Proper Indic conversational quality, multi-turn, complex form-filling sessions |
+
+**Escalation thresholds — what the SLM cannot do alone:**
+- Multi-step planning beyond ~5 steps → escalate to KYC'd peer
+- Long-context document analysis (>4–8 K tokens) → peer or cloud
+- Cross-document synthesis (multiple PDFs) → cloud
+- Reliable tool calling against 20+ tools → peer or cloud
+- Reasoning about novel domains absent from the SLM's training → cloud
+- Code generation, complex math, image / video understanding → cloud
+
+**Where this shows up in §9C vignettes.** Almost every user-facing vignette
+runs through the on-device SLM: Sita's Hindi loan conversation (1),
+Lakshmi's Tamil ABHA query (3), Suresh's Bhojpuri job-ping (5), the
+shared-phone voice biometric (6), Anjali's *"cab book karo"* intent (10),
+the Tamil-Malayalam hotel flow (11), Priya's NPU is what *serves* these
+same workloads to other users at night (7), and the conference-batch case
+(16) is on-device SLM at scale across many operator devices. The two
+vignettes that do *not* lean on the SLM are 9 (Rajesh's storage — pure L2)
+and 13 (Lava OEM — distribution-layer commercial).
+
+#### Capability-tiered distribution — Lite / Standard / Pro
+
+Brain.ai ships one binary. Apple gates Intelligence by hardware (iPhone 15
+Pro+). Bharat OS does better because it has the §7e router as a
+compensating mechanism: ship the *same OS* in three model-pack SKUs sized
+to the device, and let the router smooth the experience.
+
+| SKU | Target device | Local SLM | On-disk footprint | Routing posture |
+|---|---|---|---|---|
+| **Bharat OS Lite** | Entry-level (₹6–10K, Lava / Itel / sub-Snapdragon 6-gen) | 1–2B (Llama 3.2 1B or Gemma 2 2B) | ~0.8–1.2 GB | Heavy escalation to mesh peers and cloud |
+| **Bharat OS Standard** | Mid-range (₹10–25K, Snapdragon 7-series, Tensor G2/G3) | 3–4B (Phi-3.5-mini or Llama 3.2 3B) | ~1.8–2.2 GB | Balanced: most flows local; some peer escalation |
+| **Bharat OS Pro** | Flagship (₹25K+, Snapdragon 8 Gen 2+, Tensor G3+, Dimensity 9000+) | 7B (Sarvam-1 or AI4Bharat-tuned) | ~3.5–4.2 GB | Mostly local; peer/cloud only for genuinely heavy tasks |
+
+The point is **a worker on a ₹7K Lava feels the same OS as a flagship
+Pixel owner.** The router compensates for the SLM gap by escalating Lite
+users more often to KYC'd mesh peers and the cloud — and the §13B Net
+Contribution Score fair-use lever means Lite users (net consumers) are
+cross-subsidized by Standard/Pro users (net producers). This is what
+"sovereign OS for 1.4 B people" actually requires; a single-binary OS
+gated by hardware floor (Apple's approach) excludes the people Bharat OS
+exists for.
+
+#### Candidate local SLMs (2026 landscape)
+- **AI4Bharat / Sarvam-1 (~7B)** — India-specific, strong on the 22 Indian
+  languages thanks to the ~251B-token AI4Bharat corpus (§7a). The natural
+  default for L8 intent parsing in vernacular contexts.
+- **Phi-3.5-mini (3.8B), Gemma 2 (2B), Llama 3.2 (1B / 3B)** — general
+  small models. 4-bit quantization gets them to 1.5–2GB on disk and
+  runnable on Snapdragon 8 Gen 2+, Tensor G3+, Dimensity 9000+ — i.e.,
+  most phones shipped in or after 2023.
+- **Bhashini / IndicWhisper / IndicTTS** — already proven on-device for
+  ASR / TTS (Intel + Digital India shipped these on AI PCs in 2026). The
+  voice loop does not need an LLM at all.
+
+#### How the router decides
+The router runs four checks per request and picks the lowest tier that
+clears all of them:
+- **Privacy class.** Regulated or PII-tagged intent → never cloud without
+  explicit consent. Default to local; escalate to a KYC'd peer with a TEE
+  attestation if the local SLM is inadequate.
+- **Latency budget.** The L8 voice loop needs sub-300ms turnaround; that
+  rules out cloud for interactive intents on weak networks.
+- **Compute availability.** Battery threshold, NPU presence, current
+  device load. A 2021 phone without an NPU routes more aggressively to the
+  mesh; a charging Pixel 9 keeps almost everything local.
+- **Network class.** WiFi → mesh / cloud are cheap; mobile data → local
+  preferred to spare the user's data cap.
+
+#### On-device SLM — the real trade-off table
+
+| Pro | Con |
+|---|---|
+| Privacy by construction (DPDP compliance trivial) | Quality ceiling at 1–7B parameters |
+| Sub-100ms latency | 1.5–4GB on-disk model weights |
+| Offline-capable (rural-India unlock) | 2–4GB RAM resident during inference |
+| Zero per-query cost | Battery drain — needs the same charging-only guardrail as the mesh node (§7b) |
+| Sovereignty without policy enforcement | Sustained inference heats mid-range phones |
+| No cloud-vendor lock-in | Pre-2022 phones often lack a usable NPU |
+| Composable with mesh peer compute | Small models are less reliable at structured tool calls |
+| Model is portable (not held hostage by an API) | Model updates are multi-GB OTAs vs. instant cloud updates |
+
+The honest read: on-device alone is not enough for everything, and cloud
+alone is not acceptable for sovereignty. Routing is the only architecture
+that gives both — which is why §6 makes it L2 (substrate-level), not an L7
+feature.
+
+#### What's built today
+Nothing on this seam yet. §17 already flags it: the L7 orchestrator is
+deterministic rule-and-alias normalization, and the L2 mesh is a placement
+simulator. The router itself, a packaged on-device SLM, the TEE-attested
+peer compute pool, and the cloud escape hatch are all unbuilt. The §7a
+vernacular module and the §7d orchestrator are the seams the router will
+plug into.
+
+---
+
+### 7f. The mesh as a federated training substrate — compatible with §15, not contradictory
+
+§15 binds *"no training on user data, ever; zero-knowledge servers."* That
+forbids silent harvesting — the OpenAI / Google default. It does **not**
+forbid the architectures that improve models *with* user consent and
+without their data ever leaving the device. Done right, the §7b / §7e mesh
+becomes a **training substrate** in addition to an inference substrate —
+and turns Bharat OS's massive future device footprint into a model-quality
+flywheel without breaking any binding.
+
+#### Three model-improvement paths Bharat OS can use
+
+1. **Federated learning over the mesh.** The model trains on-device using
+   the user's own data; only encrypted gradient updates (with differential
+   privacy noise) leave the device. The control plane aggregates updates
+   across thousands of devices to produce a better global model. Raw user
+   data never moves. Gboard and Apple Intelligence already use this; the
+   novelty for Bharat OS is doing it over a *KYC'd, fiat-credit-paid mesh*
+   rather than a closed vendor cloud. The same operator node that serves
+   §13B inference at night can participate in a federated training round
+   the next night, paid the same way.
+
+2. **Opt-in explicit data donation.** The user voluntarily contributes a
+   data chunk (anonymized, redacted) to public-good model training, with
+   per-chunk consent in the L4 ledger and full revocation. They earn UPI
+   credits for participating. Brand differentiator: *"you say yes, you
+   get paid"* — the precise opposite of the silent-harvest default.
+
+3. **Public-good corpus contribution.** Bharat OS funds or contributes to
+   AI4Bharat / Bhashini corpus expansion (already public-good
+   infrastructure, §7a). No private data; aligns with the §7d sovereign-DPI
+   thesis. Strengthens the public-good Indic model commons that Bharat OS
+   itself depends on.
+
+4. **RLHF on explicit user feedback.** When a user explicitly rates a
+   response (👍 / 👎, "this was wrong, here's what I meant"), that is
+   allowed training signal because the user is the one providing it.
+
+#### What stays explicitly forbidden
+- Silent use of on-device intent / memory / document-extraction signals
+  for training, even anonymized, even aggregated. §15 binding.
+- Training on the contents of L5 encrypted memory under any circumstance,
+  including for the user's own benefit. The memory vault is read-only to
+  the user, never to a model trainer.
+- Selling user data, or selling training-set access, to anyone. §13A
+  guardrails.
+- Inferring a training-signal opt-in from a user's general consent. Each
+  donation chunk needs its own L4 consent artifact.
+
+#### Why this is a strategic asset, not just a constraint
+A federated training mesh at Bharat OS scale (target Phase 3+: tens of
+millions of devices) produces something no closed vendor can match: an
+**India-specific model improvement loop that runs on the user's terms.**
+The privacy story is the marketing story; the marketing story compounds
+adoption; adoption produces more federated participants; federated
+participants improve the model; better model improves adoption. The
+opposite-of-OpenAI brand is also the flywheel.
+
+The §7b mesh node daemon, the §7e router, the L4 consent ledger, the
+§13B fiat-credit settlement — all four already exist as primitives. A
+federated training round is just *another workload class* on the same
+substrate.
+
+#### Status
+This is unbuilt today. §17 flags the mesh as simulator-only and the L7
+orchestrator as deterministic. Federated training is a Phase 3 commitment,
+not a Phase 0 / 1 deliverable. It is captured here so the substrate
+decisions made in Phases 0 / 1 leave the seam open — specifically: the
+node daemon must support workload classes beyond inference, and the
+consent ledger must distinguish *donation* consent from *workflow* consent.
 
 ---
 
@@ -489,6 +780,423 @@ carelessly. Vectors and the defenses the architecture already enables:
   and reach require more verification. Sybil-resistance and accessibility have to be
   balanced, deliberately.
 
+### How labor relates to the broader service-brokering pattern
+The labor flow described above is one **instance** of a much broader class of
+"the OS acts as the user's agent against a third-party service" flows — cab
+booking, hotel booking, train / flight / bus tickets, food, groceries,
+contractor / electrician / doctor / tutor matching. The shape is shared
+(voice intent → match → negotiate → escrow → execute → audit), and the
+substrate is shared (Bharat OS's own L6 service marketplace, never a third
+party's). The labor case is special only because of the vulnerable-user
+posture (design problems A and B above) and the legal weight of labour-law
+and child-labour safeguards. See **§9B** for the general pattern, the
+substrate-ownership principle, and the relationship to ONDC.
+
+---
+
+## 9B. Service brokering — the general pattern (Bharat OS owns the substrate)
+
+§9A described the labor-matching flow in depth. Reread end-to-end, that flow is
+one instance of a much larger class: **voice intent → match → negotiate →
+escrow → execute → audit**. The same shape covers cab booking, hotel booking,
+train/flight/bus tickets, food delivery, groceries, contractor / electrician /
+plumber matching, doctor appointments, tutoring, lending and insurance quotes
+— *every* time the OS acts as the user's agent against a third-party service.
+The labor case is special only because of the vulnerable-user posture (§9A
+design problems A and B) and the legal weight of labour-law and child-labour
+safeguards. The architecture underneath is the same architecture.
+
+This is what separates Bharat OS from a SaaS "AI assistant" pasted on top of
+existing apps. The L7 orchestrator + L6 skill marketplace + L3 tool layer
+were always designed for service brokering. The §9A worker protections we
+encoded in L4 are partly general-purpose: `policy.worker.no_advance_fee`,
+`policy.money.fiat_settlement_only`, `policy.worker.escrow_required` apply to
+*any* action with the relevant fields set, not only labor flows.
+
+### Why not just wrap Uber / Ola / MakeMyTrip — and why we don't even depend on ONDC
+
+The instinct is "let the OS call Uber's API behind a voice command." That
+fails three ways:
+1. **API access is hostile.** Uber, Ola, MakeMyTrip, Zomato, Swiggy own the
+   customer relationship; they have no incentive to let a third-party agent
+   broker bookings for free. Their public APIs are partner-tier, narrow, and
+   priced as referral schemes — not as a substrate an OS can sit above.
+2. **Regulatory weight.** A cab booking that goes through Bharat OS as a
+   regulated aggregator pulls it into the Motor Vehicle Aggregator
+   Guidelines 2020 (state aggregator licenses, fare caps). Hotels carry
+   hospitality compliance; trains carry IRCTC's rules; flights carry DGCA.
+3. **No moat.** Wrapping aggregators is what AGI Inc. and Rabbit attempt and
+   it tops out at the UI-automation reliability ceiling (§10).
+
+A second instinct, more defensible but still wrong as the destination, is
+"build on top of ONDC." ONDC (Open Network for Digital Commerce), on the
+Beckn protocol, is a government-backed open marketplace where any buyer-side
+app can discover and transact against any seller-side app. Cabs (Namma
+Yatri), food, groceries, hotels, and B2B are live. It is explicitly designed
+to displace walled-garden aggregator dominance.
+
+But **Bharat OS is an OS, not a buyer app**. An OS does not sit *under* a
+protocol designed for any-buyer-any-seller. If the matching, trust,
+settlement, policy, and audit all live in ONDC, Bharat OS is reduced to a
+voice front-end — a thin layer above someone else's marketplace, with its
+value capped by what ONDC chooses to expose and its evolution governed by a
+committee Bharat OS does not control.
+
+### The principle: Bharat OS owns the marketplace
+
+The L6 service marketplace is **Bharat OS's substrate, not a third party's**.
+What that means concretely:
+- **The provider registry** (drivers, hotels, professionals, contractors who
+  joined the network) lives in Bharat OS — KYC'd via IndiaStack (§7d),
+  identity-anchored (L5), Trust-Passport-rated (§7c).
+- **The matching engine** (which provider for which user, ranked by Trust
+  Passport + proximity + price + fairness) is Bharat OS code on the mesh
+  (L2). No external protocol decides this.
+- **Settlement** runs on Bharat OS's UPI escrow (L3 + §13B) — no extra hop.
+- **Policy enforcement** — §9A protections, dispute resolution, deactivation
+  rules — is L4, with audit hashes, not opaque committee discretion.
+- **The audit ledger** of every booking lives on Bharat OS's mesh and audit
+  surface, not in a counterparty's logs.
+
+This is what "operating system" means at the service layer: the substrate is
+the OS itself.
+
+### How ONDC fits — bridge, not foundation
+
+ONDC is still useful, but only as a **bridge**, not the substrate:
+- **Phase A density bootstrap.** When Bharat OS's native provider registry is
+  empty, Bharat OS can integrate ONDC as *one discovery source* among
+  several, so the user gets a usable cab even before native supply exists.
+  An ONDC bridge skill (`bos:skill:ondc-bridge`) speaks Beckn outbound; the
+  result is normalized into the Bharat OS marketplace receipt shape so the
+  caller cannot tell the difference. This is a temporary lever, not a
+  long-term posture.
+- **Interoperability — Bharat OS speaks Beckn inbound too.** Bharat OS
+  exposes Beckn-compliant endpoints so an ONDC buyer-side app can discover
+  Bharat OS sellers (and vice versa). Reach without surrender of substrate.
+- **Phase B and beyond.** As native supply grows, the bridge's share of
+  bookings shrinks. ONDC becomes a peer network Bharat OS interops with,
+  not a layer it sits above.
+
+This is the same posture Bharat OS takes toward MOSIP / UPI in §13C — adopt
+the open protocols, but own the OS-level integration.
+
+### Phase B: native marketplace is the default
+
+In steady state, providers (drivers, hotels, professionals, contractors) run
+Bharat OS on the *work side* — exactly as Uber's driver app is a different
+surface from its rider app. The L6 marketplace + the mesh + Trust Passport
+are the matching substrate directly. The ONDC bridge remains available for
+counterparties that prefer the public network; it just stops being the path
+of first resort.
+
+The differentiators vs. native aggregators in Phase B are things
+aggregators structurally cannot match:
+- **No commission predation.** Take rate from the buyer side; the provider
+  keeps near-100% of the earned amount.
+- **UPI escrow by default.** No payment ambiguity, no hidden spreads.
+- **Voice-first work assignment** in the provider's own language — Hindi /
+  Marathi / Tamil / Bengali / Bhojpuri today (§17), 22 languages over time.
+- **Trust Passport portability** across services. A driver's reliability
+  rating goes with them; it is not the aggregator's hostage.
+- **Auditable policy enforcement.** Deactivation, surge pricing, wage floors
+  are L4 policies with audit hashes — not platform discretion.
+
+### Settlement principle (binding under §15)
+
+The user pays the *provider* for the service they consume — a cab fare, a
+hotel room, groceries. The user never pays *Bharat OS* for access. Bharat
+OS earns through (§13A): a platform fee on successful transactions (paid by
+the demand-side business or implicit in the take rate from the seller's
+share), the mesh / marketplace spread, and B2B verified-workflow fees.
+Workers / providers also never pay Bharat OS to find work (§15). All
+settlement remains fiat-denominated, non-transferable credits on UPI — no
+tokens.
+
+### Worker / provider protections generalize
+
+The §9A protections we encoded in L4 already apply where the action involves a
+worker subject. A cab driver, a delivery rider, a contractor, a small hotel
+operator are all "providers" in this taxonomy and inherit the protections:
+no advance fees, escrow required, minimum-floor on per-job earnings (where
+applicable and a floor is declared), age verification, no operator-acting-
+as-provider on kiosk channels. New verticals add their own vertical-specific
+rules (e.g., flight-cancellation refund timing, hotel-cancellation policy)
+without disturbing the core set.
+
+### Honest hard parts
+- **Native provider acquisition is the whole game.** Owning the substrate
+  means Bharat OS has to convince drivers, hotels, professionals to register
+  directly. Uber spent on the order of $2B in India on driver subsidies.
+  Bharat OS cannot match that. The pitch must be commission-free + UPI
+  escrow + voice work assignment in vernacular + Trust Passport portability
+  — not cash incentives.
+- **The bridge is a crutch, not a strategy.** While the ONDC bridge is
+  serving Phase A demand, the team must be obsessed with native supply
+  growth. If the bridge becomes load-bearing, Bharat OS has quietly slipped
+  into the "buyer app" position the doc explicitly rejects.
+- **Cold-start verticals.** Some verticals will have neither native supply
+  nor ONDC coverage at launch. The right move is to stay a *discovery
+  surface* — show options sourced from public data, hand off to the seller's
+  own checkout — rather than pretend depth that does not exist.
+- **Aggregator-licensing line.** Some verticals require Bharat OS to be
+  discovery-only to stay outside aggregator-licensing regimes. The L7
+  orchestrator already supports this — the plan can stop at "present
+  options" without invoking the payment skill.
+
+---
+
+## 9C. Real-world use cases — what people actually do with Bharat OS
+
+The architectural sections describe layers and flows in the abstract. This
+section grounds them in concrete user stories. Each vignette names the layers
+involved so the architecture and the experience can be read together.
+
+### 1. Sita the kirana shopkeeper applies for a loan (Varanasi, Hindi)
+Sita runs a small shop and has never filled an English banking form. She picks
+up the household phone, switches to her profile, and says: *"mujhe apni dukan
+ke liye chhota karza chahiye, lagbhag pachas hazar ka"*. The vernacular
+module (§7a, L8) routes to `regulated_onboarding`. The L7 orchestrator pulls
+her income signal from Account Aggregator (L3) under a fresh consent grant
+(L4), checks her GSTN registration via DigiLocker, and drafts the NBFC
+application in Hindi with English fields auto-mapped. She voice-approves; the
+application is submitted; the audit ledger records every step. **No paperwork
+desk, no English form, no advance fee** (§15 binding).
+
+### 2. Ravi the brick-kiln contractor hires labor (Eastern UP, Bhojpuri)
+Voice intent: *"hamra bhattha khatir pachas mazdoor chahin, teen din,
+chhah sau rupiya din"*. The vernacular module classifies as `labor_match_post`
+in Bhojpuri-Devanagari (§7a disambiguation). The §9A worker-protection
+policies fire automatically: wage ₹600/day is above the declared floor of
+₹400 (pass); age attestation prompt issued to Ravi (he confirms hiring adult
+workers); UPI escrow funded for ₹90,000. Bharat OS contacts 50 workers within
+a 30 km radius — each gets a voice ping in their own language (Bhojpuri,
+Hindi, or Maithili). Workers accept by voice; wages release on verified
+completion. **No advance fee from the worker, no commission to a labor
+agent.**
+
+### 3. Lakshmi the grandmother checks her diabetes record (rural Tamil Nadu, Tamil)
+*"enakku en sarkkarai noiyin pathivu kaattu"* (show me my sugar record).
+The L8 module routes to `health_record_read` in Tamil. L4 finds an active
+ABHA consent; L3 pulls the summary (not raw records — §15 pointer-not-payload).
+Her latest HbA1c, last hospital visit, and active medications are read aloud
+in Tamil. Her granddaughter requests access to share with a new doctor;
+Lakshmi voice-approves a scoped consent grant with a 7-day expiry. **No
+literacy required, no English UI, consent is auditable.**
+
+### 4. Aarav the college student books a train (Bangalore, code-mixed Hindi-English)
+*"Bangalore se Hyderabad ke liye Friday raat ka train book kar do, sleeper
+class"*. The §9B service marketplace receives the intent. The native L6
+provider registry has no inventory for trains in this prototype, so the
+ONDC bridge is invoked under the hood — IRCTC-via-ONDC returns three
+options. The §7e router routes the ranking computation to Aarav's own
+device (fast, private). Aarav voice-picks the 10pm option; UPI escrow funds
+₹620; the PNR comes back. The receipt records `sources: ['native',
+'ondc-bridge']` — Bharat OS used the bridge but the user experience is
+single-touch.
+
+### 5. Suresh the cab driver receives a ride request (Patna, Bhojpuri)
+Suresh has installed Bharat OS on the work-side. His phone pings him in
+Bhojpuri: *"tees kilometer door sawari, char sau pachas kamai, accept kara?"*.
+He voice-accepts; the UPI escrow is already funded by the rider; navigation
+loads automatically. His Trust Passport rating (§7c) ticks up after a
+verified completion. He pays **zero commission** — the §9B native
+marketplace's take rate falls on the rider's platform fee, not on the
+driver's earnings. At the end of the month he sees his total directly in his
+UPI account.
+
+### 6. A shared family phone with four profiles (low-income household, mixed languages)
+One Lava smartphone, ₹6,000, runs Bharat OS. Four profiles: mother (Hindi),
+father (Bhojpuri), college-going daughter (English/Hindi), school-going son
+(Hindi). Each profile is its own §7c root keypair. Switching is a 2-second
+voice biometric (or PIN for the son). The mother's profile holds her ABHA
+consent; the daughter's holds her scheme-eligibility memory; the father's
+runs his contractor side-business. **Identity is the person, not the
+device** (§15 binding) — verified by the §9A design problem A audit log:
+no one can act in another household member's name.
+
+### 7. Priya the engineering student earns on the mesh (Coimbatore, Tamil + English)
+Priya's Pixel 8a plugs in to charge at 11pm. The Bharat OS node daemon
+activates (charging + WiFi + battery > threshold — §7b). Through the night
+her NPU serves ~1.1M tokens of light inference to other Bharat OS users in
+South India — short Tamil-Hindi translations, scheme-eligibility summaries,
+WhatsApp draft suggestions. By morning she has earned ₹9 in UPI credits.
+Over a month she earns ~₹270. She is a *net producer* on the §13B Net
+Contribution Score, so her own Bharat OS usage is free. She paid for the
+phone and the WiFi; Bharat OS turned the idle hours into income.
+
+### 8. A CSC operator helps an elder enroll in a scheme (Bihar, assisted channel)
+Saraswati is 67, has no smartphone, and cannot read. She visits the
+Common Service Centre. The operator opens Bharat OS in kiosk mode. The
+§9A mediation policy fires: a `mediation.kioskOperatorId` is recorded, AND
+the system requires Saraswati's *own* voice authorization before any action
+is taken. The operator guides her through scheme eligibility lookup
+(DigiLocker land record, AA income summary), but every consent grant is
+voice-confirmed by Saraswati personally. The audit log shows the operator
+assisted but did not impersonate. Saraswati walks out with her PM-KISAN
+application submitted, the receipt printed in Hindi, and nobody ever charged
+her a fee. The L4 worker/user protections (§9A, §15) made this
+non-negotiable.
+
+### 9. Rajesh the CA stores eight years of client files on the mesh (Surat, Gujarati)
+Rajesh runs a small CA firm with ~200 clients — ~120 GB of GST returns,
+audit files, ITRs going back eight years. Generic cloud is out: DPDP +
+client confidentiality + MeitY localization (§7d). AWS S3 India is ~₹250/mo
+for 120 GB; Rajesh's bandwidth on uploads is also painful. He moves the
+archive to Bharat OS mesh storage. The files are client-side encrypted
+(pointer-not-payload, §15), Reed-Solomon erasure-coded, and distributed
+across ~40 KYC'd peer nodes in Gujarat and Maharashtra (regulatory class
+ensures Indian-only placement, §7d). He pays ~₹20/mo for 120 GB at the
+₹150–200/TB/mo sell price (§13B Product 1). His own phone contributes
+50 GB of capacity overnight → NCS slightly positive (§7b fair-use lever)
+→ effective bill ~₹15. Audit hashes on every chunk prove tamper-evidence
+when his client gets an Income Tax notice and needs to show the original
+file wasn't altered. **Revenue stream:** §13A #1 mesh storage spread —
+₹15–25 sell, ₹6–10 to the operators in his city, ₹9–15 platform.
+
+### 10. Anjali books a cab from office to home (Bangalore, Hinglish — rider side)
+9pm, Outer Ring Road. Anjali says: *"Cab book karo office se ghar"*.
+The §9B native marketplace queries: the native registry surfaces Suresh
+(yes, vignette 5 — Bharat OS is one network across both sides) at a fare
+of ₹220 with 0% driver commission; the ONDC bridge offers Namma Yatri
+at ₹240. The §7e router ranks the candidates on her own device (Trust
+Passport score, ETA, fare), takes <100 ms. She voice-picks the native
+option; UPI escrow funds ₹240 (₹220 fare + ₹20 platform fee billed to
+her). Suresh's phone pings him in Bhojpuri; he voice-accepts; navigation
+loads. On verified completion (drop-off geofence + Anjali's voice
+confirmation), the escrow releases ₹220 to Suresh and ₹20 to Bharat OS.
+Suresh keeps his full ₹220 because the §9B substrate-ownership decision
+moves the take rate to the rider side, not the worker side (§15 binding).
+**Revenue stream:** §13A #2 L6 service marketplace take.
+
+### 11. A family plans a weekend in Munnar (multi-language, hotel booking)
+The mother says in Tamil: *"velliyazhcha munnaril randu rathri family
+room venum"*. The §9B native marketplace queries local homestays
+registered directly with Bharat OS (KYC'd small operators in the Western
+Ghats); the ONDC bridge brings in OYO and a couple of MakeMyTrip-listed
+properties. Trust Passport surfaces past-traveler ratings (§7c). The
+family picks a local homestay at ₹2,250/night × 2 = ₹4,500; a ₹450
+platform fee is added on top. UPI escrow ₹4,950 funded. The homestay
+owner — a small operator who never had a website — gets a voice ping in
+Tamil; she voice-confirms; the booking is locked. On arrival, geofence +
+both-party voice confirmation releases the escrow. **Three layers
+monetize at once:** L6 marketplace take (₹450), L2 mesh stored the search
+manifests, L8 vernacular handled both sides in Tamil. **Revenue stream:**
+§13A #2 service marketplace + a small §13A #1 mesh storage tick.
+
+### 12. An NBFC processes 10,000 loan applications/month (Hyderabad, B2B)
+A mid-size NBFC routes its loan onboarding through Bharat OS. Each
+application runs three workflows: UIDAI offline eKYC identity verify, AA
+income summary, DigiLocker document validation — all token-only, no raw
+PII to the model (§15). The NBFC pays ₹15 per *completed* verified
+workflow → ₹1.5 L/month at 10k applications. Their previous KYC stack
+cost ~₹40/application; they save ~₹2.5 L/month *and* get a portable
+audit hash that satisfies RBI inspection. The customer pays nothing
+(§15 binding). The NBFC's compliance team also exports the consent and
+decision receipts to NDJSON (Phase 1.15) for their internal audit. **Revenue
+stream:** §13A #4 B2B verified-workflow fees — the institution pays per
+completed regulated action.
+
+### 13. Lava ships its new ₹8,000 5G phone with Bharat OS pre-installed (OEM)
+Lava signs a Bharat OS partnership: ~₹40/device licensing fee + a 10%
+revenue share on service-marketplace bookings made on the device. Across
+Lava's ~5 M units/year that's ~₹20 Cr in baseline licensing, plus a
+growing service rev-share as adoption matures. Lava gets a clear
+differentiation story against Realme / Xiaomi / Vivo — *"the only phone
+that speaks your language and respects your data"* — and Bharat OS gets
+distribution past the dev-toy phase (§14 risk closed). The user pays
+nothing extra; Lava's BOM absorbs the licensing fee. **Revenue stream:**
+§13A #5 OEM/telco licensing and service rev-share.
+
+### 14. A regional logistics dispatcher coordinates 20 trucks (Indore, Pro tier)
+A small fleet operator runs 20 trucks across MP, Gujarat, Rajasthan.
+Each individual driver uses Bharat OS free (citizen tier). The dispatcher
+subscribes to the **Bharat OS Business Pro** tier at ₹1,499/mo: bulk
+job-posting (up to 200 jobs/day), priority matching, an analytics
+dashboard, consolidated UPI reconciliation across drivers, and
+ledger-grade audit export for GST. The §15 binding — *"workers/users
+never pay"* — is preserved; the *business* pays for the management
+overlay. Across ~50,000 such small businesses on Bharat OS over time at
+~₹1,500/mo average, this stream alone is ~₹90 Cr/yr. **Revenue stream:**
+§13A #6 Business Pro tier.
+
+### 15. A landlord verifies a prospective tenant (Pune, Trust-as-a-service)
+Sneha is renting an apartment in Kothrud. The landlord asks for a
+Trust Passport attestation. With Sneha's explicit voice consent and a
+14-day share expiry (§7c), the landlord pays ₹75 and receives an
+attestation: *"Aadhaar verified · employment income band ₹50K–75K/mo
+confirmed via AA · 24-month rent payment history clean · no §9A flags."*
+The **underlying data** — exact income, employer name, prior addresses,
+account numbers — is never shared (§15 zero-knowledge servers). Sneha
+pays nothing. If the landlord ever tries to use the attestation outside
+the 14-day window or shares it further, the L4 audit ledger flags it and
+the attestation cryptographically expires. **Revenue stream:** §13A #7
+Trust-as-a-service — the smallest and most carefully gated stream;
+attestation, not data brokerage.
+
+### 16a. Aman photographs a prescription and ABHA gets updated (Pune, Marathi + English)
+After Aman's father's diabetes follow-up, the doctor hands him a hand-written
+prescription. Aman opens Bharat OS, points the camera, and says in
+Marathi: *"hi prescription ABHA madhe save kar"* (save this prescription to
+ABHA). On-device IndicOCR extracts the text; the §7e local SLM (Sarvam-1
+on his Pro-tier Pixel) parses it into structured fields — `{medication:
+Metformin 500mg, frequency: twice daily, duration: 90 days, prescriber:
+Dr. K. Joshi, date: 2026-05-20}`. The SLM also flags one ambiguous handwritten
+word and asks Aman to voice-confirm. Aman approves; the L3 ABHA tool
+adapter uploads the structured record under a fresh L4 consent grant. The
+original photo stays in L5 encrypted memory (pointer not payload); only
+the structured fields go to ABHA. **Same flow handles**: medical bills,
+school reports, GST returns, ration cards, electricity bills, land
+records — anywhere India's paper-heavy reality meets an IndiaStack API.
+**Revenue stream:** none directly from Aman; if a clinic chain uses the
+same pipeline at scale, §13A #4 B2B verified-workflow fees apply.
+
+### 16b. Priya's day starts with a vernacular daily brief (Coimbatore, Tamil)
+At 6:30 AM Priya's phone reads her a 90-second brief in Tamil: today's
+calendar (a college viva + Sarvam internship interview at 4 PM), three
+unread WhatsApp threads worth reading (summarized in one line each),
+yesterday's mesh earnings (₹11), an upcoming UPI auto-debit she should
+know about (₹2,400 electricity bill on Thursday), and a reminder that her
+mother's ABHA-anchored medication refill is due. The brief is generated
+fully on-device by the §7e local SLM, reading from: Android calendar API,
+notification history (with permission), L5 encrypted memory, the §13B
+NCS dashboard, and the L4 consent ledger. Nothing leaves the device.
+Priya voice-edits the brief ("skip the WhatsApp summary today, just read
+the calendar"), and the SLM adjusts. **Layers:** L8 voice loop, §7e
+local SLM, L5 memory, L4 ledger, Android system APIs. **No revenue line**
+— citizen-facing, §15 binding.
+
+### 16. A media company batch-summarizes 200 hours of conference video (compute demand)
+A Bangalore tech conference needs Hindi / Tamil / English transcripts +
+summaries of 200 hours of recorded sessions for their archive. They
+submit the batch as a Bharat OS compute job. The §7e adaptive router
+shards the work across ~80 KYC'd peer nodes overnight in Tier-2 cities
+(Mysuru, Hubballi, Mangaluru, Belagavi). The audio first hits IndicWhisper
+on the operators' devices for ASR; transcripts then route to AI4Bharat /
+Sarvam-1 on the same devices for summarization in three languages. ~24 M
+tokens served across the night → operator payouts total ~₹192 (₹6–10/M
+× midpoint); conference org pays ~₹384 (mesh sell price ₹15–25/M × 24).
+Comparable AWS Bedrock pricing for the same workload: ~₹1,800. Conference
+org saves ~₹1,400; operators in four small cities earn real rupees from
+idle phones; the platform keeps ~₹192 spread. **Revenue stream:** §13A #1
+compute mesh spread — the §13B Product 2 line in action, end-to-end.
+
+### Revenue-stream coverage — which use cases exercise which stream
+
+| §13A revenue stream | Vignettes |
+|---|---|
+| #1 Compute & storage mesh spread | 7 (Priya supply), 9 (Rajesh storage), 11 (mesh manifests), 16 (conference compute) |
+| #2 L6 marketplace take rate (skill + service) | 4 (train), 5 (driver supply), 10 (cab rider), 11 (hotel) |
+| #3 Demand-side transaction fees | 2 (Ravi labor), 10 (cab), 11 (hotel) |
+| #4 B2B verified-workflow fees | 12 (NBFC loan onboarding) |
+| #5 OEM / telco licensing and rev-share | 13 (Lava) |
+| #6 Business Pro tier | 14 (logistics dispatcher) |
+| #7 Trust-as-a-service (consent-bound attestation) | 15 (landlord) |
+
+Citizen-facing vignettes (1, 3, 6, 8) deliberately have **no revenue line**
+— §15 binding. Bharat OS earns from businesses, developers, the
+infrastructure spread, and OEMs; never from the citizen or worker.
+
 ---
 
 ## 10. Competitive landscape
@@ -536,6 +1244,14 @@ actual cases; weigh them together.
   and the Gates Foundation has committed $200 million over five years to advance DPI,
   backing open tools like MOSIP. The thesis that this pattern travels is empirically
   supported, not aspirational.
+- **Open commerce is a DPI rail too.** ONDC (Open Network for Digital
+  Commerce), built on the Beckn protocol, is already brokering cabs (Namma
+  Yatri), food, groceries, and hotels as a public-good marketplace explicitly
+  designed to displace walled-garden aggregator dominance. Bharat OS does
+  not *depend* on ONDC (§9B — Bharat OS owns its own L6 marketplace), but
+  the existence of an open commerce rail is a precedent that the public-good
+  marketplace pattern is viable in India, and ONDC interop is a useful Phase
+  A bridge while native supply is bootstrapping.
 - **Citizen super-apps win mass adoption.** Ukraine's Diia delivers identity,
   documents, and government services to citizens through one mobile app at national
   scale — proof an identity-anchored citizen app can be genuinely loved and used.
@@ -580,6 +1296,104 @@ The "for" column says the substrate, the category, and the export wave are all
 real — the bet is not crazy. The "against" column says the two things most likely
 to kill it are demand-side mesh economics (Helium's grave) and the platform/
 regulatory environment — not the technology. Believe both columns at once.
+
+---
+
+## 10B. Side-by-side — Bharat OS vs Brain.ai vs Apple Intelligence vs Google Gemini vs Microsoft Copilot+ vs Rabbit/AGI
+
+§10 names the players; §10A names the precedents; this section is the
+explicit comparison the founder will be asked for in every conversation.
+
+### The comparison table
+
+| Axis | Bharat OS | Brain.ai Natural OS | Apple Intelligence | Google Gemini in Android | Microsoft Copilot+ PC | Rabbit R1 / AGI Inc. |
+|---|---|---|---|---|---|---|
+| Where the AI runs | Adaptive: local SLM ↔ KYC'd mesh peer ↔ cloud (§7e) | Cloud (US) | On-device + Apple private cloud | Mixed: Gemini Nano on device, larger in cloud | NPU on Copilot+ PC + Azure cloud | Cloud |
+| Language scope | 22 Indian languages from day one, voice-first, romanized + native script | English-first; Japanese (SoftBank launch) | English + ~12 major languages | ~40 languages, major-language quality | English-first | English |
+| Identity layer | IndiaStack (Aadhaar optional, Account Aggregator, DigiLocker, ABHA) | None (account-based) | Apple ID | Google account | Microsoft account | Anonymous / account |
+| Sovereign data localization | Native (Indian devices + KYC'd mesh; never crosses the border by default) | US/Japan cloud | Apple's global cloud | Google's global cloud | Microsoft's global cloud | Cloud |
+| DePIN / mesh | Native at L2 (compute + storage + UPI fiat-credit settlement) | None | None | None | None | None |
+| Marketplace ownership | Native L6: skill marketplace + §9B service marketplace | None | App Store (Apple-owned, 30% take) | Play Store (Google-owned) | Microsoft Store | None |
+| Voice-first interface | Yes — Bhashini / IndicWhisper / IndicTTS, OS center | Yes (limited to English/Japanese) | Siri (auxiliary, not OS center) | Assistant (auxiliary) | Limited | Yes |
+| Regulated workflows | Native (UPI, DigiLocker, AA, ABHA, GSTN, ICEGATE) | None | None | None | None | Explicitly avoided (founder admission) |
+| Settlement rail | UPI fiat credits, non-transferable, RBI-clean | Card | Card / Apple Pay | Card / Google Pay | Card | None (UI-scraping only) |
+| Distribution path | OEM/telco shell on AOSP | SoftBank-distributed phones | Apple hardware (closed) | Pre-install on Android | Pre-install on Windows | Standalone hardware |
+| Reliability at scale | Phase 1 prototype | Commercial (Japan, 2026) | Shipping | Shipping | Shipping | Stumbling — AGI Inc. founder admits ~50-step ceiling |
+| Cost to end user | Free for citizens; businesses pay (§13A) | Paid hardware/subscription | Bundled with Apple device | Bundled with Android device | Bundled with Copilot+ PC | Paid hardware ($199–$699) |
+
+### Where Bharat OS has structural advantage
+None of these are wishful — each is rooted in something the doc binds.
+
+1. **Vernacular-native with a public-good language stack (§7a).** AI4Bharat,
+   Bhashini, IndicWhisper, IndicTTS, IndicTrans2 are state-funded and open
+   source. Brain.ai would need 5–7 years and $50M+ to match what an Indian
+   builder can take off the shelf in ~6 months. Apple / Google / Microsoft
+   can hire Indian-language teams, but they cannot replicate sovereign
+   ownership of the corpus and models.
+2. **DePIN at the OS layer (§7b).** Helium and Filecoin are bolted-on apps
+   fighting Android Doze and iOS background limits. Bharat OS *is* the OS;
+   the node daemon is a system service, not a fighting app. No competitor
+   even attempts this.
+3. **Sovereign identity via IndiaStack (§7d).** UIDAI, UPI, DigiLocker, AA,
+   ABHA are not APIs you call — they are regulated rails with KYC, consent,
+   and legal-binding-grade attestation. No foreign OS can access them at
+   the OS layer.
+4. **Native marketplace ownership at L6 (§9B, §15 substrate-ownership).**
+   Brain.ai has no marketplace. Apple / Google take 15–30% of every app
+   transaction; Bharat OS's service marketplace takes from businesses, not
+   users (§15 binding). And Bharat OS owns its substrate — unlike a buyer
+   app sitting under ONDC, Uber, or someone else's protocol.
+5. **Adaptive model router (§7e).** Brain.ai is structurally cloud-only;
+   Apple is structurally on-device-only. Neither can route per request
+   without rebuilding their architecture. Bharat OS routes by privacy class,
+   latency budget, compute availability, and network — the only architecture
+   that gives both sovereignty and frontier quality.
+6. **UPI escrow as default settlement (§13A, §15).** No card friction, no
+   3-day clearing, no chargeback risk for verified completions. RBI-clean,
+   no token regulatory exposure.
+7. **India-first regulatory shape (§7d).** DPDP, AA empanelment, AUA
+   partnership, MeitY data localization — Bharat OS is built FOR these
+   constraints; the foreign players are built AROUND them.
+
+### Where Bharat OS is structurally disadvantaged
+Equally honest.
+
+1. **No hardware.** Apple owns silicon-to-shell. Bharat OS depends on an
+   OEM/telco partner (§10, §12). Without that partner, it is a dev toy.
+2. **No global brand.** Apple, Google, Microsoft have decades of consumer
+   trust. Bharat OS starts at zero.
+3. **No frontier model of its own.** §7e's cloud-tier is a dependency
+   (whichever provider). If frontier API pricing or terms change adversely,
+   Bharat OS is exposed at the cloud tier — though the local + mesh tiers
+   mitigate this.
+4. **Smaller capital.** §12 puts the credible Phase-0-to-Phase-2 capital
+   need at ₹3–8 Cr ($3–8M). Apple's quarterly R&D run-rate exceeds this by
+   four orders of magnitude.
+5. **Provider acquisition cost (§9B Phase B).** Uber spent ~$2B in India on
+   driver subsidies. Bharat OS cannot match that and must win on
+   commission-free + UPI escrow + voice work assignment.
+6. **AOSP-only (§15 binding).** Forfeits iOS — ~3% of India by units but the
+   premium segment by spend.
+7. **Aadhaar politics.** Optional-by-design is firm but operationally
+   tricky; Kenya's Huduma Namba and Worldcoin's bans are the cautionary
+   precedents (§10A).
+8. **Well-funded Indian rivals on the same ground.** Sarvam, Krutrim, and
+   others are building Indian-language AI; vernacular-native is an
+   advantage, not a monopoly. The §9B substrate-ownership thesis is what
+   differentiates beyond language.
+9. **Multi-quarter L8 generative-UI work still ahead.** §17 says only the
+   deterministic vernacular normalizer is built today; the actual
+   generative-UI experience that competes with Brain.ai's strongest demo is
+   future work.
+
+### Net read
+Bharat OS wins on the axes where the substrate matters — vernacular,
+identity, mesh, marketplace, regulated workflows — because those are
+structurally not copyable by a cloud agent, an on-device assistant, or a
+walled-garden OS. Bharat OS loses on the axes where execution capital, brand,
+and hardware ownership matter — and the only mitigation is an OEM/telco
+partner plus disciplined India-first focus. Win on substrate, partner on
+distribution.
 
 ---
 
@@ -656,9 +1470,15 @@ The streams, strongest first:
    **detailed pricing, the AWS comparison, the fair-use lever, an illustrative
    maturity model, and the honest limits are in §13B.**
 
-2. **Skill / agent marketplace take rate.** An app-store model — a cut (≈15–30%) on
-   paid skills and on transactions that skills facilitate. Network-effect revenue
-   that compounds as the KYC'd developer ecosystem grows (L6).
+2. **L6 marketplace take rate — skills *and* services.** An app-store model
+   — a cut (≈15–30%) on paid skills and on transactions that skills
+   facilitate, *plus* a take rate on bookings through the §9B native service
+   marketplace (cabs, hotels, tickets, food, groceries, professional
+   services). Because Bharat OS owns the service marketplace substrate
+   rather than sitting under ONDC (§9B, §15 substrate-ownership), this take
+   rate is captured directly — not split with a third-party protocol.
+   Network-effect revenue that compounds as both the KYC'd developer
+   ecosystem and the native provider registry grow.
 
 3. **Demand-side transaction fees (businesses pay, users don't).** The labor flow
    (§9A) is the template: the *contractor/employer* pays — a per-post fee, a bulk-
@@ -738,10 +1558,32 @@ payouts scale on raw stored, sell price on usable. Build that into the model.
 Idle device NPUs/GPUs during charging hours are near-zero marginal cost to the
 operator. Inference is billed per workload (per ~1k tokens, or per job), sold below
 cloud GPU pricing while still paying operators meaningfully; the platform keeps the
-spread. **Reality check:** device compute is weak and intermittent, only small or
-quantized models run on-device, and heavy workloads still route to the cloud. The
-mesh captures the *routable fraction* — light/medium inference, caching, and batch
-jobs — not all inference. Model it as a slice, not the whole pie.
+spread. The **adaptive model router (§7e)** is what makes this market exist —
+every time the router escalates beyond a user's local SLM, the destination is
+either a KYC'd peer node (where money changes hands inside the marketplace) or
+the cloud (where the platform pays a frontier provider out of the same spread).
+
+| | per 1M tokens (combined I/O) | per batch job (≤100k tokens) |
+|---|---|---|
+| AWS Bedrock SLM-class (India region) reference | ₹65–95 | ₹6–10 |
+| Mesh sell price | ₹15–25 | ₹1.5–3 |
+| Operator payout | ₹6–10 | ₹0.6–1.2 |
+| Platform gross spread | ₹9–15 | ₹0.9–1.8 |
+
+**How an operator actually earns.** A modern phone's NPU running a 4-bit
+quantized 3B model (see §7e candidate list) sustains roughly 30–50 tokens/sec.
+Over a 6-hour overnight charging window that's ~0.8–1.2M tokens served, or
+₹5–12/device/night at the midpoint payout rate. Modest per device — meaningful
+at scale (1M active operator-nights/day = ₹0.5–1.2 Cr/day in operator
+earnings, and another ~50% of that flowing as platform spread).
+
+**Reality check:** device compute is weak and intermittent, only small or
+quantized models run on-device, and heavy workloads still route to the cloud.
+The mesh captures the *routable fraction* — light/medium inference, caching, and
+batch jobs — not all inference. The §7e cloud-tier requests are NOT in the
+operator-payout column above; they pay the frontier provider out of the same
+sell-side credits. Model the mesh share as a slice of inference demand, not the
+whole pie.
 
 ### Why the unit economics beat AWS
 | Cost line | AWS / centralized | Bharat OS mesh |
@@ -912,6 +1754,106 @@ independence statement or the §15 constants.
 
 ---
 
+## 14A. Patent landscape — what to know, what to defend, what isn't a risk
+
+This deserves an honest answer rather than reassurance. Patents in this space
+are real, but the landscape for an India-deployed product is materially more
+permissive than the US/EU news cycle suggests.
+
+### Where the real risk concentrates
+- **Brain.ai's four foundational agent patents (filed from 2016 onward).**
+  Cover material around generative UI materialization from natural language
+  intent and agent-orchestrated tool execution. These are the most
+  Bharat-OS-adjacent patents in the field. Treat them as the primary
+  patent-watch concern, especially if Bharat OS ever expands into the US or
+  Japan markets where Brain.ai is active.
+- **Apple's Siri / Apple Intelligence / Neural Engine patents.** Broad
+  portfolio around intent parsing, on-device inference scheduling, voice
+  biometrics. Most apply to specific implementation tricks rather than the
+  high-level architecture.
+- **Google's Assistant / Gemini / Tensor patents.** Similar shape — implementation-
+  level rather than architectural.
+- **Microsoft's Copilot patents.** Concentrated around document-grounded
+  agents and Copilot-for-X patterns.
+- **DePIN-adjacent patents (Helium, Filecoin, Render).** Mostly tokenomic
+  mechanism patents — proof-of-coverage, proof-of-storage variants. Bharat
+  OS's mesh is deliberately *not* tokenized (§15), which side-steps the
+  bulk of this portfolio.
+
+### Why the India-deployment risk is structurally lower
+- **Section 3(k) of the Indian Patents Act, 1970** excludes *"a computer
+  programme per se or algorithms"* from patentability. Pure software /
+  algorithm patents are very hard to enforce in India. A Brain.ai US
+  patent on "materializing UI from intent" is largely unenforceable against
+  an Indian-deployed product in India.
+- **Alice Corp. v. CLS Bank (US 2014)** invalidated a large swath of abstract
+  software / business-method patents in the US, narrowing what an offensive
+  plaintiff can credibly assert anywhere. Many older agent-era patents
+  would not survive an Alice challenge today.
+- **Bharat OS's distinguishing features are architectural and
+  India-specific** — IndiaStack integration, the §7e adaptive router, the
+  §9B native service marketplace, the L2 KYC'd mesh, the §15 substrate-
+  ownership posture. These are *systems* claims grounded in specific Indian
+  public infrastructure; they are not easily anticipated by foreign patents
+  written about generic agent architectures.
+- **The L3 IndiaStack adapters call government APIs** (UIDAI, UPI, DigiLocker,
+  AA, ABHA). API surface use is not patentable; the underlying systems are
+  state-owned.
+
+### Defensive strategy
+1. **Open source the obvious novelty.** Publishing the §7e router design,
+   the §9B native marketplace structure, the §9A worker-protection policy
+   set, and the L2 mesh fair-use lever creates dated prior art that makes
+   *future* patents in these areas harder for anyone to assert against
+   Bharat OS. Open source is patent defense.
+2. **File a small defensive portfolio on the genuinely novel pieces.**
+   Candidates: mesh-anchored adaptive routing with regulatory-class
+   selection (§7d intersection of §7e); identity-bound consent receipts
+   with revocation integrity (§7c + L4); §9A worker-protection policy
+   composition (escrow + wage floor + age + mediation as a system).
+   The objective is defensive cross-licensing, not offensive monetization.
+3. **Avoid known patent hotspots in implementation choices** where
+   alternatives exist — e.g., specific UI-generation rendering techniques
+   that mirror Brain.ai's claims. Where Bharat OS *does* generate UI
+   (L8 future work), prefer techniques with clear prior art (v0 / Bolt /
+   open-source generative UI research) and document the lineage.
+4. **Engage patent counsel before any expansion outside India.** §13C
+   strong-fit countries (Philippines, Ethiopia, Togo, etc.) carry different
+   patent regimes; the EU's EUDI Wallet partial-fit and US poor-fit
+   scenarios in §13C also flag higher patent risk in those jurisdictions.
+   Stay India-first not only for distribution but also for legal exposure.
+
+### The bigger non-patent legal exposure
+Patent litigation is **not** the largest legal risk Bharat OS carries. The
+real exposure is:
+- **DPDP Act 2023 compliance** — data fiduciary registration, consent
+  artifacts, breach protocol (§7d / §12). A DPDP violation has teeth.
+- **Aadhaar Act §7** — Aadhaar must be optional with viable fallbacks
+  (§15 binding, §14). Forcing Aadhaar invites real litigation.
+- **RBI rules on payment intermediation** — UPI payouts, TDS, KYC limits
+  (§12). Mis-structured settlements can trigger payment-aggregator
+  licensing requirements.
+- **MeitY data localization** — handled by architecture (§7b mesh stays
+  in India) but compliance still needs documentation.
+- **Motor Vehicle Aggregator Guidelines 2020 and similar vertical regimes**
+  (§9B). The "buyer app on a network" posture sidesteps these; transacting-
+  aggregator framing would trigger them.
+- **Labour law** (§9A). Real, enforceable, and has criminal provisions for
+  child labour. The §9A policy set is necessary but not sufficient; NGO /
+  labour-law partner engagement remains in §17's open items.
+
+### Net read
+Bharat OS is not violating any patents we can identify *for an India-deployed
+product today*. The single closest patent-watch concern is Brain.ai's
+foundational portfolio if Bharat OS ever expands into Brain.ai's home
+markets. Defensive open-sourcing, a small defensive patent portfolio, and
+patent counsel before international expansion are the right posture. The
+larger legal weight is regulatory (DPDP, RBI, MeitY, labour law) — already
+the focus of §12 and §14. None of this is reassurance; it is the honest
+shape of the risk.
+
+---
+
 ## 15. Design constants (binding rules)
 
 - The eight layers (§6) are the canonical architecture.
@@ -923,6 +1865,13 @@ independence statement or the §15 constants.
 - **Workers/users never pay to access work or services** — no advance fees, ever.
 - **Monetize businesses, developers, and the infrastructure spread — never the
   citizen/worker; never sell user data.**
+- **Substrate ownership** — Bharat OS owns its L6 marketplaces (skill
+  marketplace, service marketplace), its L2 mesh, its L4 policy engine, its
+  L5 identity vault, and its audit ledger. Third-party protocols and
+  networks (ONDC, Beckn, MOSIP, future analogues) may serve as Phase A
+  density bridges or interop surfaces — never as the substrate above which
+  Bharat OS runs. An OS that sits *under* a buyer-protocol is a buyer app;
+  Bharat OS is the OS. §9B is the canonical statement of this principle.
 - **No tokens** — fiat-denominated, non-transferable credits on UPI.
 - **iOS is permanently out of scope** — AOSP-only.
 - **Independence** — never linked to GSOS, OmniQuant, SIP, or Moneytrail (§0).
@@ -937,3 +1886,136 @@ independence statement or the §15 constants.
   let either redefine the other.
 - If a future decision changes any constant here, update this file — don't fork the
   context into a new doc.
+
+---
+
+## 17. Current implementation status (snapshot — 2026-05-23)
+
+A living snapshot of how much of the canonical architecture (§6) and roadmap
+(§13) is actually built in the accompanying repository. This section is **not
+binding** — §0, §6, and §15 are the binding parts. Update this in place when
+code lands; do not create a separate `STATUS.md` (§16).
+
+### Phase progress
+- **Phase 0 — protocol + identity + mesh:** complete *in simulation*. PowerShell
+  baseline spec (`src/BharatOS.Phase0/`) + Node Phase 0.1 core/store
+  (`src/phase0/`). Deterministic 1,000-node bootstrap simulator; local HTTP API
+  and operator console.
+- **Phase 1 — decision layer:** in deep iteration (1.1 → 1.39 as of this
+  snapshot). 1.37 added the multilingual L8 vernacular module; 1.38 added the
+  §9A worker-protection policies (escrow, wage floor, age verification,
+  kiosk-mediation authorization, fiat-only settlement, advance-fee block
+  generalized); 1.39 added the §9B **native service marketplace**
+  (`bharat_marketplace` L6 tool + `bos:skill:bharat-marketplace`) as the
+  Bharat OS-owned substrate for cab / hotel / ticket / food / grocery /
+  professional-services booking, with ONDC demoted to a Phase A outbound
+  bridge (`ondc_beckn` L3, `bos:skill:ondc-bridge`). All built against
+  *mocked* tools.
+- **Phase 2 — flashable ROM + L8 + L6 marketplace:** not started.
+- **Phase 3 — open marketplace + export:** not started.
+
+### Per-layer status
+
+| Layer | Built | Boundary / gap |
+|---|---|---|
+| L1 — AOSP substrate + node daemon | none | no fork, no daemon, no kernel scheduling work |
+| L2 — Mesh + adaptive router | placement simulator only (`src/phase0/simulate.mjs`); NCS computed per node but not surfaced to API/CLI/Trust Passport | no real P2P, no TEE attestation (Knox/StrongBox/QSEE), no erasure-coded transport, no fiat-credit settlement plumbing on UPI |
+| L3 — IndiaStack tools | six mocked adapters returning tokens, not PII (`src/phase1/tools.mjs`) | no AUA/KSA partnership; no DigiLocker / AA / ABHA empanelment |
+| L4 — Policy + consent ledger | signed consents, lifecycle, queryable + NDJSON-exportable audit ledger, ten policy rules including the full §9A worker-protection set (advance-fee, escrow, wage floor, age, mediation, fiat-only) | policies are local code, not a DSL; no distributed revocation log; worker authorization receipts are referenced by ID but not yet a signed artifact type |
+| L5 — Identity-anchored memory | encrypted local records, pointer-not-payload, consent-gated reads, metadata-only search and provenance | not distributed across the mesh; no device-pairing / recovery flow; identity has no per-profile auth (shared-device case from §9A still open) |
+| L6 — Skill marketplace + service marketplace | local static registry, versioned signed manifests, preflight + remediation + retry + execute, trace evidence, Trust Passport counts; remediation actions cover all §9A policies; §9B **native service marketplace** (`bharat_marketplace` skill+tool) as the OS-owned substrate for cab/hotel/ticket/food/grocery/services, with `ondc_beckn` as a Phase A outbound bridge only | no third-party developer KYC; no sandbox runtime; no signing trust chain; no real provider registry yet (mocked); no inbound Beckn-compliant endpoints exposed yet (interop direction) |
+| L7 — Intent orchestrator | deterministic alias + rule normalization, links L6 preflight → L3 execution, persisted receipts, carries labor / mediation / age-attestation fields through to the policy engine | no LLM; intent space is the five canonical templates |
+| L8 — Vernacular generative UI | deterministic intent normalization across five Indian languages (Hindi, Marathi, Bhojpuri, Tamil, Bengali — script + romanized) with localized response strings (`src/phase1/vernacular.mjs`) | no Bhashini / IndicWhisper / IndicTTS / IndicTrans2 integration; no generative UI renderer; coverage is a small subset of the 22-language target |
+| Cross-cutting | Trust Passport v1 (derived + signed snapshots), integrity verifier, audit ledger, operator console, local identity creation | none unique to layer |
+
+### Team and operational state (2026-05-23)
+
+- **Delivery team:** solo founder + Claude Code. The §12 "5–8 senior
+  engineers" team is a Phase 2 target, not current state. Code work is
+  scoped to what one person + AI assistant can ship per session.
+- **Goal at this milestone:** runnable MVP for investor pitch, not
+  production deployment. Phase 2 commitments do not start until Phase 1
+  surfaces are tied off (gap list below).
+- **Registered entity:** yes; Bharat OS brand / domain / public identity
+  not yet established.
+- **Testing capability:** one spare phone (model TBC) or Android Studio
+  emulator. §7e Pro-tier SLM validation needs Snapdragon 8 Gen 2+ at
+  minimum.
+- **External commitments awaiting human action (not Claude Code's
+  work):**
+  - OEM / telco LOI (§10, §14 P0 risk) — none started.
+  - AUA / KSA partnership and DPDP fiduciary registration (§7d, §12) —
+    none started.
+  - AA / ABHA empanelment (§12) — none started.
+  - Capital raise — IndiaAI Mission grants, sovereign-tech VC (§12) —
+    none started.
+  - Bharat OS domain registration; brand decisions.
+  - Patent counsel engagement (§14A defensive strategy) — planned.
+  - Regulatory counsel for DPDP / RBI / MeitY items — planned.
+
+### Phase 1 tie-offs in priority order (before Phase 2 begins)
+
+1. **NCS surfacing through API / CLI / Trust Passport / operator
+   console.** §13B fair-use lever is invisible today; investors need the
+   unit-economics dashboard to read this story.
+2. **Worker authorization receipts as signed first-class artifact.**
+   §9A mediation policy currently checks ID presence only; needs to
+   become a signed receipt with the worker's local key, mirroring the
+   consent-artifact integrity pattern.
+3. **Operator console updates for 1.37–1.39 surfaces.** Today the
+   console shows none of: vernacular detection, worker-protection policy
+   results, service-marketplace bookings, ONDC bridge usage. High-
+   visibility for investor demo.
+4. **CLI commands for direct service-booking and vernacular
+   inspection.** Service bookings can only be exercised via the intent
+   orchestrator today; a direct `bos service book` flow unblocks
+   manual testing.
+5. **Device-pairing / phone-migration scaffold.** §7c documented in this
+   session; not built. Cross-OEM portability story does not stand
+   without at least a runnable scaffold.
+6. **Per-profile auth on shared devices + one-tap reporting / flag
+   ledger.** Treat as Phase 1.40 / 1.41; bigger identity-layer work.
+
+This list is the canonical tracker. Update it inline as items close.
+
+### Observations carried forward as risks
+- **L8 is the product promise; only the deterministic normalizer exists.** §1
+  leads with vernacular generative UI in 22 languages. Closing this is
+  multi-quarter work and depends on real Bhashini / IndicX integration plus a
+  generative UI renderer. The vernacular module is the seam where that work
+  lands.
+- **L1 / L2 hard parts are unblocked but untouched.** §12 calls out
+  TEE-backed attestation as the 6–9 month engineering pole. No work has started
+  on AOSP fork, node daemon, or attestation.
+- **Phase 1 risks over-fitting the simulator.** Recent ADRs stack receipt /
+  integrity / trace surface on the same mocked tools. The next real-signal
+  increments need a real partner (AUA / DigiLocker sandbox) or one real
+  TEE-attested device — not more polish on the inner shell.
+- **§14 P0 risks are still open.** No first-1,000-nodes demand test on real
+  devices; no OEM / telco LOI; no AUA / DPDP / AA empanelment under way.
+- **§9A labor flow — partially closed.** The L4 policy engine now enforces the
+  no-advance-fee, escrow, minimum-wage-floor, age-verification, kiosk
+  mediation, and fiat-only rules; remediation hints guide callers to fix
+  blocks. Still open: (1) signed worker authorization receipts as a first-
+  class artifact (today the mediation policy accepts an opaque ID); (2)
+  per-profile auth on shared devices and a device-less assisted/kiosk channel
+  (identity layer work, not policy); (3) one-tap reporting and human-review
+  workflow for §9A safeguards; (4) NGO / labour-law partner engagement.
+- **L6 marketplace economics absent.** No KYC'd developer onboarding, no
+  installer / sandbox, no signing trust chain — the §13A "network-effect
+  revenue" line has nothing to stand on yet.
+- **NCS / fair-use lever is computed but invisible.** §7b / §13B make Net
+  Contribution Score load-bearing for the demand-side story; the Phase 0
+  simulator computes it, but no API, CLI, Trust Passport field, or console
+  view exposes it yet. Surfacing it is small but a real gap.
+
+### Useful entry points
+- `BHARAT_OS.md` — this canonical reference (you are here).
+- `README.md` — phase-by-phase build log.
+- `src/phase0/` — Node Phase 0 core, store, simulator.
+- `src/phase1/` — policy, consent, orchestrator, tools, skills, memory,
+  vernacular, Trust Passport.
+- `bin/bos.mjs` — CLI.
+- `public/operator-console/` — operator observability UI.
+- `docs/adr/` — architecture decision records, numbered chronologically.
+- `docs/phase0/` and `docs/phase1/` — implementation notes per phase.

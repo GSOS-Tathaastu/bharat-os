@@ -1,0 +1,15 @@
+{
+  "name": "bharat-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase-by-phase implementation of Bharat OS.",
+  "scripts": {
+    "test": "node --test tests/node/*.test.mjs",
+    "bos": "node bin/bos.mjs",
+    "api": "node bin/bos-api.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
