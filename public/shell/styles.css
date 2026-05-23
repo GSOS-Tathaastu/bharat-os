@@ -611,6 +611,63 @@ body {
   color: var(--accent);
 }
 
+.pairing-card .pairing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pairing-half {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pairing-half strong {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.pairing-half input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.pairing-code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--accent);
+  text-align: center;
+  padding: 8px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.pairing-card .capture-meta[data-tone='good'] { color: var(--good); }
+.pairing-card .capture-meta[data-tone='bad'] { color: var(--bad); }
+
+@media (max-width: 480px) {
+  .pairing-card .pairing-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mesh-node-card .mesh-ticker {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

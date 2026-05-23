@@ -70,6 +70,33 @@
         </div>
       </section>
 
+      <section class="capture-card pairing-card" id="pairingSection">
+        <div class="capture-header">
+          <span>📲 Pair another device (§7c)</span>
+          <span id="pairingStatus" class="capture-meta">Ready</span>
+        </div>
+        <p class="diagnostics-note" style="margin: 0;">
+          §15 binding — identity is the person, not the device. Two halves:
+          start a session on your <em>current</em> phone, then claim it from
+          your <em>new</em> phone. The transfer is direct browser-to-browser
+          via WebRTC; the server only relays SDP. To try locally: open
+          <code>/shell/</code> in a second tab and use the claim code.
+        </p>
+        <div class="pairing-grid">
+          <div class="pairing-half">
+            <strong>Old device → New device</strong>
+            <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
+            <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
+          </div>
+          <div class="pairing-half">
+            <strong>Claim on new device</strong>
+            <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
+            <button id="pairingClaimButton" class="secondary-button" type="button">Claim & receive</button>
+          </div>
+        </div>
+        <div id="pairingResult" class="capture-result" hidden></div>
+      </section>
+
       <section class="capture-card mesh-node-card" id="meshNodeSection">
         <div class="capture-header">
           <span>💎 Mesh node — §13B fair-use lever</span>

@@ -63,6 +63,14 @@ import {
   meshContributionSummary,
   MESH_PAYOUT_RATES
 } from '../phase1/mesh-contribution.mjs';
+import {
+  claimPairingSession,
+  completePairingSession,
+  createPairingSession,
+  expirePairingSession,
+  lookupByClaimCode,
+  recordSdp
+} from '../phase1/pairing-session.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -564,6 +572,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/mesh/contributions',
             'GET /api/mesh/contributions/summary/:operatorId',
             'GET /api/mesh/rates',
+            'POST /api/pairing/sessions',
+            'GET /api/pairing/sessions/:sessionId',
+            'POST /api/pairing/sessions/:sessionId/claim',
+            'POST /api/pairing/sessions/:sessionId/sdp',
+            'POST /api/pairing/sessions/:sessionId/complete',
+            'GET /api/pairing/sessions/by-code/:claimCode',
             'GET /api/nodes',
             'GET /api/manifests',
             'GET /api/reports',
@@ -1549,6 +1563,123 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // §7c device-pairing sessions — WebRTC signaling relay only.
+      // The server never sees the identity vault; the actual transfer
+      // happens browser-to-browser over the data channel.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        const session = createPairingSession({
+          issuerIdentityId: body.issuerIdentityId,
+          issuerDisplayName: body.issuerDisplayName,
+          issuerPublicKeyFingerprint: body.issuerPublicKeyFingerprint,
+          ttlSeconds: body.ttlSeconds
+        });
+        await store.savePairingSession(session);
+        jsonResponse(response, 201, { ok: true, session });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 5 &&
+        parts[3] === 'by-code'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const claimCode = decodeURIComponent(parts[4]);
+        const sessions = await store.listPairingSessions();
+        const session = lookupByClaimCode(sessions, claimCode);
+        if (!session) {
+          jsonResponse(response, 404, {
+            error: {
+              code: 'pairing_session_not_found',
+              message: 'No active pairing session matches this code (may be expired or already claimed).'
+            }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { session });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 4
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const sessionId = decodeURIComponent(parts[3]);
+        const existing = await store.readPairingSession(sessionId);
+        const session = expirePairingSession(existing);
+        if (session !== existing) await store.savePairingSession(session);
+        jsonResponse(response, 200, { session });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 5 &&
+        parts[4] === 'claim'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const sessionId = decodeURIComponent(parts[3]);
+        const body = await readRequestJson(request);
+        const existing = await store.readPairingSession(sessionId);
+        const claimed = claimPairingSession(existing, {
+          receiverFingerprint: body.receiverFingerprint,
+          sdpAnswer: body.sdpAnswer
+        });
+        await store.savePairingSession(claimed);
+        jsonResponse(response, 200, { ok: true, session: claimed });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 5 &&
+        parts[4] === 'sdp'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const sessionId = decodeURIComponent(parts[3]);
+        const body = await readRequestJson(request);
+        const existing = await store.readPairingSession(sessionId);
+        const updated = recordSdp(existing, { offer: body.offer, answer: body.answer });
+        await store.savePairingSession(updated);
+        jsonResponse(response, 200, { ok: true, session: updated });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'pairing' &&
+        parts[2] === 'sessions' &&
+        parts.length === 5 &&
+        parts[4] === 'complete'
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const sessionId = decodeURIComponent(parts[3]);
+        const body = await readRequestJson(request);
+        const existing = await store.readPairingSession(sessionId);
+        const completed = completePairingSession(existing, {
+          bytesTransferred: body.bytesTransferred
+        });
+        await store.savePairingSession(completed);
+        jsonResponse(response, 200, { ok: true, session: completed });
+        return;
       }
 
       if (

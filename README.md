@@ -144,6 +144,15 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.14 **WebRTC device pairing handshake** — §7c portability made
+  demoable. New `src/phase1/pairing-session.mjs` artifact (signed session
+  with 6-digit claim code, lifecycle pending → claimed → completed /
+  expired) + `/api/pairing/sessions*` routes as a signaling-only relay
+  (the server never sees the identity bundle). `public/shell/pairing.mjs`
+  runs a real `RTCPeerConnection` + `RTCDataChannel` handshake between two
+  browser tabs / two phones over WebRTC with Google's public STUN. The
+  shell pairing card initiates on the old device + claims on the new;
+  identity bundles transfer browser-to-browser. ADR 0063.
 - Phase 2a.13 **L2 mesh contribution loop** — signed contribution events
   (`src/phase1/mesh-contribution.mjs`) for inference / storage_serve /
   storage_store with per-event operator payout from §13B rates. New

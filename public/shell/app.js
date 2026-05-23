@@ -1,4 +1,5 @@
 import * as ondeviceSlm from './ondevice-slm.mjs';
+import * as pairing from './pairing.mjs';
 
 // Bharat OS — vernacular shell prototype.
 // The user-facing surface. Voice-first or text. Picks a persona, sends
@@ -1682,6 +1683,125 @@ function stopMeshNode() {
 
 $('meshStartButton').addEventListener('click', startMeshNode);
 $('meshStopButton').addEventListener('click', stopMeshNode);
+
+// ─── §7c device pairing — WebRTC handshake UI ──────────────────────────────
+function setPairingStatus(text, { tone } = {}) {
+  $('pairingStatus').textContent = text;
+  $('pairingStatus').dataset.tone = tone ?? '';
+}
+
+function renderPairingResult(title, rows, { tone } = {}) {
+  const box = $('pairingResult');
+  box.hidden = false;
+  box.dataset.tone = tone ?? '';
+  box.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <dl class="result-detail-grid">
+      ${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join('')}
+    </dl>
+  `;
+}
+
+async function startPairingInitiator() {
+  if (!sanityCheckActor()) return;
+  const button = $('pairingInitiateButton');
+  button.disabled = true;
+  $('pairingResult').hidden = true;
+  setPairingStatus('Creating session…');
+
+  try {
+    const identity = state.activeIdentity;
+    const fingerprint = identity.publicKeyPem
+      ? await hashString(identity.publicKeyPem)
+      : 'demo-fingerprint';
+    let displayedCode = false;
+    const result = await pairing.startInitiator({
+      identity,
+      fingerprint,
+      onProgress: (event) => {
+        if (event.phase === 'session_created' && !displayedCode) {
+          displayedCode = true;
+          const display = $('pairingCodeDisplay');
+          display.hidden = false;
+          display.textContent = `Code · ${event.session.claimCode}`;
+          setPairingStatus('Waiting for new device to claim…');
+        } else if (event.phase === 'channel_open') {
+          setPairingStatus('Data channel open — transferring…', { tone: 'good' });
+        } else if (event.phase === 'completed') {
+          setPairingStatus(`Done — ${event.bytes} bytes transferred`, { tone: 'good' });
+        }
+      }
+    });
+    renderPairingResult('Pairing completed', [
+      ['Session', shortId(result.session.sessionId)],
+      ['Code', result.session.claimCode],
+      ['Bytes sent', String(result.bytesSent)],
+      ['Server saw', 'SDP only (zero identity bytes — §15)']
+    ], { tone: 'good' });
+    $('pairingCodeDisplay').hidden = true;
+  } catch (error) {
+    setPairingStatus('Pairing failed', { tone: 'bad' });
+    renderPairingResult('Pairing did not complete', [['Reason', error.message]], { tone: 'bad' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function claimPairingFromCode() {
+  if (!sanityCheckActor()) return;
+  const code = $('pairingClaimInput').value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    showToast('Enter the 6-digit pairing code from the other device.');
+    return;
+  }
+  const button = $('pairingClaimButton');
+  button.disabled = true;
+  $('pairingResult').hidden = true;
+  setPairingStatus('Claiming session…');
+
+  try {
+    const receiverFingerprint = await hashString(state.activeIdentity.id);
+    const result = await pairing.startReceiver({
+      claimCode: code,
+      receiverFingerprint,
+      onProgress: (event) => {
+        if (event.phase === 'session_found') setPairingStatus('Session found — exchanging SDP…');
+        if (event.phase === 'channel_open') setPairingStatus('Data channel open — receiving…', { tone: 'good' });
+        if (event.phase === 'bundle_received') setPairingStatus('Identity bundle received', { tone: 'good' });
+      }
+    });
+
+    // Persist the incoming identity as a household member on this device.
+    const incoming = result.bundle.publicIdentity;
+    if (incoming?.id && !state.identities.some((i) => i.id === incoming.id)) {
+      state.identities.push(incoming);
+      addHouseholdMember(incoming.id);
+    }
+
+    renderPairingResult('Identity received and added to household', [
+      ['Incoming identity', incoming?.displayName ?? '--'],
+      ['ID', shortId(incoming?.id ?? '')],
+      ['Bundle bytes', String(JSON.stringify(result.bundle).length)],
+      ['Server saw', 'SDP only — direct peer transfer over WebRTC']
+    ], { tone: 'good' });
+    $('pairingClaimInput').value = '';
+  } catch (error) {
+    setPairingStatus('Claim failed', { tone: 'bad' });
+    renderPairingResult('Could not complete claim', [['Reason', error.message]], { tone: 'bad' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function hashString(value) {
+  if (!globalThis.crypto?.subtle) return String(value).slice(0, 24);
+  const bytes = new TextEncoder().encode(String(value));
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return hexFromBuffer(hash).slice(0, 24);
+}
+
+$('pairingInitiateButton').addEventListener('click', startPairingInitiator);
+$('pairingClaimButton').addEventListener('click', claimPairingFromCode);
 
 
 // App handoff fallback: if the deep link doesn't open the installed app

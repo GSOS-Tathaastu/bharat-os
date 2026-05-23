@@ -49,6 +49,7 @@ export class BosStore {
     this.workerAuthorizationsPath = path.join(rootPath, 'worker-authorizations');
     this.flagReportsPath = path.join(rootPath, 'flag-reports');
     this.meshContributionsPath = path.join(rootPath, 'mesh-contributions');
+    this.pairingSessionsPath = path.join(rootPath, 'pairing-sessions');
     this.healthDocumentsPath = path.join(rootPath, 'health-documents');
     this.profileCredentialsPath = path.join(rootPath, 'profile-credentials');
     this.pushSubscriptionsPath = path.join(rootPath, 'push-subscriptions');
@@ -75,6 +76,7 @@ export class BosStore {
     await fs.mkdir(this.workerAuthorizationsPath, { recursive: true });
     await fs.mkdir(this.flagReportsPath, { recursive: true });
     await fs.mkdir(this.meshContributionsPath, { recursive: true });
+    await fs.mkdir(this.pairingSessionsPath, { recursive: true });
     await fs.mkdir(this.healthDocumentsPath, { recursive: true });
     await fs.mkdir(this.profileCredentialsPath, { recursive: true });
     await fs.mkdir(this.pushSubscriptionsPath, { recursive: true });
@@ -143,6 +145,10 @@ export class BosStore {
 
   meshContributionFile(eventId) {
     return path.join(this.meshContributionsPath, `${safeName(eventId)}.json`);
+  }
+
+  pairingSessionFile(sessionId) {
+    return path.join(this.pairingSessionsPath, `${safeName(sessionId)}.json`);
   }
 
   healthDocumentFile(captureId) {
@@ -515,6 +521,27 @@ export class BosStore {
 
   async listMeshContributionEvents() {
     return listJson(this.meshContributionsPath);
+  }
+
+  async savePairingSession(session) {
+    await this.init();
+    await writeJson(this.pairingSessionFile(session.sessionId), session);
+    await this.appendLedger({
+      type: 'pairing_session.saved',
+      sessionId: session.sessionId,
+      issuerIdentityId: session.issuerIdentityId,
+      status: session.status,
+      at: new Date().toISOString()
+    });
+    return session;
+  }
+
+  async readPairingSession(sessionId) {
+    return readJson(this.pairingSessionFile(sessionId));
+  }
+
+  async listPairingSessions() {
+    return listJson(this.pairingSessionsPath);
   }
 
   async saveHealthDocumentCapture(capture) {
