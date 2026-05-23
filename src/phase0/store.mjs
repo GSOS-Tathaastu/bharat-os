@@ -48,6 +48,7 @@ export class BosStore {
     this.memoryRecordsPath = path.join(rootPath, 'memory-records');
     this.workerAuthorizationsPath = path.join(rootPath, 'worker-authorizations');
     this.flagReportsPath = path.join(rootPath, 'flag-reports');
+    this.meshContributionsPath = path.join(rootPath, 'mesh-contributions');
     this.healthDocumentsPath = path.join(rootPath, 'health-documents');
     this.profileCredentialsPath = path.join(rootPath, 'profile-credentials');
     this.pushSubscriptionsPath = path.join(rootPath, 'push-subscriptions');
@@ -73,6 +74,7 @@ export class BosStore {
     await fs.mkdir(this.memoryRecordsPath, { recursive: true });
     await fs.mkdir(this.workerAuthorizationsPath, { recursive: true });
     await fs.mkdir(this.flagReportsPath, { recursive: true });
+    await fs.mkdir(this.meshContributionsPath, { recursive: true });
     await fs.mkdir(this.healthDocumentsPath, { recursive: true });
     await fs.mkdir(this.profileCredentialsPath, { recursive: true });
     await fs.mkdir(this.pushSubscriptionsPath, { recursive: true });
@@ -137,6 +139,10 @@ export class BosStore {
 
   flagReportFile(flagId) {
     return path.join(this.flagReportsPath, `${safeName(flagId)}.json`);
+  }
+
+  meshContributionFile(eventId) {
+    return path.join(this.meshContributionsPath, `${safeName(eventId)}.json`);
   }
 
   healthDocumentFile(captureId) {
@@ -486,6 +492,31 @@ export class BosStore {
     return listJson(this.flagReportsPath);
   }
 
+  async saveMeshContributionEvent(event) {
+    await this.init();
+    await writeJson(this.meshContributionFile(event.contributionEventId), event);
+    await this.appendLedger({
+      type: 'mesh_contribution.recorded',
+      contributionEventId: event.contributionEventId,
+      operatorId: event.operatorId,
+      nodeId: event.nodeId,
+      workloadType: event.workloadType,
+      tokens: event.tokens,
+      bytes: event.bytes,
+      payoutPaise: event.payoutPaise,
+      at: event.at
+    });
+    return event;
+  }
+
+  async readMeshContributionEvent(eventId) {
+    return readJson(this.meshContributionFile(eventId));
+  }
+
+  async listMeshContributionEvents() {
+    return listJson(this.meshContributionsPath);
+  }
+
   async saveHealthDocumentCapture(capture) {
     await this.init();
     await writeJson(this.healthDocumentFile(capture.captureId), capture);
@@ -646,14 +677,17 @@ export class BosStore {
   }
 
   async computeContribution(identityId) {
-    const [nodes, memoryRecords] = await Promise.all([
+    const [nodes, memoryRecords, contributionEvents] = await Promise.all([
       this.listNodes(),
-      this.listMemoryRecords()
+      this.listMemoryRecords(),
+      this.listMeshContributionEvents()
     ]);
     const operatorNodes = nodes.filter((node) => node.operatorId === identityId);
     const ownedRecords = memoryRecords.filter((record) => record.ownerId === identityId);
+    const ownEvents = contributionEvents.filter((event) => event.operatorId === identityId);
 
-    const contributedBytes = operatorNodes.reduce(
+    // Static capacity: the storage the operator's nodes advertise.
+    const advertisedCapacityBytes = operatorNodes.reduce(
       (sum, node) => sum + Number(node.storageBytes ?? 0),
       0
     );
@@ -661,6 +695,22 @@ export class BosStore {
       (sum, node) => sum + Number(node.usedBytes ?? 0),
       0
     );
+
+    // Dynamic contribution: actual bytes served (storage egress) + actual
+    // bytes stored on others' nodes via this operator's contributions.
+    // §13B fair-use lever is "real service", not just advertised capacity.
+    const servedBytes = ownEvents
+      .filter((event) => event.workloadType === 'storage_serve' || event.workloadType === 'storage_store')
+      .reduce((sum, event) => sum + Number(event.bytes ?? 0), 0);
+    const tokensServed = ownEvents
+      .filter((event) => event.workloadType === 'inference')
+      .reduce((sum, event) => sum + Number(event.tokens ?? 0), 0);
+    const totalPaiseEarned = ownEvents.reduce(
+      (sum, event) => sum + Number(event.payoutPaise ?? 0),
+      0
+    );
+
+    const contributedBytes = advertisedCapacityBytes + servedBytes;
     const consumedBytes = ownedRecords.reduce(
       (sum, record) => sum + Number(record.plaintextBytes ?? 0),
       0
@@ -674,6 +724,12 @@ export class BosStore {
       nodeCount: operatorNodes.length,
       usedBytesOnOwnNodes,
       memoryRecordCount: ownedRecords.length,
+      advertisedCapacityBytes,
+      servedBytes,
+      tokensServed,
+      contributionEventCount: ownEvents.length,
+      earningsPaise: totalPaiseEarned,
+      earningsRupees: Number((totalPaiseEarned / 100).toFixed(2)),
       computedAt: new Date().toISOString()
     };
   }

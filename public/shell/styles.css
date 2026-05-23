@@ -611,6 +611,53 @@ body {
   color: var(--accent);
 }
 
+.mesh-node-card .mesh-ticker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.mesh-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.mesh-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.mesh-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--text);
+}
+
+.mesh-node-card .capture-meta[data-tone='good'] {
+  color: var(--good);
+}
+
+.mesh-node-card .capture-meta[data-tone='bad'] {
+  color: var(--bad);
+}
+
+@media (max-width: 480px) {
+  .mesh-node-card .mesh-ticker {
+    grid-template-columns: 1fr 1fr;
+  }
+  .mesh-node-card .mesh-ticker .mesh-stat:nth-child(3) {
+    grid-column: span 2;
+  }
+}
+
 .capture-card {
   background: var(--surface);
   border: 1px solid var(--border);

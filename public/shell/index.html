@@ -70,6 +70,39 @@
         </div>
       </section>
 
+      <section class="capture-card mesh-node-card" id="meshNodeSection">
+        <div class="capture-header">
+          <span>💎 Mesh node — §13B fair-use lever</span>
+          <span id="meshNodeStatus" class="capture-meta">Idle</span>
+        </div>
+        <div class="mesh-ticker">
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Today earned</span>
+            <span class="mesh-stat-value" id="meshEarningsRupees">₹0.00</span>
+          </div>
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Served</span>
+            <span class="mesh-stat-value" id="meshServedSummary">0 tokens · 0 GB</span>
+          </div>
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">NCS</span>
+            <span class="mesh-stat-value" id="meshNcsValue">— / —</span>
+          </div>
+        </div>
+        <p class="diagnostics-note" style="margin: 0;">
+          Earns only while charging + on WiFi + above battery threshold
+          (§7b). Each tick records a signed contribution event in the L4
+          audit ledger; payouts settle in fiat UPI credits (§15 — no
+          tokens). Demo mode bypasses charging/WiFi checks so the ticker
+          works on any laptop.
+        </p>
+        <div class="passkey-actions">
+          <button id="meshStartButton" class="secondary-button" type="button">Start earning</button>
+          <button id="meshStopButton" class="link-button" type="button" disabled>Stop</button>
+        </div>
+        <div id="meshLastEvent" class="capture-result" hidden></div>
+      </section>
+
       <section class="capture-card profile-auth-card" id="profileAuthSection">
         <div class="capture-header">
           <span>Profile security</span>

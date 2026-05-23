@@ -144,6 +144,15 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.13 **L2 mesh contribution loop** — signed contribution events
+  (`src/phase1/mesh-contribution.mjs`) for inference / storage_serve /
+  storage_store with per-event operator payout from §13B rates. New
+  `/api/mesh/contributions*` routes and store persistence + ledger.
+  `store.computeContribution` now folds events into NCS dynamically.
+  `/shell/` gains a **Mesh node** card with a live earnings ticker (8s
+  foreground ticks) and a best-effort Periodic Background Sync
+  registration for hidden-tab continuation. The §13B "your phone earns
+  ₹ overnight" story is now visible in real time. ADR 0062.
 - Phase 2a.12 **real on-device SLM** via transformers.js +
   `Xenova/paraphrase-multilingual-MiniLM-L12-v2` (~120 MB, Tier 3). User-
   triggered warm-up button in `/shell/` with a visible download progress

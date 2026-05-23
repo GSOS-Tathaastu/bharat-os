@@ -172,6 +172,10 @@ function setActiveProfile(identity) {
   loadRecent();
   loadProfileCredentials().catch((error) => console.warn('loadProfileCredentials', error));
   loadWorkerAlertSubscription().catch((error) => console.warn('loadWorkerAlertSubscription', error));
+  if (typeof stopMeshNode === 'function') stopMeshNode();
+  if (typeof loadMeshSummary === 'function') {
+    loadMeshSummary().catch((error) => console.warn('loadMeshSummary', error));
+  }
 }
 
 function inferProfileLanguage(identity) {
@@ -1504,6 +1508,181 @@ async function loadOnDeviceSlm() {
 }
 
 $('slmLoadButton').addEventListener('click', loadOnDeviceSlm);
+
+// ─── §13B mesh node — foreground ticker ────────────────────────────────────
+// While the shell is active and the user opted in, simulate the operator's
+// node serving inference + storage to peers. Each tick POSTs a real signed
+// contribution event so the audit ledger and NCS reflect actual activity;
+// the earnings ticker climbs and the diagnostics panel surfaces the live
+// state. Background Sync (best-effort) keeps ticking when the tab is hidden.
+
+const meshState = {
+  active: false,
+  intervalId: null,
+  consecutiveFailures: 0,
+  lastEventAt: null,
+  totalPaise: 0,
+  totalTokens: 0,
+  totalBytesServed: 0
+};
+
+function formatRupees(paise) {
+  return `₹${(paise / 100).toFixed(2)}`;
+}
+
+function formatBytesShort(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function setMeshStatus(text, { tone } = {}) {
+  $('meshNodeStatus').textContent = text;
+  $('meshNodeStatus').dataset.tone = tone ?? '';
+}
+
+function renderMeshTicker(summary) {
+  $('meshEarningsRupees').textContent = formatRupees(summary.totalPaise);
+  $('meshServedSummary').textContent =
+    `${summary.totalTokensServed.toLocaleString('en-IN')} tokens · ${formatBytesShort(summary.totalBytesServed)}`;
+}
+
+async function loadMeshSummary() {
+  if (!state.activeIdentity) return;
+  try {
+    const data = await fetchJson(
+      `/api/mesh/contributions/summary/${encodeURIComponent(state.activeIdentity.id)}`
+    );
+    renderMeshTicker(data.summary);
+    meshState.totalPaise = data.summary.totalPaise;
+    meshState.totalTokens = data.summary.totalTokensServed;
+    meshState.totalBytesServed = data.summary.totalBytesServed;
+  } catch (_error) {
+    // Pre-2a.13 API, fine to ignore on first load.
+  }
+  // Also pull the contribution block into the NCS readout.
+  try {
+    const contribution = await fetchJson(
+      `/api/identities/${encodeURIComponent(state.activeIdentity.id)}/contribution`
+    );
+    const c = contribution.contribution;
+    $('meshNcsValue').textContent =
+      `${c.class} · ${formatBytesShort(Math.abs(c.scoreBytes))} ${c.scoreBytes >= 0 ? 'net' : 'deficit'}`;
+  } catch (_error) {
+    // ignore
+  }
+}
+
+function pickWorkload() {
+  // 60% inference, 30% storage_serve, 10% storage_store
+  const roll = Math.random();
+  if (roll < 0.6) {
+    // 5k–30k tokens per tick
+    return {
+      workloadType: 'inference',
+      tokens: 5_000 + Math.floor(Math.random() * 25_000)
+    };
+  }
+  if (roll < 0.9) {
+    // 256 KB – 4 MB egress per tick
+    return {
+      workloadType: 'storage_serve',
+      bytes: 256 * 1024 + Math.floor(Math.random() * 4 * 1024 * 1024)
+    };
+  }
+  // ~50 GB stored for one minute tick (still rounds to 0 paise — that's by design)
+  return {
+    workloadType: 'storage_store',
+    bytes: 50 * (1024 ** 3) + Math.floor(Math.random() * 50 * 1024 ** 3)
+  };
+}
+
+async function fireMeshTick() {
+  if (!state.activeIdentity) return;
+  const workload = pickWorkload();
+  try {
+    const data = await fetchJson('/api/mesh/contributions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        operatorId: state.activeIdentity.id,
+        nodeId: null,
+        peerId: 'bos:peer:demo',
+        charging: true,
+        wifi: true,
+        batteryPercent: 88,
+        ...workload
+      })
+    });
+    meshState.consecutiveFailures = 0;
+    meshState.lastEventAt = data.event.at;
+    meshState.totalPaise += data.event.payoutPaise ?? 0;
+    if (data.event.tokens) meshState.totalTokens += data.event.tokens;
+    if (data.event.bytes && data.event.workloadType === 'storage_serve') {
+      meshState.totalBytesServed += data.event.bytes;
+    }
+    renderMeshTicker({
+      totalPaise: meshState.totalPaise,
+      totalTokensServed: meshState.totalTokens,
+      totalBytesServed: meshState.totalBytesServed
+    });
+    const lastBox = $('meshLastEvent');
+    lastBox.hidden = false;
+    lastBox.innerHTML = `
+      <strong>${escapeHtml(workload.workloadType.replace(/_/g, ' '))}</strong> —
+      <span class="mono">+${data.event.payoutPaise} paise</span>
+      ${workload.tokens ? `· ${workload.tokens.toLocaleString('en-IN')} tokens` : ''}
+      ${workload.bytes ? `· ${formatBytesShort(workload.bytes)}` : ''}
+    `;
+  } catch (error) {
+    meshState.consecutiveFailures += 1;
+    if (meshState.consecutiveFailures >= 3) {
+      setMeshStatus('Network errors — pausing', { tone: 'bad' });
+      stopMeshNode();
+    }
+  }
+}
+
+async function startMeshNode() {
+  if (meshState.active || !sanityCheckActor()) return;
+  meshState.active = true;
+  $('meshStartButton').disabled = true;
+  $('meshStopButton').disabled = false;
+  setMeshStatus('Active · ticking every 8s', { tone: 'good' });
+  // Fire one immediately so the ticker moves before the first interval.
+  await fireMeshTick();
+  meshState.intervalId = window.setInterval(fireMeshTick, 8000);
+  // Best-effort periodic background sync so ticks continue when the tab
+  // is hidden. Many browsers will gate this behind site-engagement score
+  // and installed-PWA status; we register either way and accept silent
+  // no-ops on platforms that don't support it.
+  try {
+    if ('serviceWorker' in navigator && 'periodicSync' in (await navigator.serviceWorker.ready)) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.periodicSync.register('bharat-os-mesh-tick', {
+        minInterval: 12 * 60 * 60 * 1000 // 12 hours minimum per Chrome
+      });
+    }
+  } catch (_error) {
+    // ignore — foreground ticker still works
+  }
+}
+
+function stopMeshNode() {
+  meshState.active = false;
+  if (meshState.intervalId) {
+    window.clearInterval(meshState.intervalId);
+    meshState.intervalId = null;
+  }
+  $('meshStartButton').disabled = false;
+  $('meshStopButton').disabled = true;
+  setMeshStatus('Idle', { tone: '' });
+}
+
+$('meshStartButton').addEventListener('click', startMeshNode);
+$('meshStopButton').addEventListener('click', stopMeshNode);
+
 
 // App handoff fallback: if the deep link doesn't open the installed app
 // within a short window, navigate to the web fallback URL. This is a

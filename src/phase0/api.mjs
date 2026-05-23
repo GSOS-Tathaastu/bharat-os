@@ -58,6 +58,11 @@ import {
   signFlagReport,
   verifyFlagReport
 } from '../phase1/flag-report.mjs';
+import {
+  createMeshContributionEvent,
+  meshContributionSummary,
+  MESH_PAYOUT_RATES
+} from '../phase1/mesh-contribution.mjs';
 import { createHealthDocumentCapture } from '../phase1/health-document.mjs';
 import {
   createProfileAuthChallenge,
@@ -555,6 +560,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/flags/:flagId',
             'POST /api/flags/:flagId/resolve',
             'GET /api/flags/summary/:subjectActorId',
+            'GET /api/mesh/contributions',
+            'POST /api/mesh/contributions',
+            'GET /api/mesh/contributions/summary/:operatorId',
+            'GET /api/mesh/rates',
             'GET /api/nodes',
             'GET /api/manifests',
             'GET /api/reports',
@@ -1473,6 +1482,73 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const flag = await store.readFlagReport(flagId);
         jsonResponse(response, 200, { flag });
         return;
+      }
+
+      // §13B mesh contribution events
+      if (parts[0] === 'api' && parts[1] === 'mesh' && parts[2] === 'rates' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        jsonResponse(response, 200, { rates: MESH_PAYOUT_RATES });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'mesh' &&
+        parts[2] === 'contributions' &&
+        parts.length === 5 &&
+        parts[3] === 'summary'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const operatorId = decodeURIComponent(parts[4]);
+        const events = await store.listMeshContributionEvents();
+        jsonResponse(response, 200, {
+          summary: meshContributionSummary(operatorId, events)
+        });
+        return;
+      }
+
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'mesh' &&
+        parts[2] === 'contributions' &&
+        parts.length === 3
+      ) {
+        if (request.method === 'GET') {
+          const operatorFilter = url.searchParams.get('operatorId');
+          let events = await store.listMeshContributionEvents();
+          if (operatorFilter) {
+            events = events.filter((event) => event.operatorId === operatorFilter);
+          }
+          const limit = url.searchParams.get('limit');
+          if (limit) {
+            const n = Number(limit);
+            if (Number.isFinite(n) && n > 0) {
+              events = events
+                .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+                .slice(0, n);
+            }
+          }
+          jsonResponse(response, 200, { events });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          const event = createMeshContributionEvent({
+            operatorId: body.operatorId,
+            nodeId: body.nodeId,
+            workloadType: body.workloadType,
+            tokens: body.tokens,
+            bytes: body.bytes,
+            peerId: body.peerId,
+            charging: body.charging,
+            wifi: body.wifi,
+            batteryPercent: body.batteryPercent
+          });
+          await store.saveMeshContributionEvent(event);
+          jsonResponse(response, 201, { ok: true, event });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
       }
 
       if (
