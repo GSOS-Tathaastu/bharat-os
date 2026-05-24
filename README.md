@@ -144,6 +144,18 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 3.1 **real on-device training for §7f rounds** — replaces the
+  Phase 3.0 placeholder gradient hash with actual pure-JS multinomial
+  logistic regression training. New `src/phase1/local-training.mjs`
+  (browser + node-testable): 36-feature × 6-class classifier head,
+  `extractFeatures` / `trainOneEpoch` / `addDifferentialPrivacyNoise`
+  (Gaussian mechanism, σ = 1/ε) / `hashGradient`. Shell
+  `joinFederatedRound` reads the user's orchestration history for
+  labeled samples (falls back to a 6-sample warm-up corpus), runs the
+  math locally, submits the SHA-256 of the noisy gradient. Module
+  aliased at `/shell/local-training.mjs` so browser + tests share one
+  canonical copy. §15 preserved — raw text never leaves the device.
+  261/261 tests (+12 new). SW cache to v20. ADR 0074.
 - Phase 2a.23 **operator console catch-up** — `/console/` had drifted
   behind the shell across Phase 2a.18 / 3.0 / 2a.22. Two new panels
   added between Trust and Flags: *"§7f Federated Rounds — Phase 3.0"*

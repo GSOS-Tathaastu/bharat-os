@@ -491,6 +491,15 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           );
           return;
         }
+        // §7f Phase 3.1 — same alias trick for the on-device training
+        // module so the browser and node:test share one canonical file.
+        if (url.pathname === '/shell/local-training.mjs') {
+          await staticResponse(
+            response,
+            path.join(repoRoot, 'src/phase1/local-training.mjs')
+          );
+          return;
+        }
         const relativePath =
           url.pathname === '/shell/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/shell/'.length));
         const requestedPath = path.resolve(shellRoot, relativePath);

@@ -1781,14 +1781,66 @@ function stopMeshNode() {
 $('meshStartButton').addEventListener('click', startMeshNode);
 $('meshStopButton').addEventListener('click', stopMeshNode);
 
-// ─── §7f federated rounds — Phase 3.0 ─────────────────────────────────────
+// ─── §7f federated rounds — Phase 3.0 + 3.1 ───────────────────────────────
 //
 // Lists active rounds the user can join, and a one-tap join button.
-// The actual on-device training is a Phase 3.1+ commitment (TF.js /
-// ONNX Runtime Web); the join action here ships a placeholder
-// gradient hash with the round's max-epsilon DP noise label and
-// records the donation consent. Earns UPI credits via the §7f mesh
-// workload class.
+// Phase 3.1 (ADR 0074) replaces the placeholder gradient hash with
+// real on-device training: pulls the user's recent orchestration
+// history as labeled samples, runs one epoch of multinomial
+// logistic regression locally, adds Gaussian DP noise calibrated to
+// the round's ε cap, and submits the SHA-256 of the noisy gradient.
+// Raw text never leaves the device.
+
+let trainingModulePromise = null;
+async function loadTrainingModule() {
+  if (!trainingModulePromise) {
+    trainingModulePromise = import('/shell/local-training.mjs');
+  }
+  return trainingModulePromise;
+}
+
+// Pull the active identity's recent orchestrations and shape them
+// into `{ intentText, locale, actionType }` samples. Falls back to a
+// small seeded warm-up corpus so the demo still trains something
+// even on a brand-new profile.
+async function gatherLocalTrainingSamples(identityId) {
+  let samples = [];
+  try {
+    const data = await fetchJson('/api/orchestrations');
+    const all = data.orchestrations ?? [];
+    samples = all
+      .filter((o) => {
+        const actor = o.action?.actorId ?? o.actorId ?? o.decision?.request?.actorId;
+        return actor === identityId;
+      })
+      .map((o) => ({
+        intentText:
+          o.action?.metadata?.intentText ??
+          o.action?.intentText ??
+          o.decision?.request?.metadata?.intentText ??
+          '',
+        locale:
+          o.action?.metadata?.locale ??
+          o.action?.metadata?.detectedLocale ??
+          'en-IN',
+        actionType: o.action?.actionType ?? o.actionType
+      }))
+      .filter((s) => s.intentText && s.actionType);
+  } catch (_error) {
+    // ignore — fall through to warm-up corpus
+  }
+  if (samples.length >= 3) return samples;
+  // Tiny warm-up corpus — kept short so the demo trains in
+  // milliseconds on the first run.
+  return [
+    { intentText: 'Book a cab from office to home', locale: 'en-IN', actionType: 'service_booking' },
+    { intentText: 'Mujhe ₹50,000 ka chhota karza chahiye', locale: 'hi-Latn-IN', actionType: 'regulated_onboarding' },
+    { intentText: 'Show me my health record', locale: 'en-IN', actionType: 'health_record_read' },
+    { intentText: 'Mujhe sarkari yojana chahiye', locale: 'hi-Latn-IN', actionType: 'scheme_delivery' },
+    { intentText: 'Hire 50 workers for brick kiln', locale: 'en-IN', actionType: 'labor_match_post' },
+    { intentText: 'Backup my files on the mesh', locale: 'en-IN', actionType: 'mesh_storage' }
+  ];
+}
 
 async function loadFederatedRounds() {
   if (!state.activeIdentity) return;
@@ -1870,13 +1922,25 @@ async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
       throw new Error('Could not mint donation consent.');
     }
 
-    // 2) Compose a placeholder gradient hash (real on-device
-    //    training is Phase 3.1+). Phase 3.0 ships the substrate;
-    //    the hash carries the round id + a per-device nonce.
-    const seed = `${roundId}:${state.activeIdentity.id}:${Date.now()}`;
-    const seedBytes = new TextEncoder().encode(seed);
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', seedBytes);
-    const gradientHash = `sha256:${hexFromBuffer(digest)}`;
+    // 2) Phase 3.1 — real on-device training. Pull the active
+    //    identity's recent orchestrations as labeled samples, run
+    //    one epoch of multinomial logistic regression locally, add
+    //    Gaussian DP noise at the round's ε cap, hash the noisy
+    //    gradient. Raw intent text never leaves the device — only
+    //    the SHA-256 hash plus the DP-epsilon claim travels.
+    if (result) result.textContent = 'Gathering local samples + training on-device…';
+    const samples = await gatherLocalTrainingSamples(state.activeIdentity.id);
+    const training = await loadTrainingModule();
+    const composed = await training.composeFederatedUpdate({
+      samples,
+      epsilon: Number(epsilon),
+      learningRate: 0.1
+    });
+    const gradientHash = composed.gradientHash;
+    if (result) {
+      result.textContent =
+        `Trained on ${composed.sampleCount} samples · loss ${composed.averageLoss.toFixed(3)} · ε ${composed.differentialPrivacyEpsilon} · submitting…`;
+    }
 
     // 3) Build + sign the update on the server (the demo doesn't
     //    have the contributor private key in the browser yet — the
@@ -1892,7 +1956,7 @@ async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
           baselineModelHash,
           gradientHash,
           differentialPrivacyEpsilon: Number(epsilon),
-          sampleCount: 256
+          sampleCount: composed.sampleCount
         })
       }
     );
@@ -1901,7 +1965,8 @@ async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
       const payout = updateResponse?.update?.payoutPaise
         ? `+₹${(updateResponse.update.payoutPaise / 100).toFixed(2)}`
         : '';
-      result.textContent = `Joined — update accepted ${payout}. Earnings ticked the mesh ledger.`;
+      result.textContent =
+        `Trained locally on ${composed.sampleCount} samples · ε ${composed.differentialPrivacyEpsilon} · update accepted ${payout}`;
     }
     // Refresh mesh summary so the new federated_round earning shows.
     loadMeshSummary?.().catch(() => {});
