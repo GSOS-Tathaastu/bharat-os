@@ -144,6 +144,18 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.24 **seed-demo refresh for post-2a.18 surfaces** —
+  `scripts/seed-demo.mjs` had drifted: mesh contributions, attestations,
+  and federated rounds all opened empty on first run. Extended with
+  two signed attestations (Sita → Kothrud Landlord, Lakshmi → Apollo
+  Clinic — both flow through the real `signTrustAttestation` path),
+  eight backdated mesh contribution events covering all four workload
+  classes, and one active §7f federated round (`intent-classifier-head-v1`)
+  with Priya pre-donating a signed gradient update at ε=0.3 (matching
+  `federated_round` mesh event mints her ₹2 payout). All artifacts go
+  through their real signing paths — no shortcut data. First 60 seconds
+  of the demo now opens populated; `/verify/?attestationId=…` works
+  on first run. 261/261 tests unchanged. ADR 0075.
 - Phase 3.1 **real on-device training for §7f rounds** — replaces the
   Phase 3.0 placeholder gradient hash with actual pure-JS multinomial
   logistic regression training. New `src/phase1/local-training.mjs`
