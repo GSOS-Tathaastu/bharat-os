@@ -33,6 +33,7 @@
 //                                            ↘ expired (past deadline)
 
 import { sha256Hex, signText, stableStringify, verifySignature } from '../phase0/core.mjs';
+import { assertWithinBudget, DEFAULT_FEDERATED_BUDGET } from './privacy-budget.mjs';
 
 export const FEDERATED_ROUND_PROTOCOL_VERSION = 'bos.phase1.federated-round.v0';
 
@@ -43,6 +44,29 @@ export const FEDERATED_ROUND_WORKLOAD = 'federated_round';
 // (purpose: 'tenant_verification' etc.) are *not* enough.
 export const DONATION_CONSENT_PURPOSE = 'federated_donation';
 export const DONATION_CONSENT_SCOPES = ['training.donate', 'consent.record'];
+
+// §7f Phase 3.2 — stricter consent purpose for rounds that ship the
+// actual noisy gradient bytes (not just the hash). The contributor
+// is donating the gradient vector itself, which weakens §15
+// pointer-not-payload in exchange for the server being able to
+// FedAvg. The shell must collect a separate explicit consent for
+// this purpose; a general `federated_donation` consent is NOT
+// enough.
+export const BYTES_DONATION_CONSENT_PURPOSE = 'federated_bytes_donation';
+export const BYTES_DONATION_CONSENT_SCOPES = [
+  'training.donate',
+  'training.donate_bytes',
+  'consent.record'
+];
+
+// Aggregation modes per round.
+//   • 'hash_combiner' — Phase 3.0 default. Server sees only the
+//     gradient hash; aggregation hashes the sorted hashes (no
+//     averaging possible). Strongest §15 binding.
+//   • 'fedavg' — Phase 3.2. Server sees the noisy gradient bytes
+//     and averages them element-wise. Requires the
+//     `BYTES_DONATION_CONSENT_PURPOSE` consent.
+export const FEDERATED_AGGREGATION_MODES = ['hash_combiner', 'fedavg'];
 
 // Per the §7b mesh fiat-credit rates (§13B), federated participation
 // is paid at a flat per-update rate. Researchers (the round
@@ -82,11 +106,18 @@ export function createFederatedRound({
   maxEpsilon,
   payoutPaisePerUpdate = FEDERATED_PAYOUT_PAISE_PER_UPDATE,
   deadlineSecondsFromNow = 24 * 60 * 60,
+  aggregationMode = 'hash_combiner',
+  contributorBudget = DEFAULT_FEDERATED_BUDGET,
   at = nowIso()
 } = {}) {
   if (!createdBy) throw new Error('createdBy identity ID is required.');
   if (!modelName) throw new Error('modelName is required.');
   if (!baselineModelHash) throw new Error('baselineModelHash is required.');
+  if (!FEDERATED_AGGREGATION_MODES.includes(aggregationMode)) {
+    throw new Error(
+      `aggregationMode must be one of: ${FEDERATED_AGGREGATION_MODES.join(', ')}`
+    );
+  }
   const cappedMax = Math.min(Math.max(Number(maxParticipants ?? 100), 1), 10_000);
   const epsilonCap = validateEpsilon(maxEpsilon ?? 1.0);
   const payout = Math.max(0, Number(payoutPaisePerUpdate ?? FEDERATED_PAYOUT_PAISE_PER_UPDATE));
@@ -103,12 +134,19 @@ export function createFederatedRound({
     maxParticipants: cappedMax,
     maxEpsilon: epsilonCap,
     payoutPaisePerUpdate: payout,
+    aggregationMode,
+    contributorBudget: {
+      windowHours: Math.max(1, Number(contributorBudget?.windowHours ?? DEFAULT_FEDERATED_BUDGET.windowHours)),
+      epsilonCap: validateEpsilon(contributorBudget?.epsilonCap ?? DEFAULT_FEDERATED_BUDGET.epsilonCap)
+    },
     createdAt: at,
     deadlineAt,
     openedAt: null,
     closedAt: null,
     aggregatedAt: null,
     aggregatedModelHash: null,
+    aggregatedGradientBytesBase64: null,
+    aggregatedGradientLength: null,
     updateCount: 0,
     epsilonSpent: 0
   };
@@ -134,14 +172,17 @@ export function expireRound(round, { at = nowIso() } = {}) {
 }
 
 // A gradient update — what a contributing device produces locally
-// after one round of on-device training. The actual gradient bytes
-// never reach the control plane; the contributor hashes the gradient
-// and submits the hash + DP epsilon + signature.
+// after one round of on-device training. For `hash_combiner` rounds
+// only the hash + DP epsilon + signature reach the control plane.
+// For `fedavg` rounds the noisy gradient bytes (`gradientBytesBase64`)
+// also travel, gated by a stricter consent purpose.
 export function createGradientUpdate({
   roundId,
   contributorId,
   baselineModelHash,
   gradientHash,
+  gradientBytesBase64 = null,
+  gradientLength = null,
   differentialPrivacyEpsilon,
   sampleCount,
   at = nowIso()
@@ -159,6 +200,8 @@ export function createGradientUpdate({
     contributorId,
     baselineModelHash,
     gradientHash,
+    gradientBytesBase64: gradientBytesBase64 ?? null,
+    gradientLength: gradientLength ?? null,
     differentialPrivacyEpsilon: epsilon,
     sampleCount: samples,
     submittedAt: at,
@@ -172,6 +215,26 @@ export function createGradientUpdate({
   };
 }
 
+function canonicalUpdatePayload(update) {
+  return {
+    protocolVersion: update.protocolVersion,
+    objectType: update.objectType,
+    roundId: update.roundId,
+    contributorId: update.contributorId,
+    baselineModelHash: update.baselineModelHash,
+    gradientHash: update.gradientHash,
+    // gradientBytesBase64 is intentionally NOT in the signed
+    // payload: bytes are validated by the hash they SHA-256 to,
+    // which is in the payload. Signing the hash transitively signs
+    // the bytes without bloating the signed text on hash-only
+    // rounds.
+    gradientLength: update.gradientLength,
+    differentialPrivacyEpsilon: update.differentialPrivacyEpsilon,
+    sampleCount: update.sampleCount,
+    submittedAt: update.submittedAt
+  };
+}
+
 export function signGradientUpdate(update, contributorIdentity) {
   if (!contributorIdentity?.id) {
     throw new Error('contributorIdentity is required.');
@@ -179,17 +242,7 @@ export function signGradientUpdate(update, contributorIdentity) {
   if (contributorIdentity.id !== update.contributorId) {
     throw new Error('contributorIdentity must match the update contributorId.');
   }
-  const payloadText = stableStringify({
-    protocolVersion: update.protocolVersion,
-    objectType: update.objectType,
-    roundId: update.roundId,
-    contributorId: update.contributorId,
-    baselineModelHash: update.baselineModelHash,
-    gradientHash: update.gradientHash,
-    differentialPrivacyEpsilon: update.differentialPrivacyEpsilon,
-    sampleCount: update.sampleCount,
-    submittedAt: update.submittedAt
-  });
+  const payloadText = stableStringify(canonicalUpdatePayload(update));
   const signature = signText(contributorIdentity, payloadText);
   return { ...update, signature };
 }
@@ -200,27 +253,17 @@ function verifyUpdateSignature(update, publicRecords) {
     (record) => record.id === update.contributorId
   );
   if (!subject) return false;
-  const payloadText = stableStringify({
-    protocolVersion: update.protocolVersion,
-    objectType: update.objectType,
-    roundId: update.roundId,
-    contributorId: update.contributorId,
-    baselineModelHash: update.baselineModelHash,
-    gradientHash: update.gradientHash,
-    differentialPrivacyEpsilon: update.differentialPrivacyEpsilon,
-    sampleCount: update.sampleCount,
-    submittedAt: update.submittedAt
-  });
+  const payloadText = stableStringify(canonicalUpdatePayload(update));
   return verifySignature(subject, payloadText, update.signature);
 }
 
-function hasDonationConsent(consents, { contributorId, roundId, at = nowIso() }) {
+function hasMatchingConsent(consents, { contributorId, roundId, purpose, requiredScopes, at = nowIso() }) {
   const nowMs = new Date(at).getTime();
   return consents.some((consent) => {
     if (consent.subjectId !== contributorId) return false;
-    if (consent.purpose !== DONATION_CONSENT_PURPOSE) return false;
+    if (consent.purpose !== purpose) return false;
     if (!Array.isArray(consent.scopes)) return false;
-    const hasScopes = DONATION_CONSENT_SCOPES.every((scope) =>
+    const hasScopes = requiredScopes.every((scope) =>
       consent.scopes.includes(scope)
     );
     if (!hasScopes) return false;
@@ -235,15 +278,49 @@ function hasDonationConsent(consents, { contributorId, roundId, at = nowIso() })
   });
 }
 
-// Submit a signed update against an open round, with a donation
-// consent for the contributor. Returns `{ round, update }` with the
-// round's running totals updated and the update's `accepted` /
-// `payoutPaise` set. Throws on any policy violation.
+function hasDonationConsent(consents, { contributorId, roundId, at = nowIso() }) {
+  return hasMatchingConsent(consents, {
+    contributorId,
+    roundId,
+    purpose: DONATION_CONSENT_PURPOSE,
+    requiredScopes: DONATION_CONSENT_SCOPES,
+    at
+  });
+}
+
+function hasBytesDonationConsent(consents, { contributorId, roundId, at = nowIso() }) {
+  return hasMatchingConsent(consents, {
+    contributorId,
+    roundId,
+    purpose: BYTES_DONATION_CONSENT_PURPOSE,
+    requiredScopes: BYTES_DONATION_CONSENT_SCOPES,
+    at
+  });
+}
+
+// Submit a signed update against an open round, with the appropriate
+// donation consent for the contributor. Phase 3.2 adds two more
+// gates on top of the Phase 3.0 set:
+//
+//   • For `fedavg` rounds, the update MUST carry
+//     `gradientBytesBase64` AND the contributor must hold a
+//     `federated_bytes_donation` consent. A `federated_donation`
+//     consent alone is NOT sufficient.
+//   • The contributor's cumulative ε spend across recent updates
+//     (default: 30-day rolling window) must not exceed the round's
+//     `contributorBudget.epsilonCap`. Pass `allUpdates` so the
+//     accountant can read the history; if omitted, only the current
+//     round's updates are considered.
+//
+// Returns `{ round, update }` with the round's running totals
+// updated and the update's `accepted` / `payoutPaise` set. Throws on
+// any policy violation.
 export function submitGradientUpdate({
   round,
   update,
   consents = [],
   publicRecords = [],
+  allUpdates = null,
   at = nowIso()
 } = {}) {
   if (!round || round.objectType !== 'federated-round') {
@@ -277,17 +354,56 @@ export function submitGradientUpdate({
   if (!verifyUpdateSignature(update, publicRecords)) {
     throw new Error('update signature is missing or does not verify.');
   }
-  if (
-    !hasDonationConsent(consents, {
-      contributorId: update.contributorId,
-      roundId: round.roundId,
-      at
-    })
-  ) {
-    throw new Error(
-      `no active 'federated_donation' consent for contributor ${update.contributorId} on round ${round.roundId}.`
+
+  const mode = round.aggregationMode ?? 'hash_combiner';
+  if (mode === 'fedavg') {
+    if (!update.gradientBytesBase64) {
+      throw new Error(
+        `'fedavg' rounds require update.gradientBytesBase64 (the noisy gradient vector).`
+      );
+    }
+    if (
+      !hasBytesDonationConsent(consents, {
+        contributorId: update.contributorId,
+        roundId: round.roundId,
+        at
+      })
+    ) {
+      throw new Error(
+        `'fedavg' rounds require a 'federated_bytes_donation' consent for contributor ${update.contributorId} on round ${round.roundId}.`
+      );
+    }
+  } else {
+    if (
+      !hasDonationConsent(consents, {
+        contributorId: update.contributorId,
+        roundId: round.roundId,
+        at
+      })
+    ) {
+      throw new Error(
+        `no active 'federated_donation' consent for contributor ${update.contributorId} on round ${round.roundId}.`
+      );
+    }
+  }
+
+  // §7f Phase 3.2 — cumulative privacy budget check across recent
+  // updates. If the caller didn't pass `allUpdates` (legacy
+  // callers), the budget check is skipped — the per-round cap
+  // (round.maxEpsilon) still applies.
+  if (allUpdates) {
+    assertWithinBudget(
+      update.contributorId,
+      allUpdates,
+      update.differentialPrivacyEpsilon,
+      {
+        windowHours: round.contributorBudget?.windowHours,
+        epsilonCap: round.contributorBudget?.epsilonCap,
+        at
+      }
     );
   }
+
   const acceptedUpdate = {
     ...update,
     accepted: true,
@@ -301,16 +417,20 @@ export function submitGradientUpdate({
   return { round: nextRound, update: acceptedUpdate };
 }
 
-// Aggregate the round — closes the lifecycle, computes a new
-// aggregated model hash (a deterministic hash of the sorted update
-// gradient hashes for this prototype; the real aggregation
-// algorithm is Phase 3.1+ TF.js / ONNX averaging), and stamps
-// `aggregatedAt` + `aggregatedModelHash`.
+// Aggregate a `hash_combiner` round: deterministic hash of the
+// sorted gradient hashes. The aggregated artifact is opaque —
+// useful as a provenance record but not as a trainable signal.
+// Phase 3.2 keeps this for backward compatibility; new rounds that
+// want a real averaged model use `aggregateRoundFedAvg`.
 export function aggregateRound(round, updates, { at = nowIso() } = {}) {
   if (round.status !== 'accepting_updates') {
     throw new Error(
       `round must be 'accepting_updates' to aggregate (currently '${round.status}').`
     );
+  }
+  const mode = round.aggregationMode ?? 'hash_combiner';
+  if (mode === 'fedavg') {
+    return aggregateRoundFedAvg(round, updates, { at });
   }
   const accepted = updates.filter((u) => u.accepted && u.roundId === round.roundId);
   if (accepted.length === 0) {
@@ -323,7 +443,8 @@ export function aggregateRound(round, updates, { at = nowIso() } = {}) {
     stableStringify({
       baselineModelHash: round.baselineModelHash,
       gradientHashes: sortedHashes,
-      modelName: round.modelName
+      modelName: round.modelName,
+      aggregationMode: 'hash_combiner'
     })
   );
   return {
@@ -332,6 +453,107 @@ export function aggregateRound(round, updates, { at = nowIso() } = {}) {
     closedAt: at,
     aggregatedAt: at,
     aggregatedModelHash,
+    updateCount: accepted.length
+  };
+}
+
+function base64ToFloat32(base64) {
+  const source = typeof Buffer !== 'undefined'
+    ? Buffer.from(base64, 'base64')
+    : (() => {
+        const bin = atob(base64);
+        const u8 = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) u8[i] = bin.charCodeAt(i);
+        return u8;
+      })();
+  // Node Buffer.slice() returns a VIEW (not a copy) on the shared
+  // 8KB pool, so we can't use it here. Copy bytes into a fresh
+  // ArrayBuffer of the exact required size, then create the
+  // Float32Array view.
+  if (source.byteLength % 4 !== 0) {
+    throw new Error('gradient bytes length is not a multiple of 4 (float32).');
+  }
+  const aligned = new ArrayBuffer(source.byteLength);
+  new Uint8Array(aligned).set(source);
+  return new Float32Array(aligned);
+}
+
+function float32ToBase64(floatArray) {
+  const u8 = new Uint8Array(
+    floatArray.buffer,
+    floatArray.byteOffset,
+    floatArray.byteLength
+  );
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(u8).toString('base64');
+  }
+  let binary = '';
+  for (const byte of u8) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+// Aggregate a `fedavg` round: element-wise mean of the noisy
+// gradient vectors. Returns the aggregated bytes (so a researcher
+// can update the baseline model with them) plus the SHA-256 hash of
+// the aggregated bytes as the `aggregatedModelHash`. Throws if any
+// accepted update is missing bytes or has a mismatched length.
+export function aggregateRoundFedAvg(round, updates, { at = nowIso() } = {}) {
+  if (round.status !== 'accepting_updates') {
+    throw new Error(
+      `round must be 'accepting_updates' to aggregate (currently '${round.status}').`
+    );
+  }
+  if (round.aggregationMode !== 'fedavg') {
+    throw new Error(
+      `aggregateRoundFedAvg requires aggregationMode === 'fedavg' (got '${round.aggregationMode}').`
+    );
+  }
+  const accepted = updates.filter(
+    (u) => u.accepted && u.roundId === round.roundId
+  );
+  if (accepted.length === 0) {
+    throw new Error('no accepted updates to aggregate.');
+  }
+  // All updates must carry gradient bytes of the same length.
+  const decoded = accepted.map((u) => {
+    if (!u.gradientBytesBase64) {
+      throw new Error(`update ${u.updateId} has no gradientBytesBase64.`);
+    }
+    return base64ToFloat32(u.gradientBytesBase64);
+  });
+  const dim = decoded[0].length;
+  for (const vec of decoded) {
+    if (vec.length !== dim) {
+      throw new Error(
+        `gradient length mismatch: expected ${dim}, got ${vec.length}.`
+      );
+    }
+  }
+  // Element-wise mean.
+  const sum = new Float32Array(dim);
+  for (const vec of decoded) {
+    for (let i = 0; i < dim; i += 1) sum[i] += vec[i];
+  }
+  const averaged = new Float32Array(dim);
+  for (let i = 0; i < dim; i += 1) averaged[i] = sum[i] / decoded.length;
+  const aggregatedGradientBytesBase64 = float32ToBase64(averaged);
+  // The aggregated model hash is the SHA-256 of the averaged bytes
+  // — verifier-checkable, deterministic, and the actual artifact a
+  // researcher needs to update the baseline.
+  const u8 = new Uint8Array(
+    averaged.buffer,
+    averaged.byteOffset,
+    averaged.byteLength
+  );
+  const aggregatedModelHash = sha256Hex(Buffer.from(u8).toString('hex'));
+  return {
+    ...round,
+    status: 'completed',
+    closedAt: at,
+    aggregatedAt: at,
+    aggregatedModelHash: `sha256:${aggregatedModelHash}`,
+    aggregatedGradientBytesBase64,
+    aggregatedGradientLength: dim,
     updateCount: accepted.length
   };
 }
@@ -348,7 +570,10 @@ export function describeRound(round) {
     maxEpsilon: round.maxEpsilon,
     epsilonSpent: round.epsilonSpent,
     payoutPaisePerUpdate: round.payoutPaisePerUpdate,
+    aggregationMode: round.aggregationMode ?? 'hash_combiner',
+    contributorBudget: round.contributorBudget ?? null,
     deadlineAt: round.deadlineAt,
-    aggregatedModelHash: round.aggregatedModelHash
+    aggregatedModelHash: round.aggregatedModelHash,
+    aggregatedGradientLength: round.aggregatedGradientLength ?? null
   };
 }

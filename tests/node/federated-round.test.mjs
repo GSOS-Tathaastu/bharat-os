@@ -10,11 +10,15 @@ import { signConsent } from '../../src/phase1/integrity.mjs';
 import { createConsent } from '../../src/phase1/policy.mjs';
 import {
   aggregateRound,
+  aggregateRoundFedAvg,
+  BYTES_DONATION_CONSENT_PURPOSE,
+  BYTES_DONATION_CONSENT_SCOPES,
   createFederatedRound,
   createGradientUpdate,
   DONATION_CONSENT_PURPOSE,
   DONATION_CONSENT_SCOPES,
   expireRound,
+  FEDERATED_AGGREGATION_MODES,
   FEDERATED_PAYOUT_PAISE_PER_UPDATE,
   FEDERATED_ROUND_PROTOCOL_VERSION,
   FEDERATED_ROUND_WORKLOAD,
@@ -353,4 +357,321 @@ test('round respects maxParticipants cap', () => {
       }),
     /max participants/
   );
+});
+
+// ─── Phase 3.2 — FedAvg + bytes donation + budget ───────────────────────
+
+function bytesDonationConsent(contributor, { roundId, ttlSeconds = 24 * 60 * 60 } = {}) {
+  return signConsent(
+    createConsent({
+      subjectId: contributor.id,
+      granteeId: 'bharat-os-orchestrator',
+      scopes: BYTES_DONATION_CONSENT_SCOPES,
+      purpose: BYTES_DONATION_CONSENT_PURPOSE,
+      ttlSeconds,
+      constraints: roundId ? { roundId } : {}
+    }),
+    contributor
+  );
+}
+
+function float32ToBase64(arr) {
+  const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  return Buffer.from(u8).toString('base64');
+}
+
+function buildBytesUpdate(contributor, round, { gradient, epsilon = 0.3 } = {}) {
+  return signGradientUpdate(
+    createGradientUpdate({
+      roundId: round.roundId,
+      contributorId: contributor.id,
+      baselineModelHash: round.baselineModelHash,
+      gradientHash: 'sha256:bytes-update',
+      gradientBytesBase64: float32ToBase64(gradient),
+      gradientLength: gradient.length,
+      differentialPrivacyEpsilon: epsilon,
+      sampleCount: 8
+    }),
+    contributor
+  );
+}
+
+test('aggregation mode defaults to hash_combiner; fedavg requires opt-in', () => {
+  const r1 = createFederatedRound({
+    createdBy: 'bos:person:x',
+    modelName: 'm',
+    baselineModelHash: 'b'
+  });
+  assert.equal(r1.aggregationMode, 'hash_combiner');
+  const r2 = createFederatedRound({
+    createdBy: 'bos:person:x',
+    modelName: 'm',
+    baselineModelHash: 'b',
+    aggregationMode: 'fedavg'
+  });
+  assert.equal(r2.aggregationMode, 'fedavg');
+  assert.deepEqual([...FEDERATED_AGGREGATION_MODES].sort(), ['fedavg', 'hash_combiner']);
+  assert.throws(
+    () =>
+      createFederatedRound({
+        createdBy: 'bos:person:x',
+        modelName: 'm',
+        baselineModelHash: 'b',
+        aggregationMode: 'not-real'
+      }),
+    /aggregationMode must be one of/
+  );
+});
+
+test('fedavg round refuses an update without gradientBytesBase64', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const contributor = createIdentity({ displayName: 'C' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      aggregationMode: 'fedavg'
+    })
+  );
+  const noBytes = buildUpdate(contributor, round); // hash-only update
+  assert.throws(
+    () =>
+      submitGradientUpdate({
+        round,
+        update: noBytes,
+        consents: [bytesDonationConsent(contributor)],
+        publicRecords: [publicIdentity(contributor)]
+      }),
+    /require update\.gradientBytesBase64/
+  );
+});
+
+test('fedavg round refuses a hash-only-donation consent — needs bytes donation', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const contributor = createIdentity({ displayName: 'C' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      aggregationMode: 'fedavg'
+    })
+  );
+  const grad = new Float32Array([0.1, -0.2, 0.05, 0.4]);
+  const update = buildBytesUpdate(contributor, round, { gradient: grad });
+  // Provide only the weaker hash-only donation consent.
+  assert.throws(
+    () =>
+      submitGradientUpdate({
+        round,
+        update,
+        consents: [donationConsent(contributor)], // not enough!
+        publicRecords: [publicIdentity(contributor)]
+      }),
+    /federated_bytes_donation/
+  );
+});
+
+test('fedavg round accepts updates with bytes + bytes-donation consent', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const contributor = createIdentity({ displayName: 'C' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      aggregationMode: 'fedavg'
+    })
+  );
+  const grad = new Float32Array([0.5, -0.5, 0.25, -0.25]);
+  const update = buildBytesUpdate(contributor, round, { gradient: grad });
+  const { round: next, update: accepted } = submitGradientUpdate({
+    round,
+    update,
+    consents: [bytesDonationConsent(contributor)],
+    publicRecords: [publicIdentity(contributor)]
+  });
+  assert.equal(accepted.accepted, true);
+  assert.equal(next.updateCount, 1);
+  assert.ok(accepted.gradientBytesBase64);
+});
+
+test('aggregateRoundFedAvg computes element-wise mean of accepted update gradients', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const a = createIdentity({ displayName: 'A' });
+  const b = createIdentity({ displayName: 'B' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      aggregationMode: 'fedavg'
+    })
+  );
+  const gA = new Float32Array([1.0, 2.0, 3.0, 4.0]);
+  const gB = new Float32Array([3.0, 4.0, 5.0, 6.0]);
+  const consents = [bytesDonationConsent(a), bytesDonationConsent(b)];
+  const records = [publicIdentity(a), publicIdentity(b)];
+  let working = round;
+  const { round: r1, update: u1 } = submitGradientUpdate({
+    round: working,
+    update: buildBytesUpdate(a, round, { gradient: gA }),
+    consents,
+    publicRecords: records
+  });
+  working = r1;
+  const { round: r2, update: u2 } = submitGradientUpdate({
+    round: working,
+    update: buildBytesUpdate(b, round, { gradient: gB }),
+    consents,
+    publicRecords: records
+  });
+  working = r2;
+  const aggregated = aggregateRoundFedAvg(working, [u1, u2]);
+  assert.equal(aggregated.status, 'completed');
+  assert.equal(aggregated.aggregatedGradientLength, 4);
+  assert.ok(aggregated.aggregatedGradientBytesBase64);
+  // Decode back and verify the means: (1+3)/2=2, (2+4)/2=3, etc.
+  // (Node Buffer.slice is a view on a shared pool, so copy bytes
+  // into a fresh ArrayBuffer before constructing the Float32Array.)
+  const bytes = Buffer.from(aggregated.aggregatedGradientBytesBase64, 'base64');
+  const fresh = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(fresh).set(bytes);
+  const avg = new Float32Array(fresh);
+  assert.ok(Math.abs(avg[0] - 2.0) < 1e-5);
+  assert.ok(Math.abs(avg[1] - 3.0) < 1e-5);
+  assert.ok(Math.abs(avg[2] - 4.0) < 1e-5);
+  assert.ok(Math.abs(avg[3] - 5.0) < 1e-5);
+});
+
+test('aggregateRoundFedAvg refuses to run on a hash_combiner round', () => {
+  const round = openRound(
+    createFederatedRound({
+      createdBy: 'bos:person:r',
+      modelName: 'm',
+      baselineModelHash: 'b'
+      // default aggregationMode: 'hash_combiner'
+    })
+  );
+  assert.throws(
+    () => aggregateRoundFedAvg(round, []),
+    /requires aggregationMode === 'fedavg'/
+  );
+});
+
+test('aggregate() dispatches to fedavg when the round is fedavg-mode', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const c = createIdentity({ displayName: 'C' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      aggregationMode: 'fedavg'
+    })
+  );
+  const grad = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+  const { round: r1, update } = submitGradientUpdate({
+    round,
+    update: buildBytesUpdate(c, round, { gradient: grad }),
+    consents: [bytesDonationConsent(c)],
+    publicRecords: [publicIdentity(c)]
+  });
+  const aggregated = aggregateRound(r1, [update]);
+  assert.equal(aggregated.aggregatedGradientLength, 4);
+  assert.ok(aggregated.aggregatedGradientBytesBase64);
+});
+
+test('submitGradientUpdate enforces the per-contributor privacy budget when allUpdates is passed', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const contributor = createIdentity({ displayName: 'C' });
+  // Round with a low budget cap so we can blow past it.
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      maxEpsilon: 1.0,
+      contributorBudget: { windowHours: 720, epsilonCap: 0.5 }
+    })
+  );
+  // History already used ε=0.4 in this window.
+  const history = [
+    {
+      contributorId: contributor.id,
+      accepted: true,
+      differentialPrivacyEpsilon: 0.4,
+      submittedAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString()
+    }
+  ];
+  const update = buildUpdate(contributor, round, { epsilon: 0.3 }); // would push to 0.7
+  assert.throws(
+    () =>
+      submitGradientUpdate({
+        round,
+        update,
+        consents: [donationConsent(contributor)],
+        publicRecords: [publicIdentity(contributor)],
+        allUpdates: history
+      }),
+    /privacy budget exhausted/
+  );
+});
+
+test('submitGradientUpdate budget check is skipped when allUpdates is not passed (legacy callers)', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const contributor = createIdentity({ displayName: 'C' });
+  const round = openRound(
+    createFederatedRound({
+      createdBy: researcher.id,
+      modelName: 'm',
+      baselineModelHash: 'baseline',
+      contributorBudget: { windowHours: 720, epsilonCap: 0.5 }
+    })
+  );
+  const update = buildUpdate(contributor, round, { epsilon: 0.3 });
+  // No allUpdates → no budget check. Should succeed.
+  const { round: next, update: accepted } = submitGradientUpdate({
+    round,
+    update,
+    consents: [donationConsent(contributor)],
+    publicRecords: [publicIdentity(contributor)]
+    // allUpdates omitted
+  });
+  assert.equal(accepted.accepted, true);
+  assert.equal(next.updateCount, 1);
+});
+
+test('signature stays stable across hash_combiner vs fedavg modes (canonical payload is mode-agnostic)', () => {
+  const c = createIdentity({ displayName: 'C' });
+  // Build the same logical update under both modes; signatures
+  // verify in both directions as long as gradientBytesBase64 doesn't
+  // enter the canonical payload.
+  const hashOnlyRound = openRound(
+    createFederatedRound({ createdBy: 'bos:person:r', modelName: 'm', baselineModelHash: 'b' })
+  );
+  const grad = new Float32Array([1, 2, 3]);
+  const update = signGradientUpdate(
+    createGradientUpdate({
+      roundId: hashOnlyRound.roundId,
+      contributorId: c.id,
+      baselineModelHash: hashOnlyRound.baselineModelHash,
+      gradientHash: 'sha256:abc',
+      gradientBytesBase64: float32ToBase64(grad),
+      gradientLength: 3,
+      differentialPrivacyEpsilon: 0.5,
+      sampleCount: 1
+    }),
+    c
+  );
+  // Signature must verify even though gradientBytesBase64 is present.
+  // (Signature is over the canonical payload, which excludes bytes.)
+  const { update: accepted } = submitGradientUpdate({
+    round: hashOnlyRound,
+    update,
+    consents: [donationConsent(c)],
+    publicRecords: [publicIdentity(c)]
+  });
+  assert.equal(accepted.accepted, true);
 });

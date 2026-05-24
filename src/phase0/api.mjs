@@ -638,6 +638,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/federated/rounds/:roundId/updates',
             'POST /api/federated/rounds/:roundId/updates/sign-and-submit',
             'POST /api/federated/rounds/:roundId/aggregate',
+            'GET /api/federated/budget/:contributorId',
             'GET /api/mesh/rates',
             'POST /api/pairing/sessions',
             'GET /api/pairing/sessions/:sessionId',
@@ -1770,7 +1771,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
               maxParticipants: body.maxParticipants,
               maxEpsilon: body.maxEpsilon,
               payoutPaisePerUpdate: body.payoutPaisePerUpdate,
-              deadlineSecondsFromNow: body.deadlineSecondsFromNow
+              deadlineSecondsFromNow: body.deadlineSecondsFromNow,
+              aggregationMode: body.aggregationMode,
+              contributorBudget: body.contributorBudget
             })
           );
           await store.saveFederatedRound(round);
@@ -1778,6 +1781,34 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // §7f Phase 3.2 — per-contributor privacy-budget read.
+      // Returns the contributor's running ε spend across recent
+      // accepted updates, plus the projection at the round-default
+      // budget. The shell uses this to show *"X.X ε remaining this
+      // month"* on the federated card.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'federated' &&
+        parts[2] === 'budget' &&
+        parts.length === 4
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const contributorId = decodeURIComponent(parts[3]);
+        const allUpdates = await store.listFederatedUpdates();
+        const windowHours = Number(url.searchParams.get('windowHours') ?? 720);
+        const epsilonCap = Number(url.searchParams.get('epsilonCap') ?? 8.0);
+        const requested = Number(url.searchParams.get('requestedEpsilon') ?? 0);
+        const { computeBudgetUsage, projectBudget } = await import(
+          '../phase1/privacy-budget.mjs'
+        );
+        const usage = computeBudgetUsage(contributorId, allUpdates, { windowHours });
+        const projection = requested > 0
+          ? projectBudget(contributorId, allUpdates, requested, { windowHours, epsilonCap })
+          : null;
+        jsonResponse(response, 200, { usage, projection });
+        return;
       }
 
       // Demo-mode convenience: sign + submit in one call. The
@@ -1806,6 +1837,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             contributorId: contributor.id,
             baselineModelHash: body.baselineModelHash,
             gradientHash: body.gradientHash,
+            gradientBytesBase64: body.gradientBytesBase64 ?? null,
+            gradientLength: body.gradientLength ?? null,
             differentialPrivacyEpsilon: body.differentialPrivacyEpsilon,
             sampleCount: body.sampleCount
           }),
@@ -1813,11 +1846,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         );
         const consents = await store.listConsents();
         const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const allUpdates = await store.listFederatedUpdates();
         const { round: nextRound, update: accepted } = submitGradientUpdate({
           round,
           update,
           consents,
-          publicRecords
+          publicRecords,
+          allUpdates
         });
         await store.saveFederatedRound(nextRound);
         await store.saveFederatedUpdate(accepted);
@@ -1858,11 +1893,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         }
         const consents = await store.listConsents();
         const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
+        const allUpdates = await store.listFederatedUpdates();
         const { round: nextRound, update: accepted } = submitGradientUpdate({
           round,
           update: body.update,
           consents,
-          publicRecords
+          publicRecords,
+          allUpdates
         });
         await store.saveFederatedRound(nextRound);
         await store.saveFederatedUpdate(accepted);

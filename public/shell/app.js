@@ -1845,25 +1845,34 @@ async function gatherLocalTrainingSamples(identityId) {
 async function loadFederatedRounds() {
   if (!state.activeIdentity) return;
   try {
-    const data = await fetchJson('/api/federated/rounds');
-    const rounds = (data.rounds ?? []).filter(
+    const [roundsData, budgetData] = await Promise.all([
+      fetchJson('/api/federated/rounds'),
+      fetchJson(
+        `/api/federated/budget/${encodeURIComponent(state.activeIdentity.id)}`
+      ).catch(() => null)
+    ]);
+    const rounds = (roundsData.rounds ?? []).filter(
       (r) => r.status === 'accepting_updates'
     );
-    renderFederatedRounds(rounds);
+    renderFederatedRounds(rounds, { budget: budgetData?.usage ?? null });
   } catch (error) {
     $('federatedRoundsStatus').textContent = `Error: ${error.message.slice(0, 40)}`;
   }
 }
 
-function renderFederatedRounds(rounds) {
+function renderFederatedRounds(rounds, { budget = null } = {}) {
   const list = $('federatedRoundsList');
   const status = $('federatedRoundsStatus');
   if (rounds.length === 0) {
-    status.textContent = 'No active rounds';
+    status.textContent = budget
+      ? `0 active · ε ${budget.epsilonSpent.toFixed(2)} spent`
+      : 'No active rounds';
     list.innerHTML = `<li class="federated-empty">No active rounds. Tap *Refresh* to check again.</li>`;
     return;
   }
-  status.textContent = `${rounds.length} active`;
+  status.textContent = budget
+    ? `${rounds.length} active · ε ${budget.epsilonSpent.toFixed(2)} / 8.0 (30-day)`
+    : `${rounds.length} active`;
   list.innerHTML = rounds
     .map((round) => {
       const payout = `₹${(round.payoutPaisePerUpdate / 100).toFixed(2)}`;
@@ -1872,14 +1881,18 @@ function renderFederatedRounds(rounds) {
         : '—';
       const progress = `${round.updateCount}/${round.maxParticipants}`;
       const epsilon = round.maxEpsilon;
+      const mode = round.aggregationMode ?? 'hash_combiner';
+      const modeBadge = mode === 'fedavg'
+        ? `<span class="federated-mode fedavg" title="server averages the actual gradient bytes — needs federated_bytes_donation consent">FedAvg</span>`
+        : `<span class="federated-mode hash" title="server sees only the gradient hash — pointer-not-payload">hash-only</span>`;
       return `
-        <li class="federated-row" data-round-id="${escapeHtml(round.roundId)}" data-baseline="${escapeHtml(round.baselineModelHash)}" data-epsilon="${escapeHtml(String(epsilon))}">
+        <li class="federated-row" data-round-id="${escapeHtml(round.roundId)}" data-baseline="${escapeHtml(round.baselineModelHash)}" data-epsilon="${escapeHtml(String(epsilon))}" data-mode="${escapeHtml(mode)}">
           <div class="federated-row-head">
             <strong>${escapeHtml(round.modelName)}</strong>
             <span class="federated-payout">${escapeHtml(payout)} / update</span>
           </div>
           <div class="federated-row-meta">
-            ε ≤ ${escapeHtml(String(epsilon))} · ${escapeHtml(progress)} contributors · deadline ${escapeHtml(deadline)}
+            ${modeBadge} · ε ≤ ${escapeHtml(String(epsilon))} · ${escapeHtml(progress)} contributors · deadline ${escapeHtml(deadline)}
           </div>
           <button type="button" class="secondary-button" data-join-round="${escapeHtml(round.roundId)}">
             Join round
@@ -1891,27 +1904,33 @@ function renderFederatedRounds(rounds) {
     .join('');
 }
 
-async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
+async function joinFederatedRound(roundId, { baselineModelHash, epsilon, mode = 'hash_combiner' }) {
   if (!sanityCheckActor()) return;
   const li = document.querySelector(`[data-round-id="${CSS.escape(roundId)}"]`);
   const result = li?.querySelector('.federated-row-result');
   if (result) {
     result.hidden = false;
-    result.textContent = 'Granting donation consent + composing update…';
+    result.textContent = mode === 'fedavg'
+      ? 'Granting BYTES-donation consent (gradient bytes will travel) + composing update…'
+      : 'Granting donation consent + composing update…';
   }
 
   try {
-    // 1) Mint a fresh donation consent for this round and sign it.
-    //    The server stores it; the federated-round artifact checks
-    //    for it on update submission.
+    // 1) Mint the appropriate donation consent for this round and
+    //    sign it. Phase 3.2: 'fedavg' rounds need the stricter
+    //    `federated_bytes_donation` purpose because the gradient
+    //    vector itself travels (weakens pointer-not-payload).
+    const isFedAvg = mode === 'fedavg';
     const consentResponse = await fetchJson('/api/consents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         subjectId: state.activeIdentity.id,
         granteeId: 'bharat-os-orchestrator',
-        scopes: ['training.donate', 'consent.record'],
-        purpose: 'federated_donation',
+        scopes: isFedAvg
+          ? ['training.donate', 'training.donate_bytes', 'consent.record']
+          : ['training.donate', 'consent.record'],
+        purpose: isFedAvg ? 'federated_bytes_donation' : 'federated_donation',
         ttlSeconds: 6 * 60 * 60,
         constraints: { roundId },
         signWithIdentityId: state.activeIdentity.id,
@@ -1934,12 +1953,14 @@ async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
     const composed = await training.composeFederatedUpdate({
       samples,
       epsilon: Number(epsilon),
-      learningRate: 0.1
+      learningRate: 0.1,
+      includeBytes: isFedAvg
     });
     const gradientHash = composed.gradientHash;
     if (result) {
-      result.textContent =
-        `Trained on ${composed.sampleCount} samples · loss ${composed.averageLoss.toFixed(3)} · ε ${composed.differentialPrivacyEpsilon} · submitting…`;
+      result.textContent = isFedAvg
+        ? `Trained on ${composed.sampleCount} samples · ε ${composed.differentialPrivacyEpsilon} · uploading gradient bytes…`
+        : `Trained on ${composed.sampleCount} samples · loss ${composed.averageLoss.toFixed(3)} · ε ${composed.differentialPrivacyEpsilon} · submitting hash…`;
     }
 
     // 3) Build + sign the update on the server (the demo doesn't
@@ -1955,6 +1976,8 @@ async function joinFederatedRound(roundId, { baselineModelHash, epsilon }) {
           contributorId: state.activeIdentity.id,
           baselineModelHash,
           gradientHash,
+          gradientBytesBase64: composed.gradientBytesBase64 ?? null,
+          gradientLength: composed.gradientLength ?? null,
           differentialPrivacyEpsilon: Number(epsilon),
           sampleCount: composed.sampleCount
         })
@@ -1986,7 +2009,8 @@ $('federatedRoundsList')?.addEventListener('click', (event) => {
   const li = button.closest('[data-round-id]');
   joinFederatedRound(button.dataset.joinRound, {
     baselineModelHash: li.dataset.baseline,
-    epsilon: li.dataset.epsilon
+    epsilon: li.dataset.epsilon,
+    mode: li.dataset.mode ?? 'hash_combiner'
   });
 });
 

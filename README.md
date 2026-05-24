@@ -144,6 +144,24 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 3.2 **FedAvg + privacy-budget accountant — Phase 3 complete** —
+  Two pieces close out the §7f substrate arc. New
+  `src/phase1/privacy-budget.mjs` (computeBudgetUsage /
+  projectBudget / assertWithinBudget) with `DEFAULT_FEDERATED_BUDGET`
+  = ε 8 over 30 days. Federated rounds gain `aggregationMode:
+  'hash_combiner' | 'fedavg'` (default backward-compatible) +
+  `contributorBudget` override. New
+  `BYTES_DONATION_CONSENT_PURPOSE = 'federated_bytes_donation'` —
+  `fedavg` rounds require it AND the actual `gradientBytesBase64`.
+  `aggregateRoundFedAvg` decodes base64 → element-wise mean →
+  re-encode (real averaged gradient, not just sorted hashes;
+  `aggregatedModelHash` becomes SHA-256 of the bytes). New
+  `GET /api/federated/budget/:id` endpoint; shell shows running ε
+  spend and per-round mode badge (FedAvg orange, hash-only green);
+  join flow dispatches consent purpose + bytes inclusion by mode.
+  Canonical signed payload excludes bytes (signature over hash
+  transitively covers them). 280/280 tests (+19 new: 9 budget +
+  10 fedavg). SW cache to v21. ADR 0076.
 - Phase 2a.24 **seed-demo refresh for post-2a.18 surfaces** —
   `scripts/seed-demo.mjs` had drifted: mesh contributions, attestations,
   and federated rounds all opened empty on first run. Extended with

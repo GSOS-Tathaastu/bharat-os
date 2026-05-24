@@ -281,15 +281,27 @@ export async function hashGradient(gradient) {
   return `sha256:${bytesToHex(new Uint8Array(digest))}`;
 }
 
+function gradientToBase64(gradient) {
+  const u8 = new Uint8Array(gradient.buffer, gradient.byteOffset, gradient.byteLength);
+  if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
+  let binary = '';
+  for (const byte of u8) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 // One-shot helper used by the shell: takes samples + the round's
 // baseline weights + epsilon, returns the gradient hash to submit
-// plus diagnostic metadata for the UI.
+// plus diagnostic metadata for the UI. When `includeBytes` is true
+// (Phase 3.2 fedavg rounds), the envelope also carries the
+// base64-encoded noisy gradient — gated client-side by the
+// `federated_bytes_donation` consent the user just signed.
 export async function composeFederatedUpdate({
   samples,
   baselineWeights,
   epsilon,
   learningRate = 0.1,
-  seed
+  seed,
+  includeBytes = false
 }) {
   const baseline = baselineWeights ?? initWeights({ seed: 1 });
   const trained = trainOneEpoch(samples, baseline, { learningRate });
@@ -298,6 +310,8 @@ export async function composeFederatedUpdate({
   return {
     protocolVersion: LOCAL_TRAINING_PROTOCOL_VERSION,
     gradientHash,
+    gradientBytesBase64: includeBytes ? gradientToBase64(noisy) : null,
+    gradientLength: includeBytes ? noisy.length : null,
     sampleCount: trained.sampleCount,
     averageLoss: trained.averageLoss,
     differentialPrivacyEpsilon: epsilon,

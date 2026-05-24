@@ -689,6 +689,26 @@ body {
   color: var(--text-muted);
 }
 
+.federated-mode {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.federated-mode.fedavg {
+  background: rgba(255, 122, 26, 0.18);
+  color: var(--accent);
+}
+
+.federated-mode.hash {
+  background: rgba(46, 160, 67, 0.18);
+  color: var(--good);
+}
+
 .federated-row-result {
   font-size: 12px;
   color: var(--good);
