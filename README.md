@@ -144,6 +144,33 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.2 **SIM-swap defense — per-phone rate-limit + post-recovery
+  cooldown** — Phase 5.0 audited recovery for detection; Phase 5.2
+  adds prevention. New rate-limiter policy `recovery_per_phone`
+  (3/hour per normalised phone, independent of client IP) — composes
+  with the existing per-IP `expensive` gate so an attacker rotating
+  IPs still tops out per phone target. Phone-bucket consume runs
+  **before** the identity lookup so 429 vs 200 doesn't reveal
+  registration status (preserves the §15 anti-enumeration guarantee
+  from ADR 0086). New `src/phase1/recovery-cooldown.mjs` pure-function
+  module: `applyRecoveryCooldown` stamps a 24h
+  `recoveryCooldown = { protocolVersion, reason, activatedAt, until,
+  ttlMs }` block on the identity; `assertNoCooldown` throws
+  `RECOVERY_COOLDOWN_ACTIVE` with scope + countdown. `/api/recovery/
+  verify` now applies the cooldown on success, persists the cooled
+  identity, builds the bundle from it (so the new device's UI gets
+  the banner hook), and writes `cooldownUntil` into the
+  `account_recovery.completed` ledger event. `/api/recovery/start`
+  routes matched-but-cooling-down identities to the **same no-match
+  sentinel** so a SIM-swap attacker can't probe to confirm a prior
+  recovery succeeded. `DELETE /api/identities/:id` returns **HTTP 423
+  Locked** during cooldown with `recovery_cooldown_active` + `until`
+  — a SIM-swap attacker who recovered the account cannot also
+  immediately destroy it. Read paths, intent flows, and mesh/
+  federated participation remain open during cooldown — only
+  destructive actions wait. 413/413 tests (+14 new). ADR 0088. **The
+  Phase 5.0 detection-only posture is now detection + prevention —
+  irreversibility is gated for the 24h window ops needs to react.**
 - Phase 5.1 **real SMS provider HTTP integrations — Gupshup / MSG91 /
   Twilio go live** — Phase 4.3 shipped the SMS provider abstraction
   with stubs that threw "configure env vars first." Phase 5.1 ships

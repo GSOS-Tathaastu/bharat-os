@@ -99,6 +99,12 @@ import {
   startAccountRecovery,
   verifyAccountRecovery
 } from '../phase1/account-recovery.mjs';
+import {
+  applyRecoveryCooldown,
+  assertNoCooldown,
+  cooldownState,
+  COOLDOWN_SCOPES
+} from '../phase1/recovery-cooldown.mjs';
 
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB — guards against OOM
 const TRUST_PROXY = process.env?.BHARAT_OS_TRUST_PROXY === '1';
@@ -2557,12 +2563,29 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
+        // Phase 5.2 — per-phone rate-limit. SIM-swap defense:
+        // applied IDENTICALLY to registered and unregistered
+        // phones BEFORE the identity lookup so a 429 vs 200 can
+        // never reveal which phones are Bharat OS accounts.
+        const phoneRate = limiter.consume(`phone:${phone}`, 'recovery_per_phone');
+        if (!phoneRate.allowed) {
+          const retryAfter = Math.max(1, Math.ceil(phoneRate.retryAfterSeconds));
+          response.setHeader('retry-after', retryAfter.toString());
+          jsonResponse(response, 429, {
+            error: {
+              code: 'rate_limited',
+              message: `Too many recovery attempts for this phone. Retry in ${retryAfter}s.`
+            }
+          });
+          return;
+        }
         const identities = await store.listIdentities();
         const matched = findIdentityByPhone(identities, phone);
-        if (!matched) {
-          // §15 — do not leak which phones are registered. Same
-          // response shape as success (with a sentinel ID) so
-          // timing/payload attacks can't distinguish hit from miss.
+        // Anti-enumeration sentinel reused for: (a) no-match, and
+        // (b) matched-but-cooling-down. The attacker probing a SIM-
+        // swapped phone for a second recovery cannot tell whether
+        // the prior one succeeded.
+        const noMatchSentinel = () => {
           jsonResponse(response, 200, {
             ok: true,
             recoveryId: 'bos:account-recovery:no-match-sentinel',
@@ -2570,6 +2593,16 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
             note: 'If this phone is registered with Bharat OS, a code has been sent.'
           });
+        };
+        if (!matched) {
+          noMatchSentinel();
+          return;
+        }
+        if (cooldownState(matched).active) {
+          // §15 — cooldown is itself a sensitive signal (it implies
+          // a recent recovery succeeded). Mask it behind the
+          // sentinel.
+          noMatchSentinel();
           return;
         }
         const request_ = startAccountRecovery({
@@ -2660,8 +2693,17 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             label: record.label ?? null,
             createdAt: record.createdAt ?? null
           }));
+        // Phase 5.2 — apply the 24h post-recovery cooldown to the
+        // recovered identity. Sensitive endpoints (deletion, repeat
+        // recovery, attestation-grant) refuse during this window so
+        // a SIM-swap attacker can't immediately empty the account.
+        const cooledIdentity = applyRecoveryCooldown(identity, {
+          at: Date.now(),
+          reason: 'account_recovery'
+        });
+        await store.saveIdentity(cooledIdentity);
         const bundle = buildRecoveryBundle({
-          identity,
+          identity: cooledIdentity,
           recoveryPhrase,
           memoryRecordRefs
         });
@@ -2673,12 +2715,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           identityId: identity.id,
           phoneMasked: otp.phoneMasked,
           recoveryOtpId: otp.otpId,
+          cooldownUntil: cooledIdentity.recoveryCooldown?.until,
           at: new Date().toISOString()
         });
         jsonResponse(response, 200, {
           ok: true,
           status: 'verified',
-          recoveryBundle: bundle
+          recoveryBundle: bundle,
+          recoveryCooldown: cooledIdentity.recoveryCooldown
         });
         return;
       }
@@ -2704,6 +2748,31 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             preview_endpoint: `/api/identities/${encodeURIComponent(identityId)}/erasure-preview`
           });
           return;
+        }
+        // Phase 5.2 — refuse deletion during the post-recovery
+        // cooldown. A SIM-swap attacker who just recovered the
+        // account cannot also immediately destroy it; the
+        // legitimate user has 24h to spot the recovery (via push
+        // / ops alert / paired-device notification) and override.
+        try {
+          assertNoCooldown(identity, { scope: COOLDOWN_SCOPES.IDENTITY_DELETION });
+        } catch (error) {
+          if (error.code === 'RECOVERY_COOLDOWN_ACTIVE') {
+            response.setHeader('retry-after', String(error.secondsRemaining));
+            jsonResponse(response, 423, {
+              error: {
+                code: 'recovery_cooldown_active',
+                message:
+                  'This account was recently recovered. Deletion is paused for 24 hours so a recovery attempt cannot destroy the account. ' +
+                  `Resumes at ${error.until}.`,
+                scope: error.scope,
+                until: error.until,
+                secondsRemaining: error.secondsRemaining
+              }
+            });
+            return;
+          }
+          throw error;
         }
         const report = await store.eraseUserData(identityId, { redactLedgerEntry });
         jsonResponse(response, 200, {

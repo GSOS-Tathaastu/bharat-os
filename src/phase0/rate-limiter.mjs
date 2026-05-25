@@ -23,7 +23,14 @@ export const DEFAULT_RATE_POLICIES = {
   // Write-once / expensive — identity creation, deletion, export.
   expensive: { capacity: 10, refillPerSecond: 1 / 30, burst: 10 },
   // Health probes — generous; ops needs these.
-  probe: { capacity: 600, refillPerSecond: 10, burst: 600 }
+  probe: { capacity: 600, refillPerSecond: 10, burst: 600 },
+  // Per-phone recovery sends — Phase 5.2 SIM-swap defense. 3 sends
+  // per hour per normalised phone, INDEPENDENT of client IP. Applied
+  // identically to registered and unregistered phones so the 429-vs-
+  // 200 distinction doesn't leak whether a phone is a Bharat OS
+  // account. Compose with the per-IP `expensive` policy already on
+  // /api/recovery/start — both must pass.
+  recovery_per_phone: { capacity: 3, refillPerSecond: 3 / 3600, burst: 3 }
 };
 
 export function createTokenBucket({ capacity, refillPerSecond, burst, at = Date.now() }) {
