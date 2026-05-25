@@ -188,6 +188,24 @@ function profileInitials(name) {
     .join('');
 }
 
+function updateProfileHero(identity) {
+  // Mirror the topbar profile chip onto the Profile-tab hero. Both are
+  // optional — guard if elements are absent (older HTML).
+  const heroAvatar = $('profileHeroAvatar');
+  const heroName = $('profileHeroName');
+  const heroMeta = $('profileHeroMeta');
+  if (!heroAvatar || !heroName) return;
+  if (!identity) {
+    heroAvatar.textContent = '--';
+    heroName.textContent = 'No profile';
+    if (heroMeta) heroMeta.textContent = 'Tap to set one up';
+    return;
+  }
+  heroAvatar.textContent = profileInitials(identity.displayName ?? '?');
+  heroName.textContent = identity.displayName ?? identity.id;
+  if (heroMeta) heroMeta.textContent = inferProfileLanguage(identity);
+}
+
 function setActiveProfile(identity) {
   state.activeIdentity = identity;
   if (!identity) {
@@ -202,11 +220,13 @@ function setActiveProfile(identity) {
     state.workerAlertSubscription = null;
     updateProfileAuthStatus();
     updateWorkerAlertStatus();
+    updateProfileHero(null);
     return;
   }
   $('profileAvatar').textContent = profileInitials(identity.displayName ?? '?');
   $('profileName').textContent = identity.displayName ?? identity.id;
   $('profileLanguage').textContent = inferProfileLanguage(identity);
+  updateProfileHero(identity);
   applyGreeting(profileLocale(identity));
   renderSuggestions(profileLocale(identity));
   loadVoiceRuntimePlan().catch((error) => console.warn('loadVoiceRuntimePlan', error));
@@ -565,6 +585,9 @@ async function sendIntent() {
     });
     renderOrchestration(data.orchestration, { onDeviceClassification });
     await loadRecent();
+    // Phase 2a.25 — emit so the bottom-tab nav can switch to Home if the
+    // user sent the intent from another tab (future shortcut).
+    document.dispatchEvent(new CustomEvent('bharat-os:intent-resolved'));
   } catch (error) {
     $('flowDetected').textContent = 'Network error';
     $('flowList').innerHTML = `<li class="blocked">${escapeHtml(error.message)}</li>`;
@@ -2573,8 +2596,61 @@ function maybeShowOnboarding() {
   }
 }
 
+// ─── Bottom-tab navigation — Phase 2a.25 ──────────────────────────────────
+const LS_KEY_ACTIVE_TAB = 'bharat-os.shell.activeTab.v1';
+const TABS = ['home', 'earn', 'trust', 'profile'];
+
+function setActiveTab(tabName, { persist = true } = {}) {
+  const target = TABS.includes(tabName) ? tabName : 'home';
+  for (const name of TABS) {
+    const panel = document.getElementById(`tab-${name}`);
+    const button = document.querySelector(`[data-go-tab="${name}"]`);
+    const active = name === target;
+    if (panel) panel.hidden = !active;
+    if (button) {
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-current', active ? 'page' : 'false');
+    }
+  }
+  // Scroll the newly-active panel to top so the user lands at the header.
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  if (persist) {
+    try {
+      localStorage.setItem(LS_KEY_ACTIVE_TAB, target);
+    } catch (_error) {
+      /* private-mode storage failure is fine */
+    }
+  }
+}
+
+function setupTabs() {
+  document.querySelectorAll('[data-go-tab]').forEach((button) => {
+    button.addEventListener('click', () => setActiveTab(button.dataset.goTab));
+  });
+  // When an intent result completes, the flow + result sections appear
+  // inside the Home tab. Auto-switch to Home so the user always sees the
+  // result, even if they sent the intent from another tab via a future
+  // shortcut.
+  document.addEventListener('bharat-os:intent-resolved', () => {
+    setActiveTab('home');
+  });
+  // Wire the Profile-tab "Switch / add profile" link to the existing
+  // bottom-sheet picker.
+  $('profileHeroSwitch')?.addEventListener('click', () => {
+    document.getElementById('profileButton')?.click();
+  });
+  let saved = null;
+  try {
+    saved = localStorage.getItem(LS_KEY_ACTIVE_TAB);
+  } catch (_error) {
+    saved = null;
+  }
+  setActiveTab(saved ?? 'home', { persist: false });
+}
+
 setupVoice();
 setupOnboarding();
+setupTabs();
 loadIdentities()
   .then(() => maybeShowOnboarding())
   .catch((error) => {

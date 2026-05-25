@@ -102,8 +102,10 @@ test('Phase 0 API serves the shell and operator console assets', async () => {
     const shellText = await shellHtml.text();
     assert.match(shellText, /Bharat OS/);
     assert.match(shellText, /What do you want to do today/);
-    assert.match(shellText, /Profile security/);
-    assert.match(shellText, /Worker alerts/);
+    // Phase 2a.25 UX overhaul (ADR 0077) — copy de-jargoned from
+    // "Profile security" → "Sign-in security", "Worker alerts" → "Job alerts".
+    assert.match(shellText, /Sign-in security/);
+    assert.match(shellText, /Job alerts/);
 
     const shellScript = await fetch(`${baseUrl}/shell/app.js`);
     assert.equal(shellScript.status, 200);

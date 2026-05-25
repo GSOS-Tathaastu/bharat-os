@@ -35,10 +35,235 @@ body {
 .shell {
   max-width: 520px;
   margin: 0 auto;
-  padding: 18px 16px calc(24px + env(safe-area-inset-bottom));
+  /* Bottom padding leaves room for the fixed bottom-nav (height ~64px)
+     plus the iOS safe-area inset. */
+  padding: 18px 16px calc(88px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+/* ─── Tab panels — Phase 2a.25 ────────────────────────────────────────── */
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: tab-fade-in 180ms ease-out;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+@keyframes tab-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Bottom navigation ──────────────────────────────────────────────── */
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  background: rgba(12, 16, 24, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border);
+  padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+  z-index: 30;
+}
+
+.bottom-nav-tab {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  padding: 10px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: color 120ms ease, background 120ms ease;
+  font-family: inherit;
+}
+
+.bottom-nav-tab:hover {
+  color: var(--text);
+}
+
+.bottom-nav-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.bottom-nav-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.bottom-nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* ─── Earn-tab hero ──────────────────────────────────────────────────── */
+
+.earn-hero {
+  background: linear-gradient(135deg, var(--accent-soft), transparent 70%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.earn-hero-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+}
+
+.earn-hero-value {
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  line-height: 1.1;
+}
+
+.earn-hero-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+/* ─── Profile-tab hero ───────────────────────────────────────────────── */
+
+.profile-hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-hero-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 26px;
+}
+
+.profile-hero-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.profile-hero-meta {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.profile-misc {
+  text-align: center;
+  padding: 4px;
+}
+
+/* ─── Collapsible "Why this works" / "Show details" blocks ───────────── */
+
+.why-details,
+.slm-details,
+.result-evidence-details {
+  background: transparent;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.why-details summary,
+.slm-details summary,
+.result-evidence-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  list-style: none;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.why-details summary::-webkit-details-marker,
+.slm-details summary::-webkit-details-marker,
+.result-evidence-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.why-details summary::after,
+.slm-details summary::after,
+.result-evidence-details summary::after {
+  content: '▾';
+  color: var(--text-muted);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.why-details[open] summary::after,
+.slm-details[open] summary::after,
+.result-evidence-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.slm-summary-text {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.slm-summary-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.why-details > p,
+.slm-details > .slm-row,
+.result-evidence-details > .result-evidence {
+  margin-top: 6px;
+}
+
+/* ─── Plain-language capture-note (cleaner than diagnostics-note) ────── */
+
+.capture-note {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ─── Topbar tweaks — softer brand mark, narrower profile chip ───────── */
+
+.topbar {
+  padding-bottom: 4px;
 }
 
 .topbar {

@@ -144,6 +144,23 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.25 **shell UX overhaul — bottom-tab navigation + plain-language
+  copy** — restructures `/shell/` from a single-scroll 10-card stack into
+  4 focused tabs: 🏠 Home (intent + result + recent), 💎 Earn (₹ hero +
+  mesh + federated), 🛡️ Trust (verified profile + sign & share), 👤
+  Profile (identity + pairing + passkey + alerts + health doc + flag +
+  diagnostics). All element IDs preserved — existing JS unchanged; ~50
+  lines added for tab switching + last-used tab persisted to localStorage.
+  Every user-facing §XX citation removed from copy ("§13B fair-use lever"
+  → "Earn while charging", "§9A flag" → "Report a problem",
+  "Profile security" → "Sign-in security", etc.). §XX framing moved into
+  collapsible "How this works" details so investors still get the
+  technical view one tap away. New `.earn-hero` (42px mono ₹) and
+  `.profile-hero` (64px avatar) primary surfaces. Fixed-position
+  bottom-nav with backdrop-blur. Onboarding overlay rewritten as a
+  4-step tab tour. Operator console untouched — split is now clean:
+  `/shell/` user context, `/console/` ops context. 280/280 tests
+  unchanged. SW cache to v22. ADR 0077.
 - Phase 3.2 **FedAvg + privacy-budget accountant — Phase 3 complete** —
   Two pieces close out the §7f substrate arc. New
   `src/phase1/privacy-budget.mjs` (computeBudgetUsage /

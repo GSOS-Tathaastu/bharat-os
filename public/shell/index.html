@@ -31,344 +31,404 @@
         </button>
       </header>
 
-      <section class="prompt-card" id="promptCard">
-        <div class="prompt-greeting" id="promptGreeting">
-          What do you want to do today?
-        </div>
-        <div class="prompt-greeting-sub" id="promptGreetingSub">
-          Speak in any language. Hindi · Marathi · Bhojpuri · Tamil · Bengali · English.
-        </div>
-
-        <div class="input-row">
-          <textarea
-            id="intentInput"
-            rows="2"
-            placeholder="Type your intent… or tap the mic"
-            aria-label="Intent input"
-          ></textarea>
-        </div>
-
-        <div class="action-row">
-          <button id="micButton" class="mic-button" aria-pressed="false">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-              <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
-            </svg>
-            <span id="micLabel">Hold to speak</span>
-          </button>
-          <button id="sendButton" class="send-button">Send</button>
-        </div>
-
-        <div class="suggestion-row" id="suggestionRow"></div>
-
-        <div class="slm-row" id="slmRow">
-          <button id="slmLoadButton" class="slm-load-button" type="button">
-            <span class="slm-icon" aria-hidden="true">🧠</span>
-            <span class="slm-label" id="slmLoadLabel">Load on-device AI (≈120 MB, cached after)</span>
-          </button>
-          <progress id="slmProgress" value="0" max="100" hidden></progress>
-          <span id="slmStatus" class="slm-status" hidden></span>
-        </div>
-      </section>
-
-      <section class="flow" id="flowSection" hidden>
-        <div class="flow-header">
-          <span class="flow-step" id="flowDetected">Detecting…</span>
-          <span class="flow-confidence" id="flowConfidence"></span>
-        </div>
-        <ol class="flow-list" id="flowList"></ol>
-      </section>
-
-      <section class="result" id="resultSection" hidden>
-        <div class="result-header" id="resultHeader"></div>
-        <div class="result-body" id="resultBody"></div>
-        <div class="result-evidence" id="resultEvidence"></div>
-      </section>
-
-      <section class="capture-card trust-passport-card" id="trustPassportSection">
-        <div class="capture-header">
-          <span>🛡️ Trust Passport — what a verifier would see</span>
-          <span id="trustPassportLevel" class="capture-meta">—</span>
-        </div>
-        <div class="trust-passport-grid">
-          <div class="trust-stat">
-            <span class="trust-stat-label">Attestations</span>
-            <span class="trust-stat-value" id="trustPassportAttestations">—</span>
+      <!-- ─── HOME TAB ────────────────────────────────────────────── -->
+      <section class="tab-panel" id="tab-home" data-tab="home">
+        <section class="prompt-card" id="promptCard">
+          <div class="prompt-greeting" id="promptGreeting">
+            What do you want to do today?
           </div>
-          <div class="trust-stat">
-            <span class="trust-stat-label">Active consents</span>
-            <span class="trust-stat-value" id="trustPassportConsents">—</span>
+          <div class="prompt-greeting-sub" id="promptGreetingSub">
+            Speak in any language. Hindi · Marathi · Bhojpuri · Tamil · Bengali · English.
           </div>
-          <div class="trust-stat">
-            <span class="trust-stat-label">NCS class</span>
-            <span class="trust-stat-value" id="trustPassportNcs">—</span>
-          </div>
-          <div class="trust-stat">
-            <span class="trust-stat-label">§9A flags</span>
-            <span class="trust-stat-value" id="trustPassportFlags">—</span>
-          </div>
-        </div>
-        <div id="trustPassportEvidence" class="trust-evidence" hidden></div>
-        <p class="diagnostics-note" style="margin: 0;">
-          The verifier never sees the underlying data — only this
-          passport (bands and booleans only). Tap *"Show me what a
-          landlord would see"* to preview the attestation envelope.
-          §13A #7 Trust-as-a-service; §15 selective disclosure.
-        </p>
-        <div class="passkey-actions">
-          <button id="trustPassportRefresh" class="secondary-button" type="button">Refresh</button>
-          <button id="trustPassportPreview" class="link-button" type="button">Show me what a landlord would see</button>
-          <button id="trustPassportSignShare" class="link-button" type="button">Sign &amp; share</button>
-        </div>
-        <div id="trustPassportShare" class="trust-share" hidden></div>
-      </section>
 
-      <section class="capture-card federated-card" id="federatedRoundsSection">
-        <div class="capture-header">
-          <span>🧪 Federated rounds — §7f opt-in training</span>
-          <span id="federatedRoundsStatus" class="capture-meta">—</span>
-        </div>
-        <p class="diagnostics-note" style="margin: 0;">
-          When you join a round, your phone trains a gradient on
-          <em>your</em> data on-device and uploads only a hashed
-          update plus differential-privacy noise. Each accepted
-          update earns UPI credits via the §13B mesh. You say yes,
-          you get paid. §15 binding — never silent harvesting.
-        </p>
-        <ul class="federated-list" id="federatedRoundsList">
-          <li class="federated-empty">No active rounds. Tap *Refresh* to check again.</li>
-        </ul>
-        <div class="passkey-actions">
-          <button id="federatedRoundsRefresh" class="link-button" type="button">Refresh</button>
-        </div>
-      </section>
-
-      <section class="capture-card mesh-node-card" id="meshNodeSection">
-        <div class="capture-header">
-          <span>💎 Mesh node — §13B fair-use lever</span>
-          <span id="meshNodeStatus" class="capture-meta">Idle</span>
-        </div>
-        <div class="mesh-ticker">
-          <div class="mesh-stat">
-            <span class="mesh-stat-label">Today earned</span>
-            <span class="mesh-stat-value" id="meshEarningsRupees">₹0.00</span>
-          </div>
-          <div class="mesh-stat">
-            <span class="mesh-stat-label">Served</span>
-            <span class="mesh-stat-value" id="meshServedSummary">0 tokens · 0 GB</span>
-          </div>
-          <div class="mesh-stat">
-            <span class="mesh-stat-label">NCS</span>
-            <span class="mesh-stat-value" id="meshNcsValue">— / —</span>
-          </div>
-        </div>
-        <p class="diagnostics-note" style="margin: 0;">
-          Earns only while charging + on WiFi + above battery threshold
-          (§7b). Each tick records a signed contribution event in the L4
-          audit ledger; payouts settle in fiat UPI credits (§15 — no
-          tokens). Demo mode bypasses charging/WiFi checks so the ticker
-          works on any laptop.
-        </p>
-        <div class="passkey-actions">
-          <button id="meshStartButton" class="secondary-button" type="button">Start earning</button>
-          <button id="meshStopButton" class="link-button" type="button" disabled>Stop</button>
-        </div>
-        <div id="meshLastEvent" class="capture-result" hidden></div>
-      </section>
-
-      <section class="recent" id="recentSection">
-        <div class="recent-header">
-          <span>Recent activity</span>
-          <button id="refreshRecent" class="link-button" type="button">Refresh</button>
-        </div>
-        <ul class="recent-list" id="recentList">
-          <li class="recent-empty">No activity yet on this profile.</li>
-        </ul>
-      </section>
-
-      <details class="more-controls" id="moreControlsSection">
-        <summary>
-          <span>More controls</span>
-          <span class="more-controls-meta">device pairing · passkey · alerts · health doc · §9A flag</span>
-        </summary>
-        <div class="more-controls-grid">
-          <div class="more-controls-actions">
-            <button id="replayTour" class="link-button" type="button">Replay onboarding tour</button>
-          </div>
-          <section class="capture-card pairing-card" id="pairingSection">
-            <div class="capture-header">
-              <span>📲 Pair another device (§7c)</span>
-              <span id="pairingStatus" class="capture-meta">Ready</span>
-            </div>
-            <p class="diagnostics-note" style="margin: 0;">
-              §15 — identity is the person, not the device. Two halves: start
-              a session on your <em>current</em> phone (shows a 6-digit
-              code + 12-word recovery phrase), then claim it from your
-              <em>new</em> phone (enter code, then enter phrase when
-              prompted). Direct browser-to-browser via WebRTC; the server
-              relays only SDP. The vault is AES-GCM-256-encrypted under the
-              phrase before it ever leaves the old device. To try locally:
-              open <code>/shell/</code> in a second tab and use the code +
-              phrase.
-            </p>
-            <div class="pairing-grid">
-              <div class="pairing-half">
-                <strong>Old device → New device</strong>
-                <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
-                <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
-                <div id="pairingQrDisplay" class="pairing-qr" hidden></div>
-              </div>
-              <div class="pairing-half">
-                <strong>Claim on new device</strong>
-                <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
-                <div class="pairing-claim-actions">
-                  <button id="pairingScanButton" class="link-button" type="button">📷 Scan QR</button>
-                  <button id="pairingPasteButton" class="link-button" type="button">📋 Paste QR text</button>
-                </div>
-                <button id="pairingClaimButton" class="secondary-button" type="button">Claim & receive</button>
-              </div>
-            </div>
-            <video id="pairingScanVideo" class="pairing-scan-video" hidden playsinline></video>
-            <div id="pairingResult" class="capture-result" hidden></div>
-          </section>
-
-          <section class="capture-card profile-auth-card" id="profileAuthSection">
-            <div class="capture-header">
-              <span>Profile security</span>
-              <span id="profileAuthStatus" class="capture-meta">No passkey</span>
-            </div>
-            <div class="passkey-actions">
-              <button id="profileAuthBindButton" class="secondary-button" type="button">Bind passkey</button>
-              <button id="profileAuthVerifyButton" class="link-button" type="button">Verify passkey</button>
-            </div>
-            <div id="profileAuthResult" class="capture-result" hidden></div>
-          </section>
-
-          <section class="capture-card worker-alert-card" id="workerAlertSection">
-            <div class="capture-header">
-              <span>Worker alerts</span>
-              <span id="workerAlertStatus" class="capture-meta">Off</span>
-            </div>
-            <div class="passkey-actions">
-              <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
-              <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
-            </div>
-            <div id="workerAlertResult" class="capture-result" hidden></div>
-          </section>
-
-          <section class="capture-card" id="healthCaptureSection">
-            <div class="capture-header">
-              <span>Health document</span>
-              <label class="file-action">
-                <input id="healthDocFile" type="file" accept="image/*" capture="environment" />
-                <span>Camera</span>
-              </label>
-            </div>
+          <div class="input-row">
             <textarea
-              id="healthDocText"
-              rows="3"
-              placeholder="OCR text from prescription or lab report"
-              aria-label="Health document OCR text"
-            ></textarea>
-            <div class="capture-actions">
-              <span id="healthDocFileMeta" class="capture-meta">No image selected</span>
-              <button id="healthDocUploadButton" class="link-button" type="button">Upload to ABHA</button>
-            </div>
-            <div id="healthDocResult" class="capture-result" hidden></div>
-          </section>
-
-          <section class="capture-card flag-report-card" id="flagReportSection">
-            <div class="capture-header">
-              <span>Report a problem (§9A)</span>
-              <span id="flagReportStatus" class="capture-meta">Open to file a flag</span>
-            </div>
-            <p class="diagnostics-note" style="margin: 0;">
-              A signed report from your profile against another actor. Three
-              open high-severity reports auto-block that actor's sensitive
-              actions until a human review resolves them.
-            </p>
-            <select id="flagSubjectSelect" aria-label="Report against">
-              <option value="">— Choose who you're reporting —</option>
-            </select>
-            <div class="flag-report-row">
-              <select id="flagCategorySelect" aria-label="Category">
-                <option value="advance_fee">Asked me to pay (advance fee)</option>
-                <option value="wage_non_payment">Wages not paid</option>
-                <option value="unsafe_conditions">Unsafe conditions</option>
-                <option value="underage_worker">Child labour suspected</option>
-                <option value="no_show">No-show</option>
-                <option value="fraud">Fraud / fake job</option>
-                <option value="exploitation">Exploitation / trafficking</option>
-                <option value="abuse">Abuse</option>
-                <option value="other">Other</option>
-              </select>
-              <select id="flagSeveritySelect" aria-label="Severity">
-                <option value="low">Low</option>
-                <option value="medium" selected>Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <textarea
-              id="flagSummary"
+              id="intentInput"
               rows="2"
-              placeholder="What happened? (min 4 chars)"
-              aria-label="Report summary"
+              placeholder="Type your intent… or tap the mic"
+              aria-label="Intent input"
             ></textarea>
-            <div class="capture-actions">
-              <span id="flagReportMeta" class="capture-meta"></span>
-              <button id="flagReportSubmit" class="link-button" type="button">File report</button>
-            </div>
-            <div id="flagReportResult" class="capture-result" hidden></div>
-          </section>
-        </div>
-      </details>
+          </div>
 
-      <section class="diagnostics" id="diagnosticsSection">
-        <details>
-          <summary>
-            <span>What's running, what's scaffold</span>
-            <span class="diagnostics-meta">honest accounting — §17</span>
-          </summary>
-          <ul class="diagnostics-list" id="diagnosticsList"></ul>
-          <p class="diagnostics-note">
-            Tier 1 (PWA shell) ~50 KB · Tier 2 (Tesseract.js + Indic OCR data)
-            ~7 MB lazy on first health-doc capture · Tier 3 (IndicWhisper-WASM)
-            ~30 MB opt-in · Tier 4 (on-device SLM) 1.5–4 GB explicit opt-in,
-            flagship-device only. The base experience is lighter than Uber,
-            WhatsApp, or the average Android app.
+          <div class="action-row">
+            <button id="micButton" class="mic-button" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
+              </svg>
+              <span id="micLabel">Hold to speak</span>
+            </button>
+            <button id="sendButton" class="send-button">Send</button>
+          </div>
+
+          <div class="suggestion-row" id="suggestionRow"></div>
+
+          <details class="slm-details">
+            <summary>
+              <span class="slm-summary-text">🧠 Use AI on your phone (no network needed)</span>
+              <span class="slm-summary-hint">~120 MB, cached after first load</span>
+            </summary>
+            <div class="slm-row" id="slmRow">
+              <button id="slmLoadButton" class="slm-load-button" type="button">
+                <span class="slm-icon" aria-hidden="true">🧠</span>
+                <span class="slm-label" id="slmLoadLabel">Load on-device AI (≈120 MB, cached after)</span>
+              </button>
+              <progress id="slmProgress" value="0" max="100" hidden></progress>
+              <span id="slmStatus" class="slm-status" hidden></span>
+            </div>
+          </details>
+        </section>
+
+        <section class="flow" id="flowSection" hidden>
+          <div class="flow-header">
+            <span class="flow-step" id="flowDetected">Detecting…</span>
+            <span class="flow-confidence" id="flowConfidence"></span>
+          </div>
+          <ol class="flow-list" id="flowList"></ol>
+        </section>
+
+        <section class="result" id="resultSection" hidden>
+          <div class="result-header" id="resultHeader"></div>
+          <div class="result-body" id="resultBody"></div>
+          <details class="result-evidence-details">
+            <summary>Show technical details</summary>
+            <div class="result-evidence" id="resultEvidence"></div>
+          </details>
+        </section>
+
+        <section class="recent" id="recentSection">
+          <div class="recent-header">
+            <span>Recent activity</span>
+            <button id="refreshRecent" class="link-button" type="button">Refresh</button>
+          </div>
+          <ul class="recent-list" id="recentList">
+            <li class="recent-empty">No activity yet on this profile.</li>
+          </ul>
+        </section>
+      </section>
+
+      <!-- ─── EARN TAB ────────────────────────────────────────────── -->
+      <section class="tab-panel" id="tab-earn" data-tab="earn" hidden>
+        <section class="earn-hero">
+          <div class="earn-hero-label">Earned today</div>
+          <div class="earn-hero-value" id="meshEarningsRupees">₹0.00</div>
+          <div class="earn-hero-sub">
+            Your phone earns by sharing spare compute &amp; storage with other
+            Bharat OS users while it's charging on WiFi. Pays out in real UPI
+            credits — no tokens, no crypto.
+          </div>
+        </section>
+
+        <section class="capture-card mesh-node-card" id="meshNodeSection">
+          <div class="capture-header">
+            <span>💎 Share compute &amp; storage</span>
+            <span id="meshNodeStatus" class="capture-meta">Idle</span>
+          </div>
+          <div class="mesh-ticker">
+            <div class="mesh-stat">
+              <span class="mesh-stat-label">Served</span>
+              <span class="mesh-stat-value" id="meshServedSummary">0 tokens · 0 GB</span>
+            </div>
+            <div class="mesh-stat">
+              <span class="mesh-stat-label">Your share</span>
+              <span class="mesh-stat-value" id="meshNcsValue">— / —</span>
+            </div>
+          </div>
+          <div class="passkey-actions">
+            <button id="meshStartButton" class="secondary-button" type="button">Start earning</button>
+            <button id="meshStopButton" class="link-button" type="button" disabled>Stop</button>
+          </div>
+          <div id="meshLastEvent" class="capture-result" hidden></div>
+          <details class="why-details">
+            <summary>How this works</summary>
+            <p class="diagnostics-note">
+              Earns only while charging, on WiFi, and above battery threshold.
+              Each tick records a signed contribution in an audit log; payouts
+              settle in fiat UPI credits. Demo mode bypasses the
+              charging/WiFi checks so the ticker works on a laptop.
+            </p>
+          </details>
+        </section>
+
+        <section class="capture-card federated-card" id="federatedRoundsSection">
+          <div class="capture-header">
+            <span>🧪 Help improve the AI</span>
+            <span id="federatedRoundsStatus" class="capture-meta">—</span>
+          </div>
+          <ul class="federated-list" id="federatedRoundsList">
+            <li class="federated-empty">No active rounds. Tap *Refresh* to check again.</li>
+          </ul>
+          <div class="passkey-actions">
+            <button id="federatedRoundsRefresh" class="link-button" type="button">Refresh</button>
+          </div>
+          <details class="why-details">
+            <summary>How this works</summary>
+            <p class="diagnostics-note">
+              When you join a round, your phone trains a small model on
+              <em>your</em> data on-device and uploads only a noisy mathematical
+              summary — never the underlying text. You choose to join each
+              round; you get paid in UPI credits. No silent data harvesting.
+            </p>
+          </details>
+        </section>
+      </section>
+
+      <!-- ─── TRUST TAB ──────────────────────────────────────────── -->
+      <section class="tab-panel" id="tab-trust" data-tab="trust" hidden>
+        <section class="capture-card trust-passport-card" id="trustPassportSection">
+          <div class="capture-header">
+            <span>🛡️ Your verified profile</span>
+            <span id="trustPassportLevel" class="capture-meta">—</span>
+          </div>
+          <div class="trust-passport-grid">
+            <div class="trust-stat">
+              <span class="trust-stat-label">Verified IDs</span>
+              <span class="trust-stat-value" id="trustPassportAttestations">—</span>
+            </div>
+            <div class="trust-stat">
+              <span class="trust-stat-label">Active permissions</span>
+              <span class="trust-stat-value" id="trustPassportConsents">—</span>
+            </div>
+            <div class="trust-stat">
+              <span class="trust-stat-label">Network standing</span>
+              <span class="trust-stat-value" id="trustPassportNcs">—</span>
+            </div>
+            <div class="trust-stat">
+              <span class="trust-stat-label">Open complaints</span>
+              <span class="trust-stat-value" id="trustPassportFlags">—</span>
+            </div>
+          </div>
+          <div id="trustPassportEvidence" class="trust-evidence" hidden></div>
+          <p class="capture-note">
+            Share a one-time verification link with a landlord, employer, or
+            bank. They see only what you choose to share — your raw data
+            never leaves your phone.
           </p>
-        </details>
+          <div class="passkey-actions">
+            <button id="trustPassportPreview" class="secondary-button" type="button">Preview what they'll see</button>
+            <button id="trustPassportSignShare" class="link-button" type="button">Create &amp; share</button>
+            <button id="trustPassportRefresh" class="link-button" type="button">Refresh</button>
+          </div>
+          <div id="trustPassportShare" class="trust-share" hidden></div>
+        </section>
+      </section>
+
+      <!-- ─── PROFILE TAB ────────────────────────────────────────── -->
+      <section class="tab-panel" id="tab-profile" data-tab="profile" hidden>
+        <section class="profile-hero">
+          <div class="profile-hero-avatar" id="profileHeroAvatar">--</div>
+          <div class="profile-hero-name" id="profileHeroName">No profile</div>
+          <div class="profile-hero-meta" id="profileHeroMeta">Tap your name above to switch</div>
+          <button id="profileHeroSwitch" class="link-button" type="button">Switch / add profile</button>
+        </section>
+
+        <section class="capture-card" id="pairingSection">
+          <div class="capture-header">
+            <span>📲 Move to a new phone</span>
+            <span id="pairingStatus" class="capture-meta">Ready</span>
+          </div>
+          <p class="capture-note">
+            Your identity moves with you, not with the device. Start a session
+            here, then enter the code on your new phone (or scan the QR).
+          </p>
+          <div class="pairing-grid">
+            <div class="pairing-half">
+              <strong>This phone → new phone</strong>
+              <button id="pairingInitiateButton" class="secondary-button" type="button">Start pairing</button>
+              <div id="pairingCodeDisplay" class="pairing-code" hidden></div>
+              <div id="pairingQrDisplay" class="pairing-qr" hidden></div>
+            </div>
+            <div class="pairing-half">
+              <strong>Receive from old phone</strong>
+              <input id="pairingClaimInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" aria-label="Pairing claim code" />
+              <div class="pairing-claim-actions">
+                <button id="pairingScanButton" class="link-button" type="button">📷 Scan QR</button>
+                <button id="pairingPasteButton" class="link-button" type="button">📋 Paste QR text</button>
+              </div>
+              <button id="pairingClaimButton" class="secondary-button" type="button">Claim &amp; receive</button>
+            </div>
+          </div>
+          <video id="pairingScanVideo" class="pairing-scan-video" hidden playsinline></video>
+          <div id="pairingResult" class="capture-result" hidden></div>
+        </section>
+
+        <section class="capture-card profile-auth-card" id="profileAuthSection">
+          <div class="capture-header">
+            <span>🔑 Sign-in security</span>
+            <span id="profileAuthStatus" class="capture-meta">No passkey</span>
+          </div>
+          <p class="capture-note">
+            Set up a passkey (fingerprint / face / device PIN) so only you can
+            approve sensitive actions on this profile.
+          </p>
+          <div class="passkey-actions">
+            <button id="profileAuthBindButton" class="secondary-button" type="button">Set up passkey</button>
+            <button id="profileAuthVerifyButton" class="link-button" type="button">Test passkey</button>
+          </div>
+          <div id="profileAuthResult" class="capture-result" hidden></div>
+        </section>
+
+        <section class="capture-card worker-alert-card" id="workerAlertSection">
+          <div class="capture-header">
+            <span>🔔 Job alerts</span>
+            <span id="workerAlertStatus" class="capture-meta">Off</span>
+          </div>
+          <p class="capture-note">
+            Get a notification when nearby work matching your profile is
+            available. Wages always come through escrow — you never pay to
+            apply.
+          </p>
+          <div class="passkey-actions">
+            <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
+            <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
+          </div>
+          <div id="workerAlertResult" class="capture-result" hidden></div>
+        </section>
+
+        <section class="capture-card" id="healthCaptureSection">
+          <div class="capture-header">
+            <span>📋 Save a health document</span>
+            <label class="file-action">
+              <input id="healthDocFile" type="file" accept="image/*" capture="environment" />
+              <span>Camera</span>
+            </label>
+          </div>
+          <p class="capture-note">
+            Photograph a prescription or lab report — text is read on-device
+            and only structured fields go to your ABHA record. The original
+            stays encrypted on your phone.
+          </p>
+          <textarea
+            id="healthDocText"
+            rows="3"
+            placeholder="OCR text from prescription or lab report"
+            aria-label="Health document OCR text"
+          ></textarea>
+          <div class="capture-actions">
+            <span id="healthDocFileMeta" class="capture-meta">No image selected</span>
+            <button id="healthDocUploadButton" class="link-button" type="button">Upload to ABHA</button>
+          </div>
+          <div id="healthDocResult" class="capture-result" hidden></div>
+        </section>
+
+        <section class="capture-card flag-report-card" id="flagReportSection">
+          <div class="capture-header">
+            <span>⚠️ Report a problem</span>
+            <span id="flagReportStatus" class="capture-meta">Open to file</span>
+          </div>
+          <p class="capture-note">
+            File a signed complaint against someone you've worked with or
+            transacted with. Repeated open complaints automatically pause
+            that person's sensitive actions until a human review resolves
+            them.
+          </p>
+          <select id="flagSubjectSelect" aria-label="Report against">
+            <option value="">— Choose who you're reporting —</option>
+          </select>
+          <div class="flag-report-row">
+            <select id="flagCategorySelect" aria-label="Category">
+              <option value="advance_fee">Asked me to pay (advance fee)</option>
+              <option value="wage_non_payment">Wages not paid</option>
+              <option value="unsafe_conditions">Unsafe conditions</option>
+              <option value="underage_worker">Child labour suspected</option>
+              <option value="no_show">No-show</option>
+              <option value="fraud">Fraud / fake job</option>
+              <option value="exploitation">Exploitation / trafficking</option>
+              <option value="abuse">Abuse</option>
+              <option value="other">Other</option>
+            </select>
+            <select id="flagSeveritySelect" aria-label="Severity">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <textarea
+            id="flagSummary"
+            rows="2"
+            placeholder="What happened? (min 4 chars)"
+            aria-label="Report summary"
+          ></textarea>
+          <div class="capture-actions">
+            <span id="flagReportMeta" class="capture-meta"></span>
+            <button id="flagReportSubmit" class="link-button" type="button">File report</button>
+          </div>
+          <div id="flagReportResult" class="capture-result" hidden></div>
+        </section>
+
+        <section class="profile-misc">
+          <button id="replayTour" class="link-button" type="button">▶ Replay welcome tour</button>
+        </section>
+
+        <section class="diagnostics" id="diagnosticsSection">
+          <details>
+            <summary>
+              <span>🔬 Behind the scenes</span>
+              <span class="diagnostics-meta">what's real vs scaffold on this build</span>
+            </summary>
+            <ul class="diagnostics-list" id="diagnosticsList"></ul>
+            <p class="diagnostics-note">
+              The base app is ~50 KB. Optional add-ons download on demand:
+              ~7 MB for document scanning, ~30 MB for offline voice, 1.5–4 GB
+              for the full on-device AI (flagship devices only). Lighter than
+              Uber or WhatsApp.
+            </p>
+          </details>
+        </section>
       </section>
     </main>
+
+    <!-- ─── BOTTOM NAV ──────────────────────────────────────────── -->
+    <nav class="bottom-nav" aria-label="Primary">
+      <button class="bottom-nav-tab active" data-go-tab="home" type="button">
+        <span class="bottom-nav-icon" aria-hidden="true">🏠</span>
+        <span class="bottom-nav-label">Home</span>
+      </button>
+      <button class="bottom-nav-tab" data-go-tab="earn" type="button">
+        <span class="bottom-nav-icon" aria-hidden="true">💎</span>
+        <span class="bottom-nav-label">Earn</span>
+      </button>
+      <button class="bottom-nav-tab" data-go-tab="trust" type="button">
+        <span class="bottom-nav-icon" aria-hidden="true">🛡️</span>
+        <span class="bottom-nav-label">Trust</span>
+      </button>
+      <button class="bottom-nav-tab" data-go-tab="profile" type="button">
+        <span class="bottom-nav-icon" aria-hidden="true">👤</span>
+        <span class="bottom-nav-label">Profile</span>
+      </button>
+    </nav>
 
     <div class="sheet onboarding-sheet" id="onboardingSheet" hidden>
       <div class="sheet-content">
         <div class="sheet-title">Welcome to Bharat OS</div>
         <div class="sheet-sub">
-          A 30-second tour of what's here. You can replay this any time
-          from the "More controls" menu.
+          A 30-second tour. You can replay this anytime from Profile.
         </div>
         <ol class="onboarding-steps">
           <li>
-            <strong>Speak or type any intent.</strong>
-            <span>Hindi · Marathi · Bhojpuri · Tamil · Bengali · English.
-            *"Book a cab from office to home"*, *"mera HbA1c dikhao"*,
-            *"मुझे ₹50,000 का लोन चाहिए"*. The shell will plan it, run §9A
-            worker / §15 consent checks, and either complete it or hand
-            you off to UPI / the right app.</span>
+            <strong>🏠 Home — tell your phone what you want</strong>
+            <span>Speak or type in any language.
+            <em>"Book a cab from office to home"</em>, <em>"मेरा HbA1c दिखाओ"</em>,
+            <em>"Mujhe ₹50,000 ka chhota karza chahiye"</em>. Your phone plans
+            the steps, checks the right permissions, and either completes it
+            or hands you off to UPI / the right app.</span>
           </li>
           <li>
-            <strong>Watch the §13B mesh ticker.</strong>
-            <span>Tap *Start earning* in the Mesh node card. Your phone
-            (demo-mode) serves a few tokens of inference + a few MB of
-            storage, signs each contribution, and ticks the ₹ counter.
-            Real Bharat OS does this only while charging + on WiFi.</span>
+            <strong>💎 Earn — your phone makes money in the background</strong>
+            <span>Tap <em>Start earning</em>. While charging on WiFi, your
+            phone shares spare compute &amp; storage with other Bharat OS users.
+            Payouts arrive as real UPI credits — no crypto, no tokens.</span>
           </li>
           <li>
-            <strong>Auxiliary surfaces are in "More controls".</strong>
-            <span>§7c pair-another-device, passkey, push alerts, health
-            document capture, and §9A flag reporting are one
-            summary-click away. The diagnostics panel below is the §17
-            honesty board — real / partial / placeholder per surface.</span>
+            <strong>🛡️ Trust — share verification without sharing data</strong>
+            <span>Your <em>verified profile</em> can prove things to a
+            landlord, employer, or bank (verified ID ✓, income band, no open
+            complaints) without revealing your actual income or address.
+            Create a one-time link, they verify, link expires.</span>
+          </li>
+          <li>
+            <strong>👤 Profile — your identity, your settings</strong>
+            <span>Move to a new phone, set up a passkey, enable job alerts,
+            save a health document, file a problem report.</span>
           </li>
         </ol>
         <div class="onboarding-actions">
@@ -382,9 +442,9 @@
       <div class="sheet-content">
         <div class="sheet-title">This device</div>
         <div class="sheet-sub">
-          §15 binds <em>"identity is the person, not the device"</em> — a phone
-          can hold several profiles, but only ones from the same household.
-          Each has its own memory vault, consent ledger, and Trust Passport.
+          Your identity is the person, not the phone — but a single phone can
+          hold several profiles from the same household. Each has its own
+          private data and permissions.
         </div>
         <ul id="profileList" class="profile-list"></ul>
         <button id="closeProfileSheet" class="sheet-close" type="button">Close</button>
