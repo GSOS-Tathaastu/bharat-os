@@ -79,6 +79,25 @@ import {
   erasureManifest,
   redactLedgerEntry
 } from '../phase1/dpdp-rights.mjs';
+import { applySecurityHeaders } from './security-headers.mjs';
+import {
+  clientKey,
+  createLimiter,
+  policyFor
+} from './rate-limiter.mjs';
+import { generateRequestId, logger, safePath } from './logger.mjs';
+import { recordRequest, renderMetrics } from './metrics.mjs';
+
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB — guards against OOM
+const TRUST_PROXY = process.env?.BHARAT_OS_TRUST_PROXY === '1';
+const ENABLE_HSTS = process.env?.BHARAT_OS_HSTS === '1';
+
+// Optional CORS allowlist via env. Comma-separated list of origins
+// permitted to call the API; empty string = same-origin only.
+const CORS_ALLOWLIST = (process.env?.BHARAT_OS_CORS_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 import {
   signTrustAttestation,
   verifyTrustAttestation
@@ -192,7 +211,16 @@ function methodNotAllowed(response, allowed) {
 
 async function readRequestJson(request) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+      const error = new Error(
+        `request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes`
+      );
+      error.statusCode = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
 
@@ -470,11 +498,127 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
     throw new Error('store is required.');
   }
 
-  return http.createServer(async (request, response) => {
+  const limiter = createLimiter();
+
+  const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     const parts = url.pathname.split('/').filter(Boolean);
 
+    // Phase 4.1 — request preamble. Every response gets the security
+    // headers + a request ID + access-log timing.
+    const requestId = generateRequestId();
+    const startNs = process.hrtime.bigint();
+    applySecurityHeaders(response, { enableHsts: ENABLE_HSTS });
+    response.setHeader('x-request-id', requestId);
+    response.setHeader('x-content-type-options', 'nosniff');
+
+    // CORS preflight + allowlist. Default is same-origin only; the
+    // env var BHARAT_OS_CORS_ORIGINS opens it to a named list.
+    const origin = request.headers.origin;
+    if (origin && CORS_ALLOWLIST.includes(origin)) {
+      response.setHeader('access-control-allow-origin', origin);
+      response.setHeader('access-control-allow-credentials', 'true');
+      response.setHeader('vary', 'origin');
+    }
+    if (request.method === 'OPTIONS') {
+      response.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      response.setHeader('access-control-allow-headers', 'content-type, authorization, x-request-id');
+      response.setHeader('access-control-max-age', '600');
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
+    // Rate limiting — applies to /api/* and the legal/static pages.
+    // Probes and the health endpoint use the 'probe' policy with a
+    // higher capacity so ops scrapers don't trigger 429s.
+    const key = clientKey(request, { trustProxy: TRUST_PROXY });
+    const policy = policyFor(request.method ?? 'GET', url.pathname);
+    const rate = limiter.consume(key, policy);
+    response.setHeader('x-ratelimit-policy', policy);
+    response.setHeader('x-ratelimit-remaining', Math.floor(rate.remaining).toString());
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil(rate.retryAfterSeconds));
+      response.setHeader('retry-after', retryAfter.toString());
+      logger.warn('rate_limited', {
+        requestId,
+        clientKey: key,
+        policy,
+        path: safePath(url.pathname),
+        method: request.method
+      });
+      jsonResponse(response, 429, {
+        error: {
+          code: 'rate_limited',
+          message: `Too many requests on the '${policy}' policy. Retry in ${retryAfter}s.`
+        }
+      });
+      const durationSeconds = Number(process.hrtime.bigint() - startNs) / 1e9;
+      recordRequest({
+        method: request.method ?? 'GET',
+        pathname: url.pathname,
+        status: 429,
+        durationSeconds
+      });
+      return;
+    }
+
+    // Response-finish observability — records access log + metric
+    // exactly once when the response stream closes.
+    let observed = false;
+    const observe = () => {
+      if (observed) return;
+      observed = true;
+      const durationSeconds = Number(process.hrtime.bigint() - startNs) / 1e9;
+      recordRequest({
+        method: request.method ?? 'GET',
+        pathname: url.pathname,
+        status: response.statusCode ?? 0,
+        durationSeconds
+      });
+      logger.access('http_request', {
+        requestId,
+        method: request.method,
+        path: safePath(url.pathname),
+        status: response.statusCode,
+        durationMs: Math.round(durationSeconds * 1000),
+        userAgent: String(request.headers['user-agent'] ?? '').slice(0, 200),
+        clientKey: key
+      });
+    };
+    response.on('finish', observe);
+    response.on('close', observe);
+
     try {
+      // Health probes — Phase 4.1. /healthz is liveness (process
+      // alive); /readyz is readiness (store reachable + writable).
+      if (request.method === 'GET' && url.pathname === '/healthz') {
+        jsonResponse(response, 200, { ok: true, uptimeSeconds: process.uptime() });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/readyz') {
+        const checks = { store: 'unknown' };
+        try {
+          await store.listIdentities();
+          checks.store = 'ok';
+          jsonResponse(response, 200, { ok: true, checks });
+        } catch (error) {
+          checks.store = `error: ${error.message}`;
+          logger.error('readyz_failed', { requestId, reason: error.message });
+          jsonResponse(response, 503, { ok: false, checks });
+        }
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/metrics') {
+        const body = renderMetrics();
+        response.writeHead(200, {
+          'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+          'cache-control': 'no-store'
+        });
+        response.end(body);
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -577,6 +721,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           service: 'bharat-os-phase0-api',
           routes: [
             'GET /health',
+            'GET /healthz',
+            'GET /readyz',
+            'GET /metrics',
             'GET /api',
             'GET /shell/',
             'GET /console/',
@@ -2407,6 +2554,41 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       });
     }
   });
+
+  // Phase 4.1 — generous timeouts to absorb slow networks without
+  // pinning a slow-loris client. Node defaults are quite forgiving;
+  // explicit values document the intent and make the limits
+  // tunable.
+  server.headersTimeout = 30_000;
+  server.requestTimeout = 60_000;
+  server.keepAliveTimeout = 5_000;
+
+  return server;
+}
+
+// Graceful shutdown wrapper — drains in-flight requests on SIGTERM /
+// SIGINT instead of dropping them. The CLI entry point uses this.
+export function installGracefulShutdown(server, { drainTimeoutMs = 10_000 } = {}) {
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutdown_initiated', { signal });
+    const forceTimer = setTimeout(() => {
+      logger.warn('shutdown_force', { signal, after_ms: drainTimeoutMs });
+      process.exit(1);
+    }, drainTimeoutMs);
+    forceTimer.unref?.();
+    server.close((err) => {
+      if (err) logger.error('shutdown_close_error', { reason: err.message });
+      else logger.info('shutdown_complete', { signal });
+      clearTimeout(forceTimer);
+      process.exit(err ? 1 : 0);
+    });
+  };
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => shutdown(signal));
+  }
 }
 
 export async function listenPhase0Api({ store, host = '127.0.0.1', port = 8787 }) {
@@ -2419,6 +2601,7 @@ export async function listenPhase0Api({ store, host = '127.0.0.1', port = 8787 }
       resolve();
     });
   });
-
+  logger.info('server_listening', { host, port });
+  installGracefulShutdown(server);
   return server;
 }

@@ -634,14 +634,6 @@
     <div class="toast" id="toast" hidden></div>
 
     <script src="/shell/app.js" type="module"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker
-            .register('/shell/service-worker.js', { scope: '/shell/' })
-            .catch((error) => console.warn('shell SW registration failed', error));
-        });
-      }
-    </script>
+    <script src="/shell/sw-bootstrap.js"></script>
   </body>
 </html>

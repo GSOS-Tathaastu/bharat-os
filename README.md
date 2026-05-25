@@ -144,6 +144,28 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.1 **production hardening — security headers, rate limiting,
+  structured logging, metrics, graceful shutdown** — four new artifacts
+  under `src/phase0/`: `security-headers.mjs` (strict CSP — no
+  `'unsafe-inline'`/`'unsafe-eval'` in script-src; CDN allowlist
+  esm.sh + cdn.jsdelivr.net only; X-Frame-Options DENY, COOP
+  same-origin, Permissions-Policy locking camera/mic to self + denying
+  geo/payment/usb/interest-cohort), `rate-limiter.mjs` (in-memory
+  token-bucket with 4 policy classes; per-key isolation; honours
+  X-Forwarded-For only when `BHARAT_OS_TRUST_PROXY=1`),
+  `logger.mjs` (JSON to stdout/stderr per level with **silent PII-key
+  scrubbing at any depth** — displayName / phoneNumber / intentText /
+  recoveryPhrase / privateKeyPem / vaultKeyBase64 / gradientBytesBase64;
+  crypto.randomUUID request IDs), `metrics.mjs` (Prometheus text format
+  at `/metrics`; **metricPath normalises identityIds → `:id` so no
+  per-user dimension exists**). Middleware preamble wires all four into
+  every request. New `/healthz` + `/readyz` + `/metrics` endpoints.
+  Server hardening: 30s headersTimeout, 60s requestTimeout, 1MiB body
+  cap. `installGracefulShutdown` drains in-flight on SIGTERM with
+  10s force timeout. Inline `<script>` tags de-inlined for strict CSP.
+  Env vars: `BHARAT_OS_HSTS`, `BHARAT_OS_TRUST_PROXY`,
+  `BHARAT_OS_CORS_ORIGINS`, `BHARAT_OS_LOG_LEVEL`. 322/322 tests
+  (+33 new). SW cache to v25. ADR 0080.
 - Phase 4.0 **DPDP data-subject rights — launch readiness arc starts** —
   pivot from investor-demo-ready to launch-ready. New
   `src/phase1/dpdp-rights.mjs` artifact: `collectUserData` (18-section
