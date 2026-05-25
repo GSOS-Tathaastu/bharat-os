@@ -15,11 +15,69 @@
 // the rate-limiter / database integration stays the same.
 
 import { logger } from './logger.mjs';
-import { recordSmsAttempt } from './metrics.mjs';
+import { recordCircuitState, recordSmsAttempt } from './metrics.mjs';
 
 export const SMS_PROVIDER_PROTOCOL_VERSION = 'bos.phase0.sms-provider.v0';
 
 const E164_PATTERN = /^\+\d{10,15}$/;
+
+// Phase 5.4 — per-call timeout + circuit breaker tunables. Defaults
+// chosen so a typical India-SMS API (responds in <500ms) treats
+// >3s as outage; 5 consecutive REJECTED errors trips the circuit;
+// circuit cools for 30s before a half-open probe.
+const DEFAULT_SMS_TIMEOUT_MS = 3000;
+const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+const DEFAULT_CIRCUIT_OPEN_MS = 30_000;
+
+function readPositiveIntEnv(name, fallback) {
+  const raw = process.env?.[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function smsTimeoutMs() {
+  return readPositiveIntEnv('BHARAT_OS_SMS_TIMEOUT_MS', DEFAULT_SMS_TIMEOUT_MS);
+}
+
+function circuitFailureThreshold() {
+  return readPositiveIntEnv(
+    'BHARAT_OS_SMS_CIRCUIT_THRESHOLD',
+    DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+  );
+}
+
+function circuitOpenMs() {
+  return readPositiveIntEnv('BHARAT_OS_SMS_CIRCUIT_OPEN_MS', DEFAULT_CIRCUIT_OPEN_MS);
+}
+
+// Tiny `fetch` wrapper that aborts after `timeoutMs` and re-throws
+// as a tagged `SMS_PROVIDER_REJECTED` so the fallback chain treats
+// timeout the same as vendor 5xx.
+export async function fetchWithTimeout(url, init = {}, { timeoutMs, provider = 'unknown' } = {}) {
+  const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : smsTimeoutMs();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    const aborted =
+      error?.name === 'AbortError' || error?.code === 'ABORT_ERR' || controller.signal.aborted;
+    const wrapped = new Error(
+      aborted
+        ? `${provider} send timed out after ${ms}ms`
+        : `${provider} network error: ${error?.message ?? String(error)}`
+    );
+    wrapped.code = 'SMS_PROVIDER_REJECTED';
+    wrapped.provider = provider;
+    wrapped.providerResponse = aborted ? `timeout:${ms}ms` : `network:${error?.message ?? 'unknown'}`;
+    wrapped.cause = error;
+    throw wrapped;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function normalisePhone(input) {
   if (input === null || input === undefined) return null;
@@ -130,9 +188,10 @@ const gupshupProvider = {
     const templateId = process.env.BHARAT_OS_SMS_GUPSHUP_TEMPLATE_ID;
     if (principalEntityId) params.set('principalEntityId', principalEntityId);
     if (templateId) params.set('dltTemplateId', templateId);
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://media.smsgupshup.com/GatewayAPI/rest?${params.toString()}`,
-      { method: 'GET' }
+      { method: 'GET' },
+      { provider: 'gupshup' }
     );
     const text = (await response.text()).trim();
     // Two response shapes: "success | <id>" or JSON.
@@ -199,7 +258,7 @@ const msg91Provider = {
           country: '91',
           sms: [{ message: body, to: [mobile] }]
         };
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       flowId
         ? 'https://control.msg91.com/api/v5/flow'
         : 'https://control.msg91.com/api/v5/send',
@@ -210,7 +269,8 @@ const msg91Provider = {
           authkey: authKey
         },
         body: JSON.stringify(payload)
-      }
+      },
+      { provider: 'msg91' }
     );
     const text = await response.text();
     let parsed = null;
@@ -269,7 +329,7 @@ const twilioProvider = {
       params.set('From', from);
     }
     const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
       {
         method: 'POST',
@@ -278,7 +338,8 @@ const twilioProvider = {
           authorization: `Basic ${credentials}`
         },
         body: params.toString()
-      }
+      },
+      { provider: 'twilio' }
     );
     const text = await response.text();
     let parsed = null;
@@ -343,12 +404,145 @@ function instrumentedProvider(provider) {
   };
 }
 
+// Phase 5.4 — circuit breaker. Per-provider state tracks consecutive
+// vendor REJECTED failures. After `threshold` (default 5) the
+// circuit opens — subsequent sends short-circuit immediately with
+// SMS_PROVIDER_CIRCUIT_OPEN so the fallback chain skips to the
+// next provider without paying network latency. After `openMs`
+// (default 30s) the next send is allowed through as a half-open
+// probe; success closes the circuit, failure re-opens it.
+//
+// NOT_CONFIGURED is treated as a config issue, not a vendor
+// failure, and does NOT count toward the threshold (config doesn't
+// auto-heal in 30s).
+
+const circuitStates = new Map(); // provider name → state object
+
+function circuitInitialState() {
+  return {
+    state: 'closed',
+    consecutiveFailures: 0,
+    openedAt: 0
+  };
+}
+
+function transitionCircuit(provider, state, nextState) {
+  if (state.state !== nextState) {
+    state.state = nextState;
+    recordCircuitState(provider, nextState);
+  }
+}
+
+function circuitOpenError(provider, msUntilProbe) {
+  const error = new Error(
+    `${provider} circuit open — skipping for ~${Math.ceil(msUntilProbe / 1000)}s while it cools down.`
+  );
+  error.code = 'SMS_PROVIDER_CIRCUIT_OPEN';
+  error.provider = provider;
+  error.msUntilProbe = msUntilProbe;
+  return error;
+}
+
+export function createCircuitBreakerProvider(provider, options = {}) {
+  const name = provider.name;
+  const state = circuitInitialState();
+  circuitStates.set(name, state);
+  recordCircuitState(name, 'closed');
+
+  // `now` is injectable so tests can drive time forward without
+  // hanging on real timers.
+  return {
+    name,
+    _circuit: state,
+    async send(args, callOptions = {}) {
+      const now = callOptions.now ?? Date.now;
+      const threshold = options.failureThreshold ?? circuitFailureThreshold();
+      const openMs = options.openMs ?? circuitOpenMs();
+
+      if (state.state === 'open') {
+        const elapsed = now() - state.openedAt;
+        if (elapsed < openMs) {
+          throw circuitOpenError(name, openMs - elapsed);
+        }
+        transitionCircuit(name, state, 'half_open');
+      }
+
+      try {
+        const result = await provider.send(args);
+        if (state.state !== 'closed' || state.consecutiveFailures !== 0) {
+          state.consecutiveFailures = 0;
+          state.openedAt = 0;
+          transitionCircuit(name, state, 'closed');
+        }
+        return result;
+      } catch (error) {
+        const code = error?.code;
+        if (code === 'SMS_PROVIDER_NOT_CONFIGURED') {
+          // Config failures don't heal automatically — don't open
+          // the circuit. The fallback chain treats them as
+          // recoverable for routing.
+          throw error;
+        }
+        if (code === 'SMS_PROVIDER_REJECTED') {
+          state.consecutiveFailures += 1;
+          if (state.state === 'half_open' || state.consecutiveFailures >= threshold) {
+            state.openedAt = now();
+            transitionCircuit(name, state, 'open');
+          }
+        }
+        throw error;
+      }
+    }
+  };
+}
+
+// `resetCircuit(name?)` — test + ops helper. Clears the breaker
+// state for one provider (or all when omitted) and emits the
+// closed gauge sample. Useful when a vendor confirms recovery and
+// ops wants to lift the cooldown immediately.
+export function resetCircuit(name) {
+  if (name) {
+    const s = circuitStates.get(name);
+    if (s) {
+      s.state = 'closed';
+      s.consecutiveFailures = 0;
+      s.openedAt = 0;
+      recordCircuitState(name, 'closed');
+    }
+    return;
+  }
+  for (const provName of circuitStates.keys()) {
+    resetCircuit(provName);
+  }
+}
+
+export function circuitStatusSnapshot() {
+  const out = {};
+  for (const [provName, s] of circuitStates) {
+    out[provName] = {
+      state: s.state,
+      consecutiveFailures: s.consecutiveFailures,
+      openedAt: s.openedAt
+    };
+  }
+  return out;
+}
+
+function wrappedProvider(provider) {
+  // Order matters: outermost is the circuit-breaker (decides
+  // whether to call at all), inner is telemetry (records every
+  // attempt that DOES happen). A skipped-by-circuit send doesn't
+  // record an attempt — the metric `bos_sms_circuit_state` is the
+  // observability surface for that case.
+  return createCircuitBreakerProvider(instrumentedProvider(provider));
+}
+
 const PROVIDERS = {
-  log: instrumentedProvider(logProvider),
-  gupshup: instrumentedProvider(gupshupProvider),
-  msg91: instrumentedProvider(msg91Provider),
-  karix: instrumentedProvider(karixProvider),
-  twilio: instrumentedProvider(twilioProvider)
+  log: wrappedProvider(logProvider),
+  gupshup: wrappedProvider(gupshupProvider),
+  msg91: wrappedProvider(msg91Provider),
+  karix: wrappedProvider(karixProvider),
+  twilio: wrappedProvider(twilioProvider)
 };
 
 // Phase 5.3 — fallback chain. Wraps an ordered list of providers.
@@ -392,7 +586,8 @@ export function createFallbackProvider(providerList) {
           // surfaces immediately so it's not silently swallowed.
           const isKnown =
             error?.code === 'SMS_PROVIDER_NOT_CONFIGURED' ||
-            error?.code === 'SMS_PROVIDER_REJECTED';
+            error?.code === 'SMS_PROVIDER_REJECTED' ||
+            error?.code === 'SMS_PROVIDER_CIRCUIT_OPEN';
           attempts.push({
             provider: provider.name,
             code: error?.code ?? 'UNKNOWN',

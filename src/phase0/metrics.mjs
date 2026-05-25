@@ -15,6 +15,7 @@
 const counters = new Map(); // `${method}|${routePattern}|${status}` → count
 const latencyBuckets = new Map(); // `${method}|${routePattern}` → { buckets, sum, count }
 const smsCounters = new Map(); // `${provider}|${outcome}` → count — Phase 5.3
+const smsCircuitStates = new Map(); // `${provider}` → 0|1|2 — Phase 5.4
 
 // Histogram buckets in seconds, biased toward request latencies we
 // actually expect (mostly sub-second).
@@ -60,6 +61,26 @@ export function smsCounterSnapshot() {
   const out = {};
   for (const [key, value] of smsCounters) {
     out[key] = value;
+  }
+  return out;
+}
+
+// Phase 5.4 — SMS provider circuit-breaker state. Numeric so it
+// renders as a Prometheus gauge: 0 = closed (healthy), 1 =
+// half_open (probing), 2 = open (skipping calls). Ops can alert on
+// `bos_sms_circuit_state >= 2` for any provider in the chain.
+const CIRCUIT_STATE_VALUES = Object.freeze({ closed: 0, half_open: 1, open: 2 });
+export function recordCircuitState(provider, state) {
+  if (!provider || typeof provider !== 'string') return;
+  const numeric = CIRCUIT_STATE_VALUES[state];
+  if (typeof numeric !== 'number') return;
+  smsCircuitStates.set(provider, numeric);
+}
+
+export function circuitStateSnapshot() {
+  const out = {};
+  for (const [provider, value] of smsCircuitStates) {
+    out[provider] = value;
   }
   return out;
 }
@@ -138,6 +159,18 @@ export function renderMetrics() {
     );
   }
 
+  // Phase 5.4 — SMS provider circuit-breaker state. Gauge so ops
+  // can alert on `bos_sms_circuit_state{provider="..."} >= 2`.
+  lines.push(
+    '# HELP bos_sms_circuit_state SMS provider circuit-breaker state. 0 = closed, 1 = half-open, 2 = open.'
+  );
+  lines.push('# TYPE bos_sms_circuit_state gauge');
+  const circuitKeys = [...smsCircuitStates.keys()].sort();
+  for (const provider of circuitKeys) {
+    const value = smsCircuitStates.get(provider);
+    lines.push(`bos_sms_circuit_state{provider="${escapeLabel(provider)}"} ${value}`);
+  }
+
   // Process info — minimal, no PII.
   lines.push('# HELP bos_api_process_uptime_seconds Process uptime in seconds.');
   lines.push('# TYPE bos_api_process_uptime_seconds gauge');
@@ -154,4 +187,5 @@ export function resetMetrics() {
   counters.clear();
   latencyBuckets.clear();
   smsCounters.clear();
+  smsCircuitStates.clear();
 }

@@ -144,6 +144,29 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.4 **SMS per-call timeout + circuit breaker — fast-fail when
+  a vendor breaks** — Phase 5.3's fallback chain still PROBED every
+  broken vendor in turn, so a 30-second Gupshup hang meant 30+s OTPs
+  even with MSG91 healthy behind it. Phase 5.4 ships per-call
+  `fetchWithTimeout` (AbortController-based; 3s default via
+  `BHARAT_OS_SMS_TIMEOUT_MS`) mapping timeout → `SMS_PROVIDER_REJECTED`,
+  PLUS a per-provider circuit breaker. After N consecutive REJECTED
+  failures (default 5; `BHARAT_OS_SMS_CIRCUIT_THRESHOLD`) the circuit
+  opens — subsequent calls short-circuit immediately with
+  `SMS_PROVIDER_CIRCUIT_OPEN`, no network round-trip — so the fallback
+  chain skips to the next provider in microseconds. After `openMs`
+  (default 30s; `BHARAT_OS_SMS_CIRCUIT_OPEN_MS`) the breaker half-opens
+  and allows one probe through; success closes, failure re-opens.
+  `NOT_CONFIGURED` does NOT count toward threshold so Karix stubs
+  don't pollute the dashboard. New Prometheus gauge
+  `bos_sms_circuit_state{provider}` in `/metrics` (0=closed,
+  1=half-open, 2=open) — alert on `>= 2 for 1m`. `resetCircuit(name?)`
+  ops helper exported for future SRE tooling. `.env.example`
+  documents all three tunables. §15 preserved — timeout wrapper
+  passes phone+body through unchanged; breaker records only provider
+  name + numeric state. 441/441 tests (+12 new). ADR 0090. **One
+  vendor's failure latency stops mattering after threshold — broken
+  Gupshup = microsecond fallback, not 30s waits per OTP.**
 - Phase 5.3 **SMS vendor fallback chain + per-vendor delivery
   telemetry** — Phase 5.1 shipped three real SMS HTTP integrations
   but only one ran at a time. A 5-minute Gupshup outage was a
