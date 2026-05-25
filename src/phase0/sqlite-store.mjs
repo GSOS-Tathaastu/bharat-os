@@ -388,6 +388,11 @@ const SCHEMAS = `
     on_device_model_pack_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS slm_model_packs (
+    slm_model_pack_id TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+  );
 `;
 
 function parse(row) {
@@ -1740,6 +1745,41 @@ export class SqliteStore {
   async listOnDeviceModelPacks() {
     await this.init();
     return this._listAll('on_device_model_packs');
+  }
+
+  // Phase 9.0a — Tier-4 SLM registry. Admin-curated metadata for
+  // 1.5-4 GB Small Language Model packs (Phi-3-mini, Gemma-2B etc.).
+  // Distinct from Tier-2 on-device-model-packs (~7 MB ASR/TTS/intent).
+  async saveSlmModelPack(pack) {
+    await this.init();
+    this._upsert(
+      'slm_model_packs',
+      ['slm_model_pack_id', 'json'],
+      [pack.modelPackId, JSON.stringify(pack)]
+    );
+    await this.appendLedger({
+      type: pack.status === 'revoked'
+        ? 'slm_model_pack.revoked'
+        : 'slm_model_pack.registered',
+      modelPackId: pack.modelPackId,
+      family: pack.family,
+      variant: pack.variant,
+      runtime: pack.runtime,
+      quantization: pack.quantization,
+      diskBytes: pack.diskBytes,
+      operator: pack.status === 'revoked' ? pack.revokedBy : pack.registeredBy
+    });
+    return pack;
+  }
+
+  async readSlmModelPack(id) {
+    await this.init();
+    return this._readOne('slm_model_packs', 'slm_model_pack_id', id);
+  }
+
+  async listSlmModelPacks() {
+    await this.init();
+    return this._listAll('slm_model_packs');
   }
 
   // ─── Ledger ────────────────────────────────────────────────────────────

@@ -144,6 +144,51 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 9.0a **Tier-4 SLM model-pack registry — admin-curated
+  metadata, public read, compatibility filter; no runtime yet**
+  — First sub-phase of the Phase 9.0 arc (ADR 0107 Proposed).
+  Ships the registry CRUD + public read API + compat filter
+  before the gnarly runtime work so the rest of 9.0 has a stable
+  API to build against and the investor demo can show a curated
+  SLM catalogue today. New `src/phase1/slm-model-pack.mjs`
+  (pure validation, no I/O): `createSlmModelPack` validates +
+  normalises pack metadata (Phi-3-mini / Gemma-2B / Llama-3.2
+  family etc.); `filterCompatibleSlmModelPacks` excludes revoked
+  + RAM-over + disk-under-1.2x-headroom + unsupported-runtime
+  packs; `revokeSlmModelPack` soft-deletes (flips status,
+  preserves audit trail) + idempotent. Enums exported:
+  `SLM_RUNTIMES` (`llama_cpp_wasm`, `mlc_llm_webgpu`,
+  `onnx_runtime_web`, `native_aosp`), `SLM_QUANTIZATIONS`
+  (`q4_k_m`, `q5_k_m`, `q8_0`, `fp16`, `int4`, `int8`),
+  `SLM_LICENSES`, `SLM_CAPABILITIES`. Pack record carries
+  `parameterCount` / `quantization` / `diskBytes` (≤ 8 GB Tier-4
+  envelope) / `ramRequiredMb` (≤ 16 GB safety cap) / `runtime` /
+  `sourceUrl` (HTTPS-only, http: rejected) / `sourceHash`
+  (mandatory `sha256:<64-hex>` for Phase 9.0b integrity verify)
+  / `license` / `capabilities` / `contextWindow`. Both backends
+  grow `slm_model_packs` storage; `slm_model_pack.registered` /
+  `slm_model_pack.revoked` ledger events on every CRUD. New
+  endpoints: public `GET /api/slm-model-packs` (with
+  `?activeOnly=true` / `?compatible=true&deviceRamMb=…&freeDisk
+  Bytes=…&supportedRuntimes=csv` filters; response carries
+  `totalRegistered`/`totalActive` + the four enum constants so
+  shell doesn't need a separate capabilities endpoint); `GET
+  /api/slm-model-packs/:id`; admin `POST /api/admin/slm-model-
+  packs` (Phase 5.7 bearer; 201 / 400 / 409 duplicate / 503
+  admin_disabled); `DELETE /api/admin/slm-model-packs/:id` (200
+  / 404). §15: no anonymous packs (admin curation + signed
+  ledger); integrity-checked downloads forward (sourceHash
+  mandatory); HTTPS-only; soft-delete; Tier-4 envelope cap;
+  revoked excluded from compat list; admin write audited end-to-
+  end. **No third-party runtime dependency yet** —
+  llama.cpp-wasm / MLC-LLM NOT introduced; zero-npm-dep posture
+  preserved through 9.0a; the hard call comes in 9.0c. **30 new
+  tests; full suite 777/777** (was 747; batches of 16 to dodge
+  Windows process-spawn OOM). ADR 0112. **Phase 9.0 arc has
+  started**: 9.0b shell download flow + per-identity
+  `installed_on_device_slms` table with DPDP cascade (~1-2 wks);
+  9.0c runtime adapter (~3-4 wks, gnarly third-party-dep ADR);
+  9.0d federated-round + mesh-inference integration (~1 wk).
 - Phase 8.4 **shell UI for push subscription opt-in — Phase 7.x
   ships ENABLED; Phase 8 shell arc closes** — Phase 7.0–7.3
   shipped end-to-end VAPID Web Push (JWT signing + AES-128-GCM

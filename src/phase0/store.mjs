@@ -57,6 +57,7 @@ export class BosStore {
     this.voiceModelPacksPath = path.join(rootPath, 'voice-model-packs');
     this.ttsModelPacksPath = path.join(rootPath, 'tts-model-packs');
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
+    this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
@@ -88,6 +89,7 @@ export class BosStore {
     await fs.mkdir(this.voiceModelPacksPath, { recursive: true });
     await fs.mkdir(this.ttsModelPacksPath, { recursive: true });
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
+    await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.mkdir(this.attestationsPath, { recursive: true });
@@ -1046,6 +1048,46 @@ export class BosStore {
 
   async listOnDeviceModelPacks() {
     return listJson(this.onDeviceModelPacksPath);
+  }
+
+  // Phase 9.0a — Tier-4 SLM registry. Distinct from the Tier-2
+  // on-device-model-packs (those are ~7 MB ASR/TTS/intent packs).
+  // These are 1.5-4 GB SLM packs the user explicitly opts into
+  // downloading. Admin-curated (Phase 5.7 token); not per-identity,
+  // so no DPDP §12(3) cascade entry — installed-on-device records
+  // (per-identity) come in a later Phase 9.0 sub-phase and DO
+  // cascade.
+  slmModelPackFile(modelPackId) {
+    return path.join(this.slmModelPacksPath, `${safeName(modelPackId)}.json`);
+  }
+
+  async saveSlmModelPack(modelPack) {
+    await this.init();
+    await writeJson(this.slmModelPackFile(modelPack.modelPackId), modelPack);
+    await this.appendLedger({
+      type: modelPack.status === 'revoked'
+        ? 'slm_model_pack.revoked'
+        : 'slm_model_pack.registered',
+      modelPackId: modelPack.modelPackId,
+      family: modelPack.family,
+      variant: modelPack.variant,
+      runtime: modelPack.runtime,
+      quantization: modelPack.quantization,
+      diskBytes: modelPack.diskBytes,
+      operator: modelPack.status === 'revoked'
+        ? modelPack.revokedBy
+        : modelPack.registeredBy,
+      at: new Date().toISOString()
+    });
+    return modelPack;
+  }
+
+  async readSlmModelPack(modelPackId) {
+    return readJson(this.slmModelPackFile(modelPackId));
+  }
+
+  async listSlmModelPacks() {
+    return listJson(this.slmModelPacksPath);
   }
 
   async computeContribution(identityId) {

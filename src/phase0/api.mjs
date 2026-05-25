@@ -214,6 +214,15 @@ import {
   createOnDeviceRuntimePlan,
   ON_DEVICE_TASKS
 } from '../phase1/on-device-model.mjs';
+import {
+  createSlmModelPack,
+  filterCompatibleSlmModelPacks,
+  revokeSlmModelPack,
+  SLM_RUNTIMES,
+  SLM_QUANTIZATIONS,
+  SLM_LICENSES,
+  SLM_CAPABILITIES
+} from '../phase1/slm-model-pack.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -982,6 +991,92 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 9.0a — Tier-4 SLM registry, admin write.
+      // POST /api/admin/slm-model-packs        → register a new pack
+      // DELETE /api/admin/slm-model-packs/:id  → revoke (soft-delete)
+      //   Body on DELETE: { reason?: string }
+      // All gated by `BHARAT_OS_ADMIN_TOKEN` (Phase 5.7). Both emit
+      // ledger events (`slm_model_pack.registered` /
+      // `slm_model_pack.revoked`) with operator attribution.
+      if (request.method === 'POST' && url.pathname === '/api/admin/slm-model-packs') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const body = await readRequestJson(request);
+        let pack;
+        try {
+          pack = createSlmModelPack({
+            modelPackId: body.modelPackId,
+            family: body.family,
+            variant: body.variant,
+            parameterCount: body.parameterCount,
+            quantization: body.quantization,
+            diskBytes: body.diskBytes,
+            ramRequiredMb: body.ramRequiredMb,
+            runtime: body.runtime,
+            sourceUrl: body.sourceUrl,
+            sourceHash: body.sourceHash,
+            license: body.license,
+            capabilities: body.capabilities,
+            contextWindow: body.contextWindow,
+            description: body.description,
+            registeredBy: auth.operator
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_slm_model_pack', message: error.message }
+          });
+          return;
+        }
+        const existing = await store.readSlmModelPack(pack.modelPackId).catch(() => null);
+        if (existing && existing.status !== 'revoked') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'duplicate_pack',
+              message: `SLM model pack ${pack.modelPackId} is already registered. Revoke it first or use a different modelPackId.`
+            }
+          });
+          return;
+        }
+        await store.saveSlmModelPack(pack);
+        logger.info('admin_slm_pack_registered', {
+          requestId,
+          operator: auth.operator,
+          modelPackId: pack.modelPackId,
+          family: pack.family,
+          runtime: pack.runtime
+        });
+        jsonResponse(response, 201, { ok: true, modelPack: pack });
+        return;
+      }
+
+      const slmRevokeMatch = /^\/api\/admin\/slm-model-packs\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'DELETE' && slmRevokeMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const modelPackId = decodeURIComponent(slmRevokeMatch[1]);
+        const existing = await store.readSlmModelPack(modelPackId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_pack', message: 'SLM model pack not found.' }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        const revoked = revokeSlmModelPack(existing, {
+          revokedBy: auth.operator,
+          reason: body?.reason ?? null
+        });
+        await store.saveSlmModelPack(revoked);
+        logger.info('admin_slm_pack_revoked', {
+          requestId,
+          operator: auth.operator,
+          modelPackId,
+          reason: revoked.revocationReason
+        });
+        jsonResponse(response, 200, { ok: true, modelPack: revoked });
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -1202,6 +1297,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/admin/mesh/withdrawals/:requestId/accepted',
             'POST /api/admin/mesh/withdrawals/:requestId/paid',
             'POST /api/admin/mesh/withdrawals/:requestId/failed',
+            'GET /api/slm-model-packs',
+            'GET /api/slm-model-packs/:modelPackId',
+            'POST /api/admin/slm-model-packs',
+            'DELETE /api/admin/slm-model-packs/:modelPackId',
             'POST /api/identities/:collectiveId/collective-memberships',
             'GET /api/identities/:memberId/collective-memberships',
             'POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke',
@@ -2188,6 +2287,55 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      // Phase 9.0a — Tier-4 SLM registry, public read. Returns every
+      // registered pack (including revoked, marked with `status:
+      // 'revoked'`) so the shell can display history honestly. Pass
+      // `?compatible=true` plus optional `deviceRamMb`, `freeDiskBytes`,
+      // `supportedRuntimes` (CSV) to filter to packs the device can
+      // actually run. `?activeOnly=true` excludes revoked packs.
+      // Admin curation lives at POST/DELETE under /api/admin/slm-model-packs
+      // (Phase 5.7-gated, below).
+      if (parts[0] === 'api' && parts[1] === 'slm-model-packs' && parts.length === 2) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const all = await store.listSlmModelPacks();
+        const activeOnly = url.searchParams.get('activeOnly') === 'true';
+        const compatible = url.searchParams.get('compatible') === 'true';
+        const candidates = activeOnly
+          ? all.filter((pack) => pack.status !== 'revoked')
+          : all;
+        let modelPacks = candidates;
+        if (compatible) {
+          const supportedRuntimes = url.searchParams.get('supportedRuntimes');
+          modelPacks = filterCompatibleSlmModelPacks(candidates, {
+            deviceRamMb: url.searchParams.get('deviceRamMb'),
+            freeDiskBytes: url.searchParams.get('freeDiskBytes'),
+            supportedRuntimes: supportedRuntimes ? supportedRuntimes.split(',').map((r) => r.trim()).filter(Boolean) : []
+          });
+        }
+        jsonResponse(response, 200, {
+          modelPacks,
+          totalRegistered: all.length,
+          totalActive: all.filter((pack) => pack.status !== 'revoked').length,
+          supportedRuntimes: SLM_RUNTIMES,
+          supportedQuantizations: SLM_QUANTIZATIONS,
+          supportedLicenses: SLM_LICENSES,
+          supportedCapabilities: SLM_CAPABILITIES
+        });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'slm-model-packs' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const modelPackId = decodeURIComponent(parts[2]);
+        const pack = await store.readSlmModelPack(modelPackId);
+        if (!pack) {
+          jsonResponse(response, 404, { error: { code: 'unknown_pack', message: 'SLM model pack not found.' } });
+          return;
+        }
+        jsonResponse(response, 200, { modelPack: pack });
+        return;
       }
 
       if (parts[0] === 'api' && parts[1] === 'integrity' && parts[2] === 'verify') {

@@ -2100,30 +2100,39 @@ code lands; do not create a separate `STATUS.md` (§16).
   `identityHash` per `(identityId, jobId)` prevents sponsor cross-job
   correlation; refund-on-failed semantics extend to labeling.
   Estimated effort: ~9-10 weeks across the six sub-phases.
-- **Phase 9.0 (ADR 0107)** — Tier-4 SLM download + runtime. Prerequisite
-  for the federated-learning-as-a-service pitch. Ships the model-pack
-  registry extension for 1.5-4GB SLMs (Phi-3-mini, Llama-3.2, Gemma-2B
-  family), opt-in capability-checked download flow, runtime adapter
-  layer wrapping llama.cpp-wasm / MLC-LLM / ONNX Runtime Web,
-  integration with Phase 3.x federated rounds + Phase 6.0b mesh-
-  contribution events. **First time we introduce third-party runtime
-  dependencies** (llama.cpp-wasm / MLC-LLM aren't zero-dep) — trade-off
-  vs. the SMS/backup zero-dep pattern documented in the ADR.
-  Estimated effort: ~6-8 weeks (substantial — multi-week vs. the
-  ~1-day Phase 8.x shell ships).
+- **Phase 9.0b / 9.0c / 9.0d (ADR 0107)** — Tier-4 SLM remaining sub-
+  phases. Phase 9.0a (model-pack registry, ADR 0112) is now SHIPPED
+  with admin CRUD + public read + compatibility filter + ledger
+  evidence + 30/30 tests; the registry has a stable API the rest of
+  the arc consumes. **Remaining**: 9.0b shell download flow on Profile
+  tab + per-identity `installed_on_device_slms` table with DPDP
+  cascade (~1-2 wks, no runtime yet just storage); 9.0c runtime
+  adapter layer wrapping llama.cpp-wasm / MLC-LLM / ONNX Runtime Web
+  (~3-4 wks — **first introduction of third-party runtime
+  dependencies**; needs its own ADR for the choice + the distroless-
+  deploy trade-off); 9.0d integration with Phase 3.x federated rounds
+  + Phase 6.0b mesh-inference workload events finally recording real
+  ticks (~1 wk). Total remaining: ~5-7 weeks.
 - **Phase 9.1 (sketched)** — sponsored federated-round API. Depends on
   Phase 9.0. Sells privacy-preserving fine-tuning to banks / hospitals
   / government as a paid service routing through the operator network.
 
-Suggested sequencing: Phase 8.4 (small shell UI — push opt-in,
-activates Phase 7.x) → Phase 9.0 (big SLM infrastructure ship) →
-Phase 9.1 (sponsored federated rounds — demand-side revenue) →
-Phase 10.0–10.5 (labeling marketplace, sponsor-funded revenue line;
-sub-phases 10.0–10.2 launchable without Phase 9.0 — 10.3 SLM
-pre-labeling hint layers on after 9.0 lands; 10.4–10.5 QC + signed
-export harden before any commercial pilot). The 8.x, 9.x, and 10.x
-arcs share the existing consent / ledger / UPI rails but don't share
-code surfaces — can run in parallel after Phase 8.4.
+Suggested sequencing: Phase 9.0b (shell download flow + per-identity
+install table, builds on 9.0a registry) → Phase 9.0c (runtime
+adapter wrapping llama.cpp-wasm / MLC-LLM — biggest unblock) →
+Phase 9.0d (federated-round + mesh-inference integration) → Phase
+9.1 (sponsored federated rounds — demand-side revenue) → Phase
+10.0–10.5 (labeling marketplace, sponsor-funded revenue line; sub-
+phases 10.0–10.2 launchable without Phase 9.0c — 10.3 SLM pre-
+labeling hint layers on after 9.0c lands; 10.4–10.5 QC + signed
+export harden before any commercial pilot). The 9.x and 10.x arcs
+share the existing consent / ledger / UPI rails but don't share code
+surfaces — can run in parallel once 9.0c lands.
+
+---
+
+Closed in Phase 9.0a (ADR 0112 — Tier-4 SLM model-pack registry; first slice of Phase 9.0):
+1. ✅ **Tier-4 SLM model-pack registry — admin-curated metadata, public read, compatibility filter; no runtime yet** — ADR 0107 sketched the Phase 9.0 substrate end-to-end (model-pack registry + capability detection + shell download flow + runtime adapter wrapping llama.cpp-wasm / MLC-LLM / ONNX Runtime Web) but flagged the runtime-adapter component as the gnarly part (first time Bharat OS introduces third-party runtime dependencies). Right sequencing: ship the easy pieces (registry CRUD + public read API + compat filter) first so the investor demo can show a curated catalogue immediately (with empty install slots), the shell's Phase 9.0b capability-detection + download flow has a stable API to consume from day 1, and admin ops can populate the registry from a jumphost without waiting for the runtime work. **New `src/phase1/slm-model-pack.mjs`** (pure validation + helpers, no I/O): `createSlmModelPack(input)` validates and normalises pack records (throws on invalid metadata; derives `modelPackId` from canonical hash when caller doesn't provide one); `filterCompatibleSlmModelPacks(packs, deviceProfile)` excludes revoked + RAM-exceeded + disk-under-1.2x-headroom (so half-finished download fits + leaves scratch for SHA-256 verify) + unsupported-runtime packs; `revokeSlmModelPack(pack, {revokedBy, reason})` flips status to `revoked` without hard-deleting (audit trail of "who installed this when" still resolves) + idempotent. **Constants exported**: `SLM_RUNTIMES` (`llama_cpp_wasm`, `mlc_llm_webgpu`, `onnx_runtime_web`, `native_aosp`); `SLM_QUANTIZATIONS` (`q4_k_m`, `q5_k_m`, `q8_0`, `fp16`, `int4`, `int8`); `SLM_LICENSES` (`mit`, `apache-2.0`, `bsd-3-clause`, `meta-llama-3`, `gemma-terms`, `phi-license`, `other`); `SLM_CAPABILITIES` (`inference`, `lora_finetune`, `classifier_head`, `embedding`). **Pack record** carries `modelPackId` / `tier: 4` / `family` / `variant` / `parameterCount` / `quantization` / `diskBytes` / `ramRequiredMb` / `runtime` / `sourceUrl` (HTTPS-only — http: rejected) / `sourceHash` (mandatory `sha256:<64-hex>`) / `license` / `capabilities` / `contextWindow` / `description` / `registeredAt` / `registeredBy` / `status` (`registered` | `revoked`). **Validation guards**: `diskBytes ≤ 8 GB` Tier-4 envelope; `ramRequiredMb ≤ 16 GB` (saves us from typos like `32768`); HTTPS-only sourceUrl (compromised plain-HTTP mirror can't ship backdoored SLM even before integrity verify); `sha256:<64-hex>` format mandatory; capabilities/runtime/quantization/license restricted to enumerated constants. **Storage**: both backends grow `slm_model_packs` table/directory; SqliteStore upserts + emits ledger event; BosStore file backend mirrors with `slm-model-packs/` directory + ledger append for parity; `saveSlmModelPack` emits `slm_model_pack.registered` (initial save) OR `slm_model_pack.revoked` (revoke save) ledger events carrying `modelPackId` / `family` / `variant` / `runtime` / `quantization` / `diskBytes` / `operator` / `at`. **DPDP §12(3) cascade NOT updated** — registry is admin-curated not per-identity; per-identity install records (`installed_on_device_slms`) come in Phase 9.0b and WILL go in the cascade. **API routes**: public `GET /api/slm-model-packs` (with `?activeOnly=true` to exclude revoked; `?compatible=true&deviceRamMb=…&freeDiskBytes=…&supportedRuntimes=csv` to filter; response carries `totalRegistered`/`totalActive` + the four enum constants so shell doesn't need a separate capabilities endpoint); `GET /api/slm-model-packs/:modelPackId` single-pack lookup or 404; admin (Phase 5.7 `BHARAT_OS_ADMIN_TOKEN` bearer) `POST /api/admin/slm-model-packs` (201 ok / 400 `invalid_slm_model_pack` / 409 `duplicate_pack` if non-revoked pack already exists with that id — revoke-then-re-register if operator actually wants to replace / 503 `admin_disabled` when token unset); `DELETE /api/admin/slm-model-packs/:modelPackId` (body `{reason?: string}`; 200 ok / 404 `unknown_pack`). Both admin routes log `admin_slm_pack_registered` / `admin_slm_pack_revoked` at INFO and rely on store's ledger-event emit for the audit trail. Route catalog at `GET /api` includes all four new endpoints. **§15 bindings**: no anonymous packs (admin curation + signed ledger events with operator attribution); integrity-checked downloads forward (sourceHash mandatory; Phase 9.0b will SHA-256-verify); HTTPS-only sourceUrl; soft-delete preserves audit trail; Tier-4 envelope cap prevents accidentally offering "install this 80 GB model"; revoked packs filtered from compat list (shell never offers revoked packs to new installs); admin write audited end-to-end (HTTP log line + ledger event). **Tests**: `tests/node/slm-model-pack.test.mjs` — 30 tests covering constants, `createSlmModelPack` happy path + every validation guard (12 tests), `revokeSlmModelPack` (2), `filterCompatibleSlmModelPacks` (4), BosStore + SqliteStore persistence + ledger evidence + reload (3), HTTP wiring including admin-auth gating + invalid metadata 400 + duplicate 409 + revoke DELETE + 404 + compat filter + single lookup (9). Full Node suite **777/777** (was 747; +30 new SLM tests; run in batches of 16 files to dodge Windows process-spawn OOM hitting parallel `--test` runners). **Phase 9.0 arc has started**: shell-side (9.0b) and runtime (9.0c) work now have a stable, tested API to build against. Investor demo today can call `GET /api/slm-model-packs` and show a curated catalogue. **No third-party runtime dependency yet** — llama.cpp-wasm / MLC-LLM NOT introduced; "zero npm dep" posture preserved through Phase 9.0a; the hard call comes in Phase 9.0c. **§15-compliant from day 1**: HTTPS-only source URL, mandatory SHA-256 integrity hash, admin-curated registry, soft-delete audit trail, Tier-4 envelope caps — all guards in place even before any actual downloads happen. **Remaining Phase 9.0 sub-phases**: 9.0b shell download flow on Profile tab + `installed_on_device_slms` per-identity table with DPDP cascade (~1-2 wks, no runtime yet just storage); 9.0c runtime adapter layer wrapping llama.cpp-wasm / MLC-LLM / ONNX Runtime Web (~3-4 wks, needs its own ADR for the third-party-dep + distroless-deploy trade-off); 9.0d integration with Phase 3.x federated rounds + Phase 6.0b mesh-inference workload events finally recording real ticks (~1 wk).
 
 ---
 
