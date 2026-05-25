@@ -2075,6 +2075,26 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 ### Phase 1 tie-offs — status
 
+🟡 **Proposed (design only — not yet implemented):**
+
+- **Phase 6.0 (ADR 0096)** — Single-player worker tools: cross-platform
+  earnings tracker, mesh-contribution dashboard, year-end tax helper.
+  Designed to give workers a reason to install Bharat OS before the
+  two-sided network exists. **Recommended to ship first** in the
+  growth arc.
+- **Phase 5.9 (ADR 0095)** — Portable work-history attestation via
+  worker-initiated QR handshake. Three-tier signing (anonymous tap /
+  OTP-confirmed / Bharat OS signed), additive-only attestations, no
+  aggregator integration required. Should layer on top of the
+  user base 6.0 builds.
+
+Implementation order intentionally inverts the numbering: ship Phase
+6.0 first, then 5.9. Numbering reflects logical phase grouping
+(5.x is the technical post-launch arc, 6.x is the growth arc), not
+shipping order.
+
+---
+
 Closed in Phase 1.40–1.43 (ADRs 0046, 0047, 0048, 0049):
 1. ✅ **NCS surfacing** — `store.computeContribution`, `GET /api/identities/:id/contribution`, `bos contribution show`, Trust Passport `mesh` block.
 2. ✅ **Worker authorization receipts as signed artifact** — new `worker-authorization.mjs` module, L4 mediation policy verifies signature + workerId + expiry, `publicRecords` threaded through evaluation chain.
