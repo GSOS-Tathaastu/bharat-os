@@ -609,6 +609,50 @@
           </details>
         </section>
 
+        <!-- Phase 9.0b — Tier-4 SLM install card. -->
+        <section class="capture-card slm-install-card" id="slmInstallSection">
+          <div class="capture-header">
+            <span>🧠 Install a Bharat OS language model</span>
+            <span id="slmInstallStatus" class="capture-meta">Off</span>
+          </div>
+          <p class="capture-note">
+            Bharat OS can run a Small Language Model (1–4 GB) on your
+            phone for offline intent matching, voice-rationale labeling,
+            and participating in paid federated training rounds. The
+            runtime is not yet wired (Phase 9.0c); for now this card
+            shows the catalogue and tracks your installs.
+          </p>
+          <div class="slm-install-device" id="slmInstallDevice"></div>
+          <div class="slm-install-installed" id="slmInstalledList" hidden></div>
+          <div class="slm-install-catalogue" id="slmInstallCatalogue"></div>
+          <div class="passkey-actions">
+            <button id="slmInstallRefresh" class="link-button" type="button">Refresh catalogue</button>
+          </div>
+          <div id="slmInstallResult" class="capture-result" hidden></div>
+          <details class="push-opt-in-details">
+            <summary>How on-device SLMs work</summary>
+            <p>
+              When you tap <strong>Install</strong>, your browser
+              streams the model from a Bharat OS-curated mirror
+              (HTTPS-only, SHA-256 verified). The bytes are stored in
+              your browser's Origin Private File System — they never
+              live on the Bharat OS server. The server only records
+              <em>that</em> you installed pack X, not the bytes
+              themselves. If you erase your identity (Profile →
+              Switch / add → Erase), the install record AND the
+              on-device blob are both removed.
+            </p>
+            <p>
+              The runtime adapter (llama.cpp-wasm / MLC-LLM) that
+              actually <em>runs</em> the model lands in Phase 9.0c.
+              Until then, installing a pack just downloads + verifies
+              it. The catalogue + size estimates + license terms are
+              live now so an investor demo can walk the full opt-in
+              flow.
+            </p>
+          </details>
+        </section>
+
         <section class="capture-card" id="healthCaptureSection">
           <div class="capture-header">
             <span>📋 Save a health document</span>

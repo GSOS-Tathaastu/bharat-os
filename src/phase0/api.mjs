@@ -223,6 +223,10 @@ import {
   SLM_LICENSES,
   SLM_CAPABILITIES
 } from '../phase1/slm-model-pack.mjs';
+import {
+  createInstalledSlmRecord,
+  INSTALLED_SLM_STATUSES
+} from '../phase1/installed-slm.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1301,6 +1305,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/slm-model-packs/:modelPackId',
             'POST /api/admin/slm-model-packs',
             'DELETE /api/admin/slm-model-packs/:modelPackId',
+            'GET /api/identities/:identityId/installed-slms',
+            'POST /api/identities/:identityId/installed-slms',
+            'DELETE /api/identities/:identityId/installed-slms/:installId',
             'POST /api/identities/:collectiveId/collective-memberships',
             'GET /api/identities/:memberId/collective-memberships',
             'POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke',
@@ -2336,6 +2343,129 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         }
         jsonResponse(response, 200, { modelPack: pack });
         return;
+      }
+
+      // Phase 9.0b — per-identity SLM install records. Pointer-not-
+      // payload (the model bytes themselves live in client-side OPFS
+      // / IndexedDB; the server tracks status + which pack + how
+      // many bytes downloaded). DPDP §12(3) cascade entry already
+      // wired in eraseUserData.
+      //
+      //   GET    /api/identities/:id/installed-slms
+      //   POST   /api/identities/:id/installed-slms
+      //   DELETE /api/identities/:id/installed-slms/:installId
+      //
+      // POST is worker-initiated: after the client downloads + SHA-
+      // 256-verifies the pack, it posts a record so the server can
+      // surface "installed" status across paired devices via the
+      // identity's Trust Passport.
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'identities'
+        && parts.length >= 4
+        && parts[3] === 'installed-slms'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+
+        if (parts.length === 4 && request.method === 'GET') {
+          const all = await store.listInstalledSlms();
+          const installs = all.filter((record) => record.identityId === identityId);
+          // Decorate with referenced pack metadata so the shell
+          // doesn't need a second round-trip per row. Stale-tolerant
+          // — if the registry has revoked a pack the worker
+          // installed earlier, we still surface the install but mark
+          // packStatus: 'revoked' honestly.
+          const decorated = await Promise.all(
+            installs.map(async (record) => {
+              const pack = await store.readSlmModelPack(record.modelPackId).catch(() => null);
+              return {
+                ...record,
+                pack: pack
+                  ? {
+                      family: pack.family,
+                      variant: pack.variant,
+                      quantization: pack.quantization,
+                      parameterCount: pack.parameterCount,
+                      diskBytes: pack.diskBytes,
+                      license: pack.license,
+                      status: pack.status
+                    }
+                  : null
+              };
+            })
+          );
+          jsonResponse(response, 200, { installs: decorated });
+          return;
+        }
+
+        if (parts.length === 4 && request.method === 'POST') {
+          const body = await readRequestJson(request);
+          // The model pack must exist + not be revoked (revoked
+          // packs can be installed-from-earlier but we refuse NEW
+          // installs of them — same posture as `filterCompatibleSlm
+          // ModelPacks`).
+          const pack = await store.readSlmModelPack(body.modelPackId).catch(() => null);
+          if (!pack) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_pack', message: 'SLM model pack not found in the registry.' }
+            });
+            return;
+          }
+          if (pack.status === 'revoked' && body.status === 'installed') {
+            jsonResponse(response, 409, {
+              error: {
+                code: 'pack_revoked',
+                message: `SLM model pack ${pack.modelPackId} has been revoked by the operator. Refusing to record a new install.`
+              }
+            });
+            return;
+          }
+          // Bind expectedHash to the registry's sourceHash so the
+          // client can't claim a different hash than the registry
+          // advertises. (The client passes observedHash from its own
+          // SHA-256 compute; the module's invariant check fails the
+          // record if expected !== observed when status=installed.)
+          let record;
+          try {
+            record = createInstalledSlmRecord({
+              identityId,
+              modelPackId: body.modelPackId,
+              runtimeBackend: body.runtimeBackend,
+              downloadedBytes: body.downloadedBytes,
+              status: body.status,
+              failureReason: body.failureReason,
+              storageLocation: body.storageLocation,
+              expectedHash: pack.sourceHash,
+              observedHash: body.observedHash
+            });
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_install_record', message: error.message }
+            });
+            return;
+          }
+          await store.saveInstalledSlm(record);
+          jsonResponse(response, 201, { ok: true, install: record });
+          return;
+        }
+
+        if (parts.length === 5 && request.method === 'DELETE') {
+          const installId = decodeURIComponent(parts[4]);
+          const existing = await store.readInstalledSlm(installId).catch(() => null);
+          if (!existing || existing.identityId !== identityId) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_install', message: 'SLM install record not found.' }
+            });
+            return;
+          }
+          await store.deleteInstalledSlm(installId);
+          jsonResponse(response, 200, { ok: true, installId, removed: true });
+          return;
+        }
+
+        return methodNotAllowed(response, parts.length === 4 ? ['GET', 'POST'] : ['DELETE']);
       }
 
       if (parts[0] === 'api' && parts[1] === 'integrity' && parts[2] === 'verify') {

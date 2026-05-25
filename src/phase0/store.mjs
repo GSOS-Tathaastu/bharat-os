@@ -58,6 +58,7 @@ export class BosStore {
     this.ttsModelPacksPath = path.join(rootPath, 'tts-model-packs');
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
     this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
+    this.installedSlmsPath = path.join(rootPath, 'installed-slms');
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
@@ -90,6 +91,7 @@ export class BosStore {
     await fs.mkdir(this.ttsModelPacksPath, { recursive: true });
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
+    await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.mkdir(this.attestationsPath, { recursive: true });
@@ -388,6 +390,17 @@ export class BosStore {
       () => this.listPushSubscriptions(),
       this.pushSubscriptionFile,
       'subscriptionId'
+    );
+    // Phase 9.0b — per-identity SLM install records. The model
+    // bytes themselves live in client-side OPFS / IndexedDB and are
+    // wiped by Phase 4.0's identity-scoped client storage clear;
+    // here we just remove the server-side install record so it can't
+    // be used as a reattachment vector.
+    await sweep(
+      'installedSlms',
+      () => this.listInstalledSlms(),
+      this.installedSlmFile,
+      'installId'
     );
     await sweep(
       'workerNotifications',
@@ -1088,6 +1101,54 @@ export class BosStore {
 
   async listSlmModelPacks() {
     return listJson(this.slmModelPacksPath);
+  }
+
+  // Phase 9.0b — per-identity SLM install records. Pointer-not-
+  // payload: server tracks status + metadata only; the model bytes
+  // live in client-side OPFS / IndexedDB. DPDP §12(3) cascade
+  // entry is below in deleteIdentityCascade — installed_slms is
+  // per-identity and MUST be erased on identity wipe.
+  installedSlmFile(installId) {
+    return path.join(this.installedSlmsPath, `${safeName(installId)}.json`);
+  }
+
+  async saveInstalledSlm(record) {
+    await this.init();
+    await writeJson(this.installedSlmFile(record.installId), record);
+    await this.appendLedger({
+      type: record.status === 'failed'
+        ? 'installed_slm.failed'
+        : 'installed_slm.recorded',
+      installId: record.installId,
+      identityId: record.identityId,
+      modelPackId: record.modelPackId,
+      runtimeBackend: record.runtimeBackend,
+      downloadedBytes: record.downloadedBytes,
+      at: new Date().toISOString()
+    });
+    return record;
+  }
+
+  async readInstalledSlm(installId) {
+    return readJson(this.installedSlmFile(installId));
+  }
+
+  async listInstalledSlms() {
+    return listJson(this.installedSlmsPath);
+  }
+
+  async deleteInstalledSlm(installId) {
+    try {
+      await fs.unlink(this.installedSlmFile(installId));
+      await this.appendLedger({
+        type: 'installed_slm.removed',
+        installId,
+        at: new Date().toISOString()
+      });
+      return true;
+    } catch (_error) {
+      return false;
+    }
   }
 
   async computeContribution(identityId) {

@@ -238,6 +238,9 @@ function setActiveProfile(identity) {
   loadRecent();
   loadProfileCredentials().catch((error) => console.warn('loadProfileCredentials', error));
   loadWorkerAlertSubscription().catch((error) => console.warn('loadWorkerAlertSubscription', error));
+  if (typeof refreshSlmInstallCard === 'function') {
+    refreshSlmInstallCard().catch((error) => console.warn('refreshSlmInstallCard', error));
+  }
   if (typeof stopMeshNode === 'function') stopMeshNode();
   if (typeof loadMeshSummary === 'function') {
     loadMeshSummary().catch((error) => console.warn('loadMeshSummary', error));
@@ -1299,6 +1302,404 @@ async function testWorkerAlert() {
   }
 }
 
+// Phase 9.0b — Tier-4 SLM install card on the Profile tab. Lists
+// the catalogue from /api/slm-model-packs?compatible=true, runs a
+// real fetch+SHA-256-verify+OPFS-persist for any pack the user
+// taps install on, then POSTs the install record so the server-side
+// install ledger reflects what's on the device. NO runtime yet —
+// 9.0c wires llama.cpp-wasm / MLC-LLM through src/phase1/slm-runtime.
+// The shell honestly says so in the card's copy.
+
+function formatGb(bytes) {
+  const gb = Number(bytes ?? 0) / 1_000_000_000;
+  return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
+}
+
+function formatBillions(parameterCount) {
+  const b = Number(parameterCount ?? 0) / 1_000_000_000;
+  return `${b.toFixed(b >= 10 ? 0 : 1)}B`;
+}
+
+async function getSlmDeviceProfile() {
+  const profile = {
+    deviceRamMb: 0,
+    freeDiskBytes: 0,
+    supportedRuntimes: []
+  };
+  if (typeof navigator !== 'undefined') {
+    if (Number.isFinite(navigator.deviceMemory)) {
+      profile.deviceRamMb = Math.round(navigator.deviceMemory * 1024);
+    }
+    if (navigator.storage?.estimate) {
+      try {
+        const { quota, usage } = await navigator.storage.estimate();
+        if (Number.isFinite(quota) && Number.isFinite(usage)) {
+          profile.freeDiskBytes = Math.max(0, quota - usage);
+        }
+      } catch (_error) {
+        // ignore — leave freeDiskBytes at 0 so compat filter is permissive
+      }
+    }
+    // OPFS is required to persist the model bytes. WebGPU enables
+    // MLC-LLM; WASM threads enable llama.cpp-wasm. We probe both
+    // cheaply; the catalogue filter intersects with whatever the
+    // operator's registry advertises.
+    const hasOpfs = Boolean(navigator.storage?.getDirectory);
+    const hasWebGpu = typeof navigator.gpu !== 'undefined';
+    const hasWasm = typeof WebAssembly !== 'undefined';
+    if (hasOpfs && hasWasm) profile.supportedRuntimes.push('llama_cpp_wasm');
+    if (hasOpfs && hasWebGpu) profile.supportedRuntimes.push('mlc_llm_webgpu');
+    if (hasOpfs && hasWasm) profile.supportedRuntimes.push('onnx_runtime_web');
+  }
+  return profile;
+}
+
+function renderSlmDeviceProfile(profile) {
+  const block = $('slmInstallDevice');
+  if (!block) return;
+  const ramLabel = profile.deviceRamMb > 0
+    ? `${(profile.deviceRamMb / 1024).toFixed(1)} GB RAM (estimated)`
+    : 'RAM not reported by browser';
+  const diskLabel = profile.freeDiskBytes > 0
+    ? `${formatGb(profile.freeDiskBytes)} free in browser storage`
+    : 'Free disk not reported by browser';
+  const runtimesLabel = profile.supportedRuntimes.length
+    ? profile.supportedRuntimes.map((r) => r.replace(/_/g, ' ')).join(' · ')
+    : 'No runtime supported by this browser';
+  block.innerHTML = `
+    <div class="slm-install-device-grid">
+      <div><strong>Device</strong></div>
+      <div>${escapeHtml(ramLabel)}</div>
+      <div>${escapeHtml(diskLabel)}</div>
+      <div>${escapeHtml(runtimesLabel)}</div>
+    </div>
+  `;
+}
+
+function renderInstalledSlms(installs, deviceProfile) {
+  const block = $('slmInstalledList');
+  if (!block) return;
+  if (installs.length === 0) {
+    block.hidden = true;
+    block.innerHTML = '';
+    return;
+  }
+  block.hidden = false;
+  const rows = installs.map((record) => {
+    const pack = record.pack ?? {};
+    const family = pack.family ?? record.modelPackId;
+    const variant = pack.variant ? ` · ${pack.variant}` : '';
+    const status = record.status;
+    const statusClass = status === 'installed'
+      ? 'installed'
+      : status === 'failed'
+        ? 'failed'
+        : 'removed';
+    const meta = [
+      pack.parameterCount ? `${formatBillions(pack.parameterCount)} params` : null,
+      pack.quantization ?? null,
+      record.runtimeBackend ?? null,
+      `${formatGb(record.downloadedBytes)} downloaded`,
+      pack.status === 'revoked' ? 'pack revoked since install' : null,
+      record.failureReason ? `Reason: ${record.failureReason}` : null
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="slm-installed-row" data-install-id="${escapeHtml(record.installId)}">
+        <div class="slm-installed-header">
+          <span class="slm-installed-name">${escapeHtml(family)}${escapeHtml(variant)}</span>
+          <span class="slm-installed-status slm-install-status-${escapeHtml(statusClass)}">${escapeHtml(status)}</span>
+        </div>
+        <div class="slm-installed-meta">${escapeHtml(meta)}</div>
+        <div class="slm-installed-actions">
+          <button class="link-button slm-installed-remove" type="button" data-install-id="${escapeHtml(record.installId)}">Remove</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  block.innerHTML = `<h4 class="slm-installed-heading">Installed</h4>${rows}`;
+  for (const button of block.querySelectorAll('.slm-installed-remove')) {
+    button.addEventListener('click', () => removeInstalledSlm(button.dataset.installId));
+  }
+}
+
+function renderSlmCatalogue(packs, installs, deviceProfile) {
+  const block = $('slmInstallCatalogue');
+  if (!block) return;
+  if (packs.length === 0) {
+    block.innerHTML = `
+      <div class="slm-install-empty">
+        No SLM packs match this device's profile. Admins curate the
+        registry; check back after a new pack is published.
+      </div>
+    `;
+    return;
+  }
+  const installedIds = new Set(
+    installs.filter((i) => i.status === 'installed').map((i) => i.modelPackId)
+  );
+  const tiles = packs.map((pack) => {
+    const alreadyInstalled = installedIds.has(pack.modelPackId);
+    const heading = `${pack.family}${pack.variant ? ` · ${pack.variant}` : ''}`;
+    const meta = [
+      `${formatBillions(pack.parameterCount)} params`,
+      pack.quantization,
+      pack.license,
+      `${formatGb(pack.diskBytes)} download`
+    ].join(' · ');
+    const description = pack.description
+      ? `<p class="slm-pack-description">${escapeHtml(pack.description)}</p>`
+      : '';
+    const runtimeLabel = pack.runtime.replace(/_/g, ' ');
+    return `
+      <div class="slm-pack-tile" data-model-pack-id="${escapeHtml(pack.modelPackId)}">
+        <div class="slm-pack-header">
+          <span class="slm-pack-name">${escapeHtml(heading)}</span>
+          <span class="slm-pack-runtime">${escapeHtml(runtimeLabel)}</span>
+        </div>
+        <div class="slm-pack-meta">${escapeHtml(meta)}</div>
+        ${description}
+        <div class="slm-pack-actions">
+          <button class="secondary-button slm-pack-install" type="button"
+            data-model-pack-id="${escapeHtml(pack.modelPackId)}"
+            ${alreadyInstalled ? 'disabled' : ''}>
+            ${alreadyInstalled ? 'Already installed' : `Install (${formatGb(pack.diskBytes)})`}
+          </button>
+        </div>
+        <progress class="slm-pack-progress" data-model-pack-id="${escapeHtml(pack.modelPackId)}" value="0" max="100" hidden></progress>
+      </div>
+    `;
+  }).join('');
+  block.innerHTML = tiles;
+  for (const button of block.querySelectorAll('.slm-pack-install')) {
+    button.addEventListener('click', () => installSlmPack(button.dataset.modelPackId));
+  }
+}
+
+function renderSlmInstallResult(title, rows) {
+  const box = $('slmInstallResult');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <dl class="result-detail-grid">
+      ${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(String(value))}</dd>`).join('')}
+    </dl>
+  `;
+}
+
+function updateSlmStatusChip(installs) {
+  const chip = $('slmInstallStatus');
+  if (!chip) return;
+  const active = installs.filter((i) => i.status === 'installed');
+  if (active.length === 0) {
+    chip.textContent = 'Off';
+  } else if (active.length === 1) {
+    chip.textContent = `1 installed`;
+  } else {
+    chip.textContent = `${active.length} installed`;
+  }
+}
+
+state.slmDeviceProfile = null;
+state.slmCataloguePacks = [];
+state.slmInstalls = [];
+
+async function refreshSlmInstallCard() {
+  if (!state.activeIdentity) return;
+  const profile = await getSlmDeviceProfile();
+  state.slmDeviceProfile = profile;
+  renderSlmDeviceProfile(profile);
+
+  const params = new URLSearchParams({ compatible: 'true', activeOnly: 'true' });
+  if (profile.deviceRamMb > 0) params.set('deviceRamMb', String(profile.deviceRamMb));
+  if (profile.freeDiskBytes > 0) params.set('freeDiskBytes', String(profile.freeDiskBytes));
+  if (profile.supportedRuntimes.length > 0) {
+    params.set('supportedRuntimes', profile.supportedRuntimes.join(','));
+  }
+  const [catResp, installsResp] = await Promise.all([
+    fetchJson(`/api/slm-model-packs?${params.toString()}`),
+    fetchJson(`/api/identities/${encodeURIComponent(state.activeIdentity.id)}/installed-slms`)
+  ]);
+  state.slmCataloguePacks = catResp.modelPacks ?? [];
+  state.slmInstalls = installsResp.installs ?? [];
+
+  updateSlmStatusChip(state.slmInstalls);
+  renderInstalledSlms(state.slmInstalls, profile);
+  renderSlmCatalogue(state.slmCataloguePacks, state.slmInstalls, profile);
+}
+
+async function installSlmPack(modelPackId) {
+  if (!sanityCheckActor()) return;
+  const pack = state.slmCataloguePacks.find((p) => p.modelPackId === modelPackId);
+  if (!pack) {
+    showToast('Pack not found in catalogue.');
+    return;
+  }
+  const tile = document.querySelector(`.slm-pack-tile[data-model-pack-id="${modelPackId}"]`);
+  const button = tile?.querySelector('.slm-pack-install');
+  const progress = tile?.querySelector('.slm-pack-progress');
+  if (button) button.disabled = true;
+  const confirmed = window.confirm(
+    `Install ${pack.family}${pack.variant ? ' · ' + pack.variant : ''}? `
+    + `Downloads ${formatGb(pack.diskBytes)} from the operator's mirror, `
+    + `verifies the SHA-256 against the registry, and stores the model in `
+    + `your browser's private storage. You can remove it anytime.`
+  );
+  if (!confirmed) {
+    if (button) button.disabled = false;
+    return;
+  }
+
+  if (progress) {
+    progress.hidden = false;
+    progress.value = 0;
+  }
+
+  let downloadedBytes = 0;
+  let observedHash = null;
+  let status = 'installed';
+  let failureReason = null;
+  let storageLocation = 'opfs';
+
+  try {
+    if (!navigator.storage?.getDirectory) {
+      throw new Error('Browser lacks OPFS support — cannot persist the model offline.');
+    }
+    if (!globalThis.crypto?.subtle) {
+      throw new Error('Browser lacks SubtleCrypto — cannot verify the SHA-256.');
+    }
+
+    const response = await fetch(pack.sourceUrl);
+    if (!response.ok) {
+      throw new Error(`Mirror returned ${response.status} ${response.statusText}.`);
+    }
+    const total = Number(response.headers.get('content-length') ?? pack.diskBytes);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Browser cannot stream the download (no response.body.getReader).');
+
+    const root = await navigator.storage.getDirectory();
+    const slmDir = await root.getDirectoryHandle('bharat-os-slm', { create: true });
+    const fileHandle = await slmDir.getFileHandle(modelPackId.replace(/[^a-zA-Z0-9._-]/g, '_'), { create: true });
+    const writable = await fileHandle.createWritable();
+    const chunks = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      downloadedBytes += value.byteLength;
+      await writable.write(value);
+      if (progress && total > 0) {
+        progress.value = Math.min(100, Math.round((downloadedBytes / total) * 100));
+      }
+    }
+    await writable.close();
+
+    // SHA-256 verify against pack.sourceHash.
+    const concatenated = new Uint8Array(downloadedBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      concatenated.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const hashBuf = await globalThis.crypto.subtle.digest('SHA-256', concatenated);
+    observedHash = 'sha256:' + Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    if (observedHash !== pack.sourceHash) {
+      status = 'failed';
+      failureReason = `SHA-256 mismatch — expected ${pack.sourceHash}, got ${observedHash}.`;
+      // Discard the corrupt blob.
+      try {
+        await slmDir.removeEntry(fileHandle.name).catch(() => {});
+      } catch (_error) { /* best-effort */ }
+    }
+  } catch (error) {
+    status = 'failed';
+    failureReason = error.message;
+  }
+
+  const runtimeBackend = state.slmDeviceProfile?.supportedRuntimes?.[0] ?? pack.runtime;
+  try {
+    const saved = await fetchJson(
+      `/api/identities/${encodeURIComponent(state.activeIdentity.id)}/installed-slms`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          modelPackId,
+          runtimeBackend,
+          downloadedBytes,
+          status,
+          failureReason,
+          storageLocation,
+          observedHash
+        })
+      }
+    );
+    renderSlmInstallResult(
+      status === 'installed' ? 'Pack installed' : 'Install failed',
+      [
+        ['Pack', `${pack.family}${pack.variant ? ' · ' + pack.variant : ''}`],
+        ['Bytes downloaded', formatGb(downloadedBytes)],
+        ['Status', status],
+        ['Install id', shortId(saved.install.installId)],
+        failureReason ? ['Reason', failureReason] : ['Verified', 'sha256 match']
+      ]
+    );
+    showToast(status === 'installed' ? 'SLM pack installed.' : `Install failed: ${failureReason}`);
+    await refreshSlmInstallCard();
+  } catch (error) {
+    renderSlmInstallResult('Could not record install', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    if (button) button.disabled = false;
+    if (progress) progress.hidden = true;
+  }
+}
+
+async function removeInstalledSlm(installId) {
+  if (!sanityCheckActor()) return;
+  const record = state.slmInstalls.find((r) => r.installId === installId);
+  if (!record) return;
+  const confirmed = window.confirm(
+    `Remove ${record.pack?.family ?? record.modelPackId}? `
+    + `The on-device blob will be deleted from your browser storage and the `
+    + `server-side install record will be removed.`
+  );
+  if (!confirmed) return;
+
+  try {
+    // Remove the OPFS blob first; the server record is gone after
+    // DELETE returns.
+    if (navigator.storage?.getDirectory) {
+      try {
+        const root = await navigator.storage.getDirectory();
+        const slmDir = await root.getDirectoryHandle('bharat-os-slm', { create: false });
+        const safeName = record.modelPackId.replace(/[^a-zA-Z0-9._-]/g, '_');
+        await slmDir.removeEntry(safeName).catch(() => {});
+      } catch (_error) {
+        // best-effort — the install row may have been recorded on
+        // another device of this same identity.
+      }
+    }
+
+    const response = await fetch(
+      `/api/identities/${encodeURIComponent(state.activeIdentity.id)}/installed-slms/${encodeURIComponent(installId)}`,
+      { method: 'DELETE' }
+    );
+    if (!response.ok && response.status !== 404) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `Server returned ${response.status}.`);
+    }
+    showToast('Install removed.');
+    await refreshSlmInstallCard();
+  } catch (error) {
+    renderSlmInstallResult('Could not remove install', [['Reason', error.message]]);
+    showToast(error.message);
+  }
+}
+
 // Lazy-load Tesseract.js from a CDN the first time the user picks a health
 // document image. Worth ~7 MB (engine + Hindi + English + Tamil language
 // data) but only fetched once, then cached by the service worker for offline
@@ -1586,6 +1987,17 @@ $('profileAuthVerifyButton').addEventListener('click', verifyProfilePasskey);
 $('workerAlertEnableButton').addEventListener('click', enableWorkerAlerts);
 $('workerAlertTestButton').addEventListener('click', testWorkerAlert);
 $('workerAlertDisableButton').addEventListener('click', disableWorkerAlerts);
+
+// Phase 9.0b — SLM install card refresh.
+const slmRefreshBtn = document.getElementById('slmInstallRefresh');
+if (slmRefreshBtn) {
+  slmRefreshBtn.addEventListener('click', () => {
+    refreshSlmInstallCard().catch((error) => {
+      console.warn('refreshSlmInstallCard', error);
+      showToast(error.message);
+    });
+  });
+}
 $('healthDocFile').addEventListener('change', handleHealthDocFile);
 $('healthDocUploadButton').addEventListener('click', uploadHealthDocument);
 

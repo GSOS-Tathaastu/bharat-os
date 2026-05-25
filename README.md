@@ -144,6 +144,62 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 9.0b **Per-identity SLM install records + DPDP cascade +
+  shell install card; install pipeline end-to-end demoable; still
+  no runtime (9.0c)** — Phase 9.0a shipped the registry but the
+  server couldn't record per-worker installs, the shell had no UI
+  to install, and DPDP §12(3) had no cascade story. 9.0b closes
+  all three. New `src/phase1/installed-slm.mjs` (pure validation,
+  no I/O): `createInstalledSlmRecord` with two terminal statuses
+  (`installed` / `failed`); defends **expected vs observed hash
+  invariant** server-side. **Pointer-not-payload**: bytes live in
+  browser OPFS; server holds metadata only. Storage: both backends
+  grow `installed_slms` (sqlite has `identity_id` index for fast
+  per-identity GET); `installed_slm.recorded` / `.failed` / `.
+  removed` ledger events. **DPDP §12(3) cascade total** —
+  SqliteStore `eraseUserData` + BosStore `eraseUserData` both sweep
+  `installed_slms` by identityId; on-device OPFS blob wiped by
+  Phase 4.0 identity-erase + Phase 9.0b uninstall flow proactively.
+  New endpoints `GET /api/identities/:id/installed-slms` (decorated
+  with registry metadata so shell doesn't need a second round-
+  trip), `POST` (binds `expectedHash` to registry's `sourceHash`;
+  404 `unknown_pack` / 409 `pack_revoked` for status=installed /
+  400 `invalid_install_record`), `DELETE` (identity-scoped; 404 on
+  cross-identity; emits `installed_slm.removed`). Shell card
+  `#slmInstallSection` on Profile tab between Phase 8.4 push opt-in
+  and health-doc: header "🧠 Install a Bharat OS language model"
+  + status chip; device profile block (`navigator.deviceMemory` +
+  `navigator.storage.estimate()` + runtime probes for
+  `llama_cpp_wasm` / `mlc_llm_webgpu` / `onnx_runtime_web`);
+  installed list with status badge + bytes + remove button;
+  catalogue filtered via `?compatible=true&deviceRamMb=…&freeDisk
+  Bytes=…&supportedRuntimes=…` with per-pack tile + install button;
+  honest copy spelling out the Phase 9.0c runtime gap. Install
+  handler: confirm gate → OPFS+SubtleCrypto probe → stream `fetch`
+  → write to OPFS file handle → SHA-256 verify against pack
+  `sourceHash` (mismatch → discard blob + status: failed) → POST
+  → re-render. Remove handler: confirm → OPFS removeEntry (best-
+  effort across paired devices) → DELETE → re-render. SW cache v34
+  → v35. §15: bytes never on server; two-layer integrity (shell
+  verifies + server defends); revoked packs refused for new
+  installs; cross-identity access impossible; one-tap-plus-confirm
+  opt-out; audit trail covers register/install/uninstall; operator
+  can audit per-worker install state without seeing bytes. **21
+  new tests; full suite 798/798** (was 777; batches of 16). Live
+  smoke verified end-to-end with Phi-3-mini registry pack + matched-
+  hash POST + mismatched-hash 400 + DELETE. ADR 0113. **Install
+  pipeline end-to-end demoable**: worker opens Profile → device
+  profile → catalogue → tap Install → confirm → progress → SHA
+  verify → installed row. Until 9.0c lands the model can't *run*
+  but the opt-in flow + DPDP story is real. **OPFS dependency
+  introduced** (Chrome/Edge/FF 111+/Safari 17+); older browsers get
+  honest "Browser lacks OPFS support" error. **No third-party
+  runtime dependency yet** — shell uses only browser-native
+  `fetch` + `crypto.subtle` + `navigator.storage`; zero-dep posture
+  preserved. **Phase 9.0 progress ~30%**: 9.0a + 9.0b are storage +
+  UI scaffolding; 9.0c runtime adapter (~3-4 wks, third-party-dep
+  ADR required) is the bulk of remaining; 9.0d federated-round +
+  mesh-inference event integration (~1 wk).
 - Phase 9.0a **Tier-4 SLM model-pack registry — admin-curated
   metadata, public read, compatibility filter; no runtime yet**
   — First sub-phase of the Phase 9.0 arc (ADR 0107 Proposed).

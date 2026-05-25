@@ -393,6 +393,13 @@ const SCHEMAS = `
     slm_model_pack_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS installed_slms (
+    install_id TEXT PRIMARY KEY,
+    identity_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_installed_slms_identity ON installed_slms(identity_id);
 `;
 
 function parse(row) {
@@ -1782,6 +1789,54 @@ export class SqliteStore {
     return this._listAll('slm_model_packs');
   }
 
+  // Phase 9.0b — per-identity SLM install records. Pointer-not-
+  // payload (model bytes are client-side OPFS). DPDP §12(3)
+  // cascade entry below in deleteIdentityCascade.
+  async saveInstalledSlm(record) {
+    await this.init();
+    this._upsert(
+      'installed_slms',
+      ['install_id', 'identity_id', 'json'],
+      [record.installId, record.identityId, JSON.stringify(record)]
+    );
+    await this.appendLedger({
+      type: record.status === 'failed'
+        ? 'installed_slm.failed'
+        : 'installed_slm.recorded',
+      installId: record.installId,
+      identityId: record.identityId,
+      modelPackId: record.modelPackId,
+      runtimeBackend: record.runtimeBackend,
+      downloadedBytes: record.downloadedBytes
+    });
+    return record;
+  }
+
+  async readInstalledSlm(installId) {
+    await this.init();
+    return this._readOne('installed_slms', 'install_id', installId);
+  }
+
+  async listInstalledSlms() {
+    await this.init();
+    return this._listAll('installed_slms');
+  }
+
+  async deleteInstalledSlm(installId) {
+    await this.init();
+    const info = this.db
+      .prepare('DELETE FROM installed_slms WHERE install_id = ?')
+      .run(installId);
+    const deleted = Number(info.changes) > 0;
+    if (deleted) {
+      await this.appendLedger({
+        type: 'installed_slm.removed',
+        installId
+      });
+    }
+    return deleted;
+  }
+
   // ─── Ledger ────────────────────────────────────────────────────────────
 
   async appendLedger(event) {
@@ -1922,6 +1977,12 @@ export class SqliteStore {
         'member_id',
         'issuer_id'
       ]);
+      // Phase 9.0b — per-identity SLM install records. Model bytes
+      // are client-side OPFS / IndexedDB, wiped by Phase 4.0's
+      // identity-scoped client storage clear; here we erase the
+      // server-side install record so it can't be used as a
+      // reattachment vector.
+      sections.installedSlms = sweep('installed_slms', ['identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

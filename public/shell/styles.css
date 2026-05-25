@@ -2809,3 +2809,128 @@ body {
   margin: 8px 0;
   line-height: 1.5;
 }
+
+/* Phase 9.0b — SLM install card additions. */
+.slm-install-card {
+  background: var(--bg-elevated);
+}
+.slm-install-device {
+  margin: 8px 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 12px;
+}
+.slm-install-device-grid {
+  display: grid;
+  gap: 4px;
+}
+.slm-installed-heading {
+  margin: 14px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.slm-installed-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.slm-installed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.slm-installed-name {
+  font-weight: 650;
+}
+.slm-installed-meta {
+  color: var(--text-muted, #6b7280);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.slm-installed-actions {
+  text-align: right;
+}
+.slm-install-status-installed {
+  background: #d1fae5;
+  color: #065f46;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.slm-install-status-failed {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.slm-install-status-removed {
+  background: #f3f4f6;
+  color: #6b7280;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.slm-install-catalogue {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.slm-pack-tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.slm-pack-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.slm-pack-name {
+  font-weight: 650;
+  font-size: 14px;
+}
+.slm-pack-runtime {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.slm-pack-meta {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.slm-pack-description {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.slm-pack-actions {
+  margin-top: 8px;
+}
+.slm-pack-progress {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  height: 6px;
+}
+.slm-install-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted, #6b7280);
+}
