@@ -958,6 +958,18 @@ export class SqliteStore {
     return this._listAll('push_subscriptions');
   }
 
+  // Phase 7.0 — push services return 410 Gone when a subscription
+  // is permanently invalid (user revoked notifications, app
+  // uninstalled, browser cleared site data). The recovery-alert
+  // sender calls this to clean up automatically.
+  async deletePushSubscription(subscriptionId) {
+    await this.init();
+    const info = this.db
+      .prepare('DELETE FROM push_subscriptions WHERE subscription_id = ?')
+      .run(subscriptionId);
+    return Number(info.changes) > 0;
+  }
+
   // ─── Worker notifications ──────────────────────────────────────────────
 
   async saveWorkerNotification(notification) {

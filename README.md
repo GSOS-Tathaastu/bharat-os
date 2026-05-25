@@ -144,6 +144,40 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 7.0 **Web Push (VAPID) notifications — SIM-swap defense loop
+  fully closed** — Phase 5.2 gated destructive actions for 24h after
+  recovery, but the legitimate user only knew their account was
+  recovered when they next logged in. Phase 7.0 ships the push-side
+  detection signal. New `src/phase0/web-push.mjs` implements RFC 8030
+  + 8291 + 8292 **from scratch** on Node 20+'s built-in `crypto` —
+  **zero new npm dependencies** (consistent since Phase 5.1). VAPID
+  JWT (ES256, JWK-format keypair → Node `createPrivateKey({ format:
+  'jwk' })`, raw r||s 64-byte JOSE signature via `derToJose`). Payload
+  encryption: AES-128-GCM keys via HKDF-SHA-256 over ECDH-P256 shared
+  secret + 16-byte auth; RFC 8188 `aes128gcm` content-encoding. HTTP
+  send with `vapid t=<jwt>, k=<pubkey>` auth header. `maskEndpoint`
+  (`fcm.../xxxx23`) mandatory for audit/ledger/metric. Phase 2a.4
+  scaffold extended with `storeDeliveryKeys: true` opt-in (defaults
+  to no-store for backward compat). New `deletePushSubscription`
+  store method for 410-Gone auto-cleanup. New `GET /api/push-public-
+  key` endpoint (503 push_disabled when VAPID unset). `/api/push/
+  subscriptions` POST extended. **Wired into `/api/recovery/verify`
+  success path**: reads paired-device subscriptions, sends high-
+  urgency `account_recovery_alert` push to each, emits
+  `recovery_alert.pushed` ledger event with masked endpoint;
+  best-effort (failures don't block recovery). New
+  `scripts/generate-vapid-keys.mjs` prints ready-to-paste .env
+  snippet. New env vars: `BHARAT_OS_VAPID_PUBLIC_KEY` +
+  `_PRIVATE_KEY` + `_SUBJECT`. §15: subscription endpoints
+  device-identifying PII (opt-in storage + masked everywhere except
+  stored record + outbound fetch); payload E2E-encrypted (push
+  service can't read); VAPID claims have no user data; alert
+  payload no PII; 410 Gone auto-unsubscribes; DPDP cascade. 718/718
+  tests (+22 new — including the **full E2E recovery push** that
+  proves the wire-level flow end-to-end). ADR 0101. **SIM-swap
+  attacker who recovers gets ZERO destructive actions (Phase 5.2
+  cooldown) AND the legitimate user knows within seconds (Phase
+  7.0 push). Web Push in ~600 lines of code, zero deps.**
 - Phase 6.3 **state e-Shram + welfare-scheme entitlement substrate
   — ADR 0096 growth-arc plan now fully shipped** — e-Shram (Ministry
   of Labour & Employment) has registered ~300M unorganised workers,

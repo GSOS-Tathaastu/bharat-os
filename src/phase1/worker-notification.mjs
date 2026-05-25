@@ -26,10 +26,20 @@ export function createPushSubscriptionRecord({
   permission = 'granted',
   source = 'shell',
   userAgent,
-  subscribedAt = nowIso()
+  subscribedAt = nowIso(),
+  // Phase 7.0 — when set true, the raw endpoint + keys are
+  // persisted on the record so the server can actually SEND web
+  // pushes (RFC 8030/8291). The Phase 2a.4 scaffold (ADR 0053)
+  // explicitly defaulted this off because no real delivery
+  // existed yet. With Phase 7.0's VAPID implementation, callers
+  // that want real-push delivery pass `storeDeliveryKeys: true`.
+  // §15 impact documented in ADR 0101.
+  storeDeliveryKeys = false
 }) {
   if (!identityId) throw new Error('identityId is required.');
   const hasEndpoint = Boolean(endpoint);
+  const hasFullKeys = Boolean(keys?.p256dh && keys?.auth);
+  const willStore = storeDeliveryKeys && hasEndpoint && hasFullKeys;
   const core = {
     protocolVersion: WORKER_NOTIFICATION_PROTOCOL_VERSION,
     objectType: 'push-subscription',
@@ -39,12 +49,18 @@ export function createPushSubscriptionRecord({
     source,
     endpointHash: hasEndpoint ? sha256Hex(endpoint) : null,
     endpointHost: endpointHost(endpoint),
+    // Raw endpoint + keys only when explicitly opted in by the
+    // caller AND the subscription has the necessary fields.
+    endpoint: willStore ? endpoint : null,
+    keys: willStore
+      ? { p256dh: keys.p256dh, auth: keys.auth }
+      : null,
     keysPresent: {
       p256dh: Boolean(keys?.p256dh),
       auth: Boolean(keys?.auth)
     },
-    rawEndpointStored: false,
-    rawKeysStored: false,
+    rawEndpointStored: willStore,
+    rawKeysStored: willStore,
     userAgent: userAgent ? String(userAgent).slice(0, 160) : null,
     subscribedAt
   };

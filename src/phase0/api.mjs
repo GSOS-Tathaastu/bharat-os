@@ -90,6 +90,7 @@ import {
 import { generateRequestId, logger, safePath } from './logger.mjs';
 import { recordBackupFreshness, recordRequest, renderMetrics } from './metrics.mjs';
 import { listSnapshots } from './backup.mjs';
+import { maskEndpoint, readVapidConfig, sendWebPush } from './web-push.mjs';
 import { normalisePhone, sendSms } from './sms-provider.mjs';
 import {
   createPhoneOtp,
@@ -1166,6 +1167,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/vault-snapshot',
             'GET /api/identities/:identityId/export',
             'GET /api/identities/:identityId/erasure-preview',
+            'GET /api/push-public-key',
             'POST /api/identities/:identityId/earnings',
             'GET /api/identities/:identityId/earnings',
             'GET /api/identities/:identityId/earnings/summary',
@@ -1861,16 +1863,40 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         }
         if (request.method === 'POST') {
           const body = await readRequestJson(request);
+          // Phase 7.0 — when `storeDeliveryKeys: true`, the
+          // subscription record persists the raw endpoint + p256dh
+          // + auth so the server can SEND Web Push notifications
+          // (RFC 8030/8291). Required for the SIM-swap recovery
+          // alert + §9A worker-notification delivery. §15 trade-off
+          // documented in ADR 0101.
+          // Refuse if the operator wants delivery keys stored but
+          // VAPID isn't configured — saves us from a useless
+          // record + the user a confused subscription that never
+          // delivers.
+          if (body.storeDeliveryKeys === true && !readVapidConfig()) {
+            jsonResponse(response, 503, {
+              error: {
+                code: 'push_disabled',
+                message:
+                  'Web Push not configured. Set BHARAT_OS_VAPID_PUBLIC_KEY / PRIVATE_KEY / SUBJECT (see scripts/generate-vapid-keys.mjs).'
+              }
+            });
+            return;
+          }
           const subscription = createPushSubscriptionRecord({
             identityId: body.identityId,
             endpoint: body.endpoint,
             keys: body.keys ?? {},
             permission: body.permission ?? 'granted',
             source: body.source ?? 'shell',
-            userAgent: body.userAgent
+            userAgent: body.userAgent,
+            storeDeliveryKeys: body.storeDeliveryKeys === true
           });
           await store.savePushSubscription(subscription);
-          jsonResponse(response, 201, { ok: true, subscription });
+          // Strip raw endpoint + keys from the response — the
+          // client already has them; no need to echo back.
+          const { endpoint: _e, keys: _k, ...safe } = subscription;
+          jsonResponse(response, 201, { ok: true, subscription: safe });
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
@@ -2788,6 +2814,30 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       if (parts[0] === 'api' && parts[1] === 'dpdp' && parts[2] === 'grievance' && parts.length === 3) {
         if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
         jsonResponse(response, 200, { contact: DEFAULT_DPO_CONTACT });
+        return;
+      }
+
+      // Phase 7.0 — Web Push VAPID public key. Public; shell uses
+      // this to construct the browser Push API subscription. When
+      // VAPID isn't configured the endpoint returns 503 with
+      // `push_disabled` — same pattern as Phase 5.7 admin-auth.
+      if (parts[0] === 'api' && parts[1] === 'push-public-key' && parts.length === 2) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const vapid = readVapidConfig();
+        if (!vapid) {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'push_disabled',
+              message:
+                'Web Push not configured. Set BHARAT_OS_VAPID_PUBLIC_KEY / PRIVATE_KEY / SUBJECT (see scripts/generate-vapid-keys.mjs).'
+            }
+          });
+          return;
+        }
+        jsonResponse(response, 200, {
+          publicKey: vapid.publicKey,
+          subject: vapid.subject
+        });
         return;
       }
 
@@ -4718,6 +4768,68 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           cooldownUntil: cooledIdentity.recoveryCooldown?.until,
           at: new Date().toISOString()
         });
+
+        // Phase 7.0 — push a SIM-swap detection alert to every
+        // paired device that had a stored push subscription. The
+        // legitimate user sees "your account was just recovered"
+        // within seconds on devices the attacker doesn't have.
+        // Best-effort: failures don't block the response. The
+        // 24h cooldown (Phase 5.2) is the actual defensive
+        // protection; this push is the detection signal.
+        const vapidForRecovery = readVapidConfig();
+        if (vapidForRecovery && typeof store.listPushSubscriptions === 'function') {
+          const allSubs = await store.listPushSubscriptions().catch(() => []);
+          const ownSubs = allSubs.filter(
+            (s) =>
+              s.identityId === identity.id &&
+              s.rawEndpointStored === true &&
+              s.endpoint &&
+              s.keys?.p256dh &&
+              s.keys?.auth
+          );
+          for (const sub of ownSubs) {
+            try {
+              const result = await sendWebPush({
+                subscription: { endpoint: sub.endpoint, keys: sub.keys },
+                payload: {
+                  type: 'account_recovery_alert',
+                  title: 'Your Bharat OS account was just recovered',
+                  body:
+                    `If this was you, no action needed. If it was NOT, ` +
+                    `tap to contact support — your cooldown window ends at ` +
+                    `${cooledIdentity.recoveryCooldown?.until}.`,
+                  cooldownUntil: cooledIdentity.recoveryCooldown?.until
+                },
+                vapid: vapidForRecovery,
+                urgency: 'high'
+              });
+              await store.appendLedger({
+                type: result.ok
+                  ? 'recovery_alert.pushed'
+                  : 'recovery_alert.failed',
+                identityId: identity.id,
+                subscriptionId: sub.subscriptionId,
+                endpointMasked: maskEndpoint(sub.endpoint),
+                pushStatus: result.status,
+                reason: result.reason ?? null,
+                at: new Date().toISOString()
+              });
+              // 410 Gone → unsubscribe automatically.
+              if (result.shouldUnsubscribe && typeof store.deletePushSubscription === 'function') {
+                await store.deletePushSubscription(sub.subscriptionId).catch(() => {});
+              }
+            } catch (error) {
+              // Single push failure must not break the recovery response.
+              logger.warn('recovery_push_error', {
+                requestId,
+                identityId: identity.id,
+                endpointMasked: maskEndpoint(sub.endpoint),
+                reason: error?.message
+              });
+            }
+          }
+        }
+
         jsonResponse(response, 200, {
           ok: true,
           status: 'verified',
