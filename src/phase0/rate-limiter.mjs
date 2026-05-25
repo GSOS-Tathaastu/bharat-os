@@ -153,6 +153,10 @@ export function policyFor(method, pathname) {
   if (method === 'DELETE' && pathname.startsWith('/api/identities/')) return 'expensive';
   if (method === 'GET' && pathname.endsWith('/export')) return 'expensive';
   if (method === 'GET' && pathname.endsWith('/erasure-preview')) return 'expensive';
+  // Phone OTP — expensive to send (costs real SMS in prod). Verify
+  // stays in the cheap 'write' policy because legitimate users may
+  // retry.
+  if (method === 'POST' && pathname === '/api/phone-otp/send') return 'expensive';
   // Mutating routes — anything that POSTs / PUTs / DELETEs.
   if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
     return 'write';

@@ -144,6 +144,24 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.3 **phone OTP authentication scaffold — recovery path beyond
+  the 12-word phrase** — population-scale users will lose their phrase;
+  phone OTP is the fallback. New `src/phase0/sms-provider.mjs` (`log`
+  default for dev with masked-phone structured logging + plaintext OTP
+  on stdout via `BHARAT_OS_LOG_OTP_BODIES=1`; stubs for gupshup / msg91
+  / karix / twilio ready to swap when partner contract lands) +
+  `src/phase1/phone-otp.mjs` (cryptographically random 6-digit code,
+  salted SHA-256 hash for storage, `crypto.timingSafeEqual` verify;
+  5-min TTL, 5-attempt cap; purposes `phone_verify` /
+  `account_recovery` / `sensitive_action`). Plaintext code never
+  persisted — only the salted hash. New `phone_otps` storage in both
+  backends; included in SqliteStore atomic erasure cascade. Two API
+  routes: `POST /api/phone-otp/send` (`expensive` rate-limit policy)
+  + `POST /api/phone-otp/verify` (on success, attaches `phone_verified`
+  to identity attestations with masked form only). Shell adds
+  *"📱 Phone (recovery)"* card on Profile with `autocomplete=
+  "one-time-code"` for iOS/Android auto-fill. 347/347 tests (+14 new).
+  SW cache to v26. ADR 0082.
 - Phase 4.2 **SQLite store backend — ACID transactions for launch scale** —
   new `src/phase0/sqlite-store.mjs` is a drop-in replacement for the
   file-based `BosStore` with identical method signatures (existing tests

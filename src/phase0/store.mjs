@@ -60,6 +60,7 @@ export class BosStore {
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
+    this.phoneOtpsPath = path.join(rootPath, 'phone-otps');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -90,6 +91,7 @@ export class BosStore {
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.mkdir(this.attestationsPath, { recursive: true });
+    await fs.mkdir(this.phoneOtpsPath, { recursive: true });
     await fs.appendFile(this.ledgerPath, '');
   }
 
@@ -753,6 +755,37 @@ export class BosStore {
 
   async listAttestations() {
     return listJson(this.attestationsPath);
+  }
+
+  // Phase 4.3 — phone-OTP storage.
+
+  phoneOtpFile(otpId) {
+    return path.join(this.phoneOtpsPath, `${safeName(otpId)}.json`);
+  }
+
+  async savePhoneOtp(otp) {
+    await this.init();
+    await writeJson(this.phoneOtpFile(otp.otpId), otp);
+    // Ledger captures the lifecycle event but NEVER the plaintext
+    // code (the OTP object as stored has only the hash + salt).
+    await this.appendLedger({
+      type: 'phone_otp.saved',
+      otpId: otp.otpId,
+      identityId: otp.identityId,
+      phoneMasked: otp.phoneMasked,
+      purpose: otp.purpose,
+      status: otp.status,
+      at: new Date().toISOString()
+    });
+    return otp;
+  }
+
+  async readPhoneOtp(otpId) {
+    return readJson(this.phoneOtpFile(otpId));
+  }
+
+  async listPhoneOtps() {
+    return listJson(this.phoneOtpsPath);
   }
 
   async savePairingSession(session) {

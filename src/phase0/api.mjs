@@ -87,6 +87,12 @@ import {
 } from './rate-limiter.mjs';
 import { generateRequestId, logger, safePath } from './logger.mjs';
 import { recordRequest, renderMetrics } from './metrics.mjs';
+import { normalisePhone, sendSms } from './sms-provider.mjs';
+import {
+  createPhoneOtp,
+  PHONE_OTP_PURPOSES,
+  verifyPhoneOtp
+} from '../phase1/phone-otp.mjs';
 
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB — guards against OOM
 const TRUST_PROXY = process.env?.BHARAT_OS_TRUST_PROXY === '1';
@@ -794,6 +800,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/erasure-preview',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
+            'POST /api/phone-otp/send',
+            'POST /api/phone-otp/verify',
             'GET /api/attestations',
             'GET /api/attestations/:attestationId',
             'GET /api/attestations/:attestationId/verify',
@@ -2374,6 +2382,143 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       if (parts[0] === 'api' && parts[1] === 'dpdp' && parts[2] === 'grievance' && parts.length === 3) {
         if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
         jsonResponse(response, 200, { contact: DEFAULT_DPO_CONTACT });
+        return;
+      }
+
+      // Phase 4.3 — phone-OTP send.
+      //
+      // Body: { identityId, phone, purpose? }
+      // Returns: { ok, otpId, expiresAt, phoneMasked, providerMessageId }
+      //
+      // The plaintext OTP is generated, handed to the SMS provider,
+      // then discarded by this handler. Storage holds only the
+      // salted hash. Rate-limited under the 'expensive' policy
+      // (10/5min) by the route prefix detection in policyFor().
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'phone-otp' &&
+        parts[2] === 'send' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        const phone = normalisePhone(body.phone);
+        if (!phone) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_phone', message: 'Provide a 10-digit Indian number or E.164 (+91…).' }
+          });
+          return;
+        }
+        if (!body.identityId) {
+          jsonResponse(response, 400, {
+            error: { code: 'missing_identity', message: 'identityId is required.' }
+          });
+          return;
+        }
+        const identity = await store.readIdentity(body.identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const purpose = body.purpose ?? 'phone_verify';
+        if (!PHONE_OTP_PURPOSES.includes(purpose)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_purpose',
+              message: `purpose must be one of: ${PHONE_OTP_PURPOSES.join(', ')}`
+            }
+          });
+          return;
+        }
+        const otp = createPhoneOtp({
+          identityId: body.identityId,
+          phone,
+          purpose
+        });
+        // Strip the plaintext code BEFORE persisting. Storage gets
+        // only { codeHash, salt }.
+        const { code, ...persisted } = otp;
+        await store.savePhoneOtp(persisted);
+        // Send the SMS — using the configured provider (default
+        // 'log' in dev). Failures bubble up to the caller; we don't
+        // persist a "sent" state if the provider rejected.
+        const smsResult = await sendSms({
+          phone,
+          body: `Bharat OS code: ${code}. Valid for 5 minutes. Never share this code.`
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          otpId: persisted.otpId,
+          expiresAt: persisted.expiresAt,
+          phoneMasked: persisted.phoneMasked,
+          providerMessageId: smsResult.providerMessageId
+        });
+        return;
+      }
+
+      // Phase 4.3 — phone-OTP verify.
+      //
+      // Body: { otpId, code }
+      // Returns: { ok, status, otp: <persisted summary> }
+      // On success, the phone is attached to the identity's
+      // attestations block as a verified attestation.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'phone-otp' &&
+        parts[2] === 'verify' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        if (!body.otpId || !body.code) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'missing_fields',
+              message: 'otpId and code are both required.'
+            }
+          });
+          return;
+        }
+        const otp = await store.readPhoneOtp(body.otpId).catch(() => null);
+        if (!otp) return notFound(response);
+        const result = verifyPhoneOtp(otp, body.code);
+        // Persist the updated OTP regardless of outcome (attempts
+        // counter, expiry state, etc).
+        await store.savePhoneOtp(result.otp);
+
+        if (result.status === 'verified') {
+          // On success: attach the phone as a verified attestation
+          // on the identity. Future regulated workflows can use
+          // this as evidence the phone is the user's.
+          const identity = await store.readIdentity(otp.identityId).catch(() => null);
+          if (identity) {
+            const updated = {
+              ...identity,
+              attestations: {
+                ...(identity.attestations ?? {}),
+                phone_verified: {
+                  status: 'verified',
+                  issuer: 'phone_otp',
+                  verifiedAt: result.otp.verifiedAt,
+                  phoneMasked: result.otp.phoneMasked
+                  // Full phone NOT stored on the public identity
+                  // record — only the OTP store has it. Verifiers
+                  // see only the mask.
+                }
+              }
+            };
+            await store.saveIdentity(updated);
+          }
+        }
+
+        jsonResponse(response, result.status === 'verified' ? 200 : 400, {
+          ok: result.status === 'verified',
+          status: result.status,
+          otp: {
+            otpId: result.otp.otpId,
+            status: result.otp.status,
+            attempts: result.otp.attempts,
+            expiresAt: result.otp.expiresAt,
+            verifiedAt: result.otp.verifiedAt
+          }
+        });
         return;
       }
 

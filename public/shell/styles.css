@@ -802,6 +802,50 @@ body {
   color: var(--accent);
 }
 
+/* ─── Phone OTP card (Phase 4.3) ─────────────────────────────────────── */
+
+.phone-otp-card input[type="tel"],
+.phone-otp-card input[type="text"] {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 16px;
+  padding: 12px 14px;
+  font-family: inherit;
+  letter-spacing: 1px;
+}
+
+.phone-otp-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.phone-otp-card #phoneOtpCodeInput {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 6px;
+  text-align: center;
+  font-size: 22px;
+}
+
+.phone-otp-card .capture-meta[data-tone='good'] { color: var(--good); }
+.phone-otp-card .capture-meta[data-tone='bad']  { color: var(--bad); }
+
+.phone-otp-card .capture-result[data-tone='good'] {
+  border-left-color: var(--good);
+  color: var(--good);
+}
+
+.phone-otp-card .capture-result[data-tone='bad'] {
+  border-left-color: var(--bad);
+  color: var(--bad);
+}
+
+.phone-otp-card #phoneOtpVerifyHint {
+  margin-bottom: 8px;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;

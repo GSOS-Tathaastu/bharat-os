@@ -245,6 +245,17 @@ function setActiveProfile(identity) {
   if (typeof loadFederatedRounds === 'function') {
     loadFederatedRounds().catch((error) => console.warn('loadFederatedRounds', error));
   }
+  // Reflect phone-verified status on the Profile-tab OTP card.
+  const phoneStatus = document.getElementById('phoneOtpStatus');
+  if (phoneStatus) {
+    if (identity?.attestations?.phone_verified?.status === 'verified') {
+      phoneStatus.textContent = `Verified ${identity.attestations.phone_verified.phoneMasked ?? ''} ✓`;
+      phoneStatus.dataset.tone = 'good';
+    } else {
+      phoneStatus.textContent = 'Not verified';
+      phoneStatus.dataset.tone = '';
+    }
+  }
 }
 
 function inferProfileLanguage(identity) {
@@ -3174,11 +3185,165 @@ function setupDpdp() {
   $('dpdpGrievanceButton')?.addEventListener('click', showGrievanceContact);
 }
 
+// ─── Phone-OTP recovery (Phase 4.3) ───────────────────────────────────────
+//
+// The user enters a phone number, taps "Send code", Bharat OS asks
+// the SMS provider (default: log to stdout in dev) to deliver a
+// 6-digit code, the user types it back. On success the phone is
+// attached to the identity's attestations as `phone_verified`, with
+// only the masked form stored on the public record.
+
+const phoneOtpState = {
+  pendingOtpId: null,
+  pendingPhoneMasked: null
+};
+
+function setPhoneOtpStatus(text, { tone } = {}) {
+  const el = $('phoneOtpStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.tone = tone ?? '';
+}
+
+function showPhoneOtpResult(text, { tone } = {}) {
+  const box = $('phoneOtpResult');
+  if (!box) return;
+  box.hidden = false;
+  box.textContent = text;
+  box.dataset.tone = tone ?? '';
+}
+
+function showPhoneOtpStep(name) {
+  const enter = $('phoneOtpStep');
+  const verify = $('phoneOtpStepVerify');
+  if (!enter || !verify) return;
+  enter.hidden = name !== 'enter';
+  verify.hidden = name !== 'verify';
+}
+
+async function sendPhoneOtp() {
+  if (!state.activeIdentity) {
+    showToast('No active profile.');
+    return;
+  }
+  const phone = $('phoneOtpInput').value.trim();
+  if (!phone) {
+    showPhoneOtpResult('Enter a phone number first.', { tone: 'bad' });
+    return;
+  }
+  const button = $('phoneOtpSendButton');
+  button.disabled = true;
+  showPhoneOtpResult('Sending code…');
+  try {
+    const data = await fetchJson('/api/phone-otp/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identityId: state.activeIdentity.id,
+        phone,
+        purpose: 'phone_verify'
+      })
+    });
+    phoneOtpState.pendingOtpId = data.otpId;
+    phoneOtpState.pendingPhoneMasked = data.phoneMasked;
+    $('phoneOtpVerifyHint').textContent = `Code sent to ${data.phoneMasked}. Valid for 5 minutes.`;
+    showPhoneOtpStep('verify');
+    showPhoneOtpResult('Code sent. Check your phone (or the server log in dev mode).');
+    setTimeout(() => $('phoneOtpCodeInput')?.focus(), 50);
+  } catch (error) {
+    showPhoneOtpResult(`Send failed: ${error.message}`, { tone: 'bad' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function verifyPhoneOtpFromShell() {
+  if (!phoneOtpState.pendingOtpId) {
+    showPhoneOtpResult('No pending OTP. Send a code first.', { tone: 'bad' });
+    return;
+  }
+  const code = $('phoneOtpCodeInput').value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    showPhoneOtpResult('Enter the 6-digit code.', { tone: 'bad' });
+    return;
+  }
+  const button = $('phoneOtpVerifyButton');
+  button.disabled = true;
+  showPhoneOtpResult('Verifying…');
+  try {
+    const response = await fetch('/api/phone-otp/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        otpId: phoneOtpState.pendingOtpId,
+        code
+      })
+    });
+    const data = await response.json();
+    if (data.status === 'verified') {
+      setPhoneOtpStatus('Verified ✓', { tone: 'good' });
+      showPhoneOtpResult(
+        `Phone ${phoneOtpState.pendingPhoneMasked} verified. You'll never see the warning banner — this is your recovery fallback if you ever lose the 12-word phrase.`,
+        { tone: 'good' }
+      );
+      showPhoneOtpStep('enter');
+      $('phoneOtpInput').value = '';
+      phoneOtpState.pendingOtpId = null;
+      // Refresh trust passport so the new verified attestation
+      // appears immediately.
+      loadTrustPassport().catch(() => {});
+    } else if (data.status === 'mismatch') {
+      const attempts = data.otp?.attempts ?? 0;
+      const remaining = Math.max(0, 5 - attempts);
+      showPhoneOtpResult(
+        `Code didn't match. ${remaining} attempt${remaining === 1 ? '' : 's'} left.`,
+        { tone: 'bad' }
+      );
+    } else if (data.status === 'expired') {
+      showPhoneOtpResult('Code expired (5-minute window). Tap Cancel and send a new one.', {
+        tone: 'bad'
+      });
+    } else if (data.status === 'too_many_attempts') {
+      showPhoneOtpResult('Too many wrong attempts. Send a new code.', { tone: 'bad' });
+      phoneOtpState.pendingOtpId = null;
+      showPhoneOtpStep('enter');
+    } else {
+      showPhoneOtpResult(`Verify status: ${data.status}`, { tone: 'bad' });
+    }
+  } catch (error) {
+    showPhoneOtpResult(`Verify failed: ${error.message}`, { tone: 'bad' });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setupPhoneOtp() {
+  $('phoneOtpSendButton')?.addEventListener('click', sendPhoneOtp);
+  $('phoneOtpVerifyButton')?.addEventListener('click', verifyPhoneOtpFromShell);
+  $('phoneOtpCancelButton')?.addEventListener('click', () => {
+    phoneOtpState.pendingOtpId = null;
+    showPhoneOtpStep('enter');
+    showPhoneOtpResult('');
+    $('phoneOtpResult').hidden = true;
+  });
+  $('phoneOtpInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') sendPhoneOtp();
+  });
+  $('phoneOtpCodeInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') verifyPhoneOtpFromShell();
+  });
+  // Reflect existing attestation status from setActiveProfile.
+  if (state.activeIdentity?.attestations?.phone_verified) {
+    setPhoneOtpStatus('Verified ✓', { tone: 'good' });
+  }
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
 setupFirstRun();
 setupDpdp();
+setupPhoneOtp();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

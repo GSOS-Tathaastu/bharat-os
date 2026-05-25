@@ -213,6 +213,19 @@ const SCHEMAS = `
   );
   CREATE INDEX IF NOT EXISTS idx_attestations_subject_id ON attestations(subject_id);
 
+  CREATE TABLE IF NOT EXISTS phone_otps (
+    otp_id TEXT PRIMARY KEY,
+    identity_id TEXT,
+    phone TEXT,
+    purpose TEXT,
+    status TEXT,
+    issued_at TEXT,
+    expires_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_phone_otps_identity ON phone_otps(identity_id);
+  CREATE INDEX IF NOT EXISTS idx_phone_otps_status ON phone_otps(status);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -871,6 +884,46 @@ export class SqliteStore {
     return this._listAll('attestations');
   }
 
+  // ─── Phone OTPs (Phase 4.3) ────────────────────────────────────────────
+
+  async savePhoneOtp(otp) {
+    await this.init();
+    this._upsert(
+      'phone_otps',
+      ['otp_id', 'identity_id', 'phone', 'purpose', 'status', 'issued_at', 'expires_at', 'json'],
+      [
+        otp.otpId,
+        otp.identityId ?? null,
+        otp.phone ?? null,
+        otp.purpose ?? null,
+        otp.status ?? null,
+        otp.issuedAt ?? null,
+        otp.expiresAt ?? null,
+        JSON.stringify(otp)
+      ]
+    );
+    await this.appendLedger({
+      type: 'phone_otp.saved',
+      otpId: otp.otpId,
+      identityId: otp.identityId,
+      phoneMasked: otp.phoneMasked,
+      purpose: otp.purpose,
+      status: otp.status,
+      at: new Date().toISOString()
+    });
+    return otp;
+  }
+
+  async readPhoneOtp(otpId) {
+    await this.init();
+    return this._readOne('phone_otps', 'otp_id', otpId);
+  }
+
+  async listPhoneOtps() {
+    await this.init();
+    return this._listAll('phone_otps');
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1121,6 +1174,7 @@ export class SqliteStore {
       sections.workerNotifications = sweep('worker_notifications', ['identity_id']);
       sections.federatedUpdates = sweep('federated_updates', ['contributor_id']);
       sections.attestations = sweep('attestations', ['subject_id']);
+      sections.phoneOtps = sweep('phone_otps', ['identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

@@ -275,6 +275,49 @@
           <div id="profileAuthResult" class="capture-result" hidden></div>
         </section>
 
+        <section class="capture-card phone-otp-card" id="phoneOtpSection">
+          <div class="capture-header">
+            <span>📱 Phone (recovery)</span>
+            <span id="phoneOtpStatus" class="capture-meta">Not verified</span>
+          </div>
+          <p class="capture-note">
+            Optional. If you ever lose your recovery phrase, a verified phone
+            number is your fallback path to get back in. Bharat OS sends a
+            6-digit code; we never store the code, only its hash.
+          </p>
+          <div id="phoneOtpStep" data-step="enter">
+            <input
+              id="phoneOtpInput"
+              type="tel"
+              inputmode="tel"
+              placeholder="10-digit number or +91…"
+              autocomplete="tel"
+              maxlength="16"
+              aria-label="Phone number"
+            />
+            <div class="passkey-actions">
+              <button id="phoneOtpSendButton" class="secondary-button" type="button">Send code</button>
+            </div>
+          </div>
+          <div id="phoneOtpStepVerify" data-step="verify" hidden>
+            <div class="capture-meta" id="phoneOtpVerifyHint">Code sent to phone</div>
+            <input
+              id="phoneOtpCodeInput"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6-digit code"
+              autocomplete="one-time-code"
+              aria-label="One-time code"
+            />
+            <div class="passkey-actions">
+              <button id="phoneOtpVerifyButton" class="secondary-button" type="button">Verify</button>
+              <button id="phoneOtpCancelButton" class="link-button" type="button">Cancel</button>
+            </div>
+          </div>
+          <div id="phoneOtpResult" class="capture-result" hidden></div>
+        </section>
+
         <section class="capture-card worker-alert-card" id="workerAlertSection">
           <div class="capture-header">
             <span>🔔 Job alerts</span>
