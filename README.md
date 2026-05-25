@@ -144,6 +144,43 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.2 **worker-collective membership substrate — SEWA / IFAT
+  partnership conversation has a code answer** — ADR 0096's Phase
+  6.2 plan was worker-collective distribution. The partnership is
+  out-of-tree but the substrate ships here. New
+  `src/phase1/collective-membership.mjs` with three primitives,
+  cleanly separated: `createMembershipAttestation` (Ed25519-signed
+  by the collective; 7 enumerated member roles; region capped at
+  ~1km city/district precision matching Phase 5.9 GPS;
+  default 365-day TTL; refuses self-membership),
+  `verifyMembershipAttestation` (status enum: `valid` / `expired` /
+  `revoked` / `signature_invalid` / `unknown_collective` /
+  `malformed`), `revokeMembershipAttestation` (collective burns a
+  membership — worker left the union; reason ≥ 4 chars).
+  **Blessed-collectives registry** completely decouples protocol
+  (anyone can sign) from trust policy (only blessed ones surface in
+  consuming flows). `createBlessedCollectiveRecord` admin-issued;
+  `filterBlessedMemberships` returns the active-AND-blessed
+  subset. Two new SqliteStore tables + DPDP §12(3) cascade. **Six
+  new API endpoints**: POST issue membership (emits typed ledger
+  event), POST revoke (non-issuer → 404 no-ownership-leak), GET
+  list, GET blessed-collectives (public trust list), POST admin
+  bless (Phase 5.7 admin-auth gated; verifies collective identity
+  exists), DELETE admin unbless. **MFI bundle (Phase 6.1) extended**
+  with `credibility.verifiedCollectiveMemberships` — only memberships
+  from blessed collectives that are currently valid; the trust-list
+  filter happens server-side so rogue attestations cannot bleed
+  through. §15: collective signs but data lives on member's record
+  (DPDP-exportable + deletable); region capped at neighbourhood;
+  cross-issuer revoke 404; full audit trail. 673/673 tests (+26
+  new — including the **full end-to-end** test: bless SEWA →
+  SEWA issues membership → worker issues MFI consent → MFI fetches
+  bundle → bundle surfaces verified membership). ADR 0099. **When
+  SEWA / IFAT / NDLF asks "what does Bharat OS give us?", the
+  answer is concrete: an endpoint your office hits to issue
+  verifiable credentials; those credentials surface in the worker's
+  Trust Passport + the MFI bundle + any consuming aggregator —
+  without per-partner integration code.**
 - Phase 6.1b **UPI cash-out for mesh earnings — workers can finally
   turn accumulated mesh paise into real rupees** — Phase 6.0b
   promoted the mesh dashboard but earnings never left the system.

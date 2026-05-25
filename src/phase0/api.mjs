@@ -145,6 +145,13 @@ import {
   maskUpiId,
   MESH_WITHDRAWAL_LIMITS
 } from '../phase1/mesh-withdrawal.mjs';
+import {
+  createBlessedCollectiveRecord,
+  createMembershipAttestation,
+  MEMBER_ROLES,
+  revokeMembershipAttestation,
+  verifyMembershipAttestation
+} from '../phase1/collective-membership.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1162,6 +1169,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/admin/mesh/withdrawals/:requestId/accepted',
             'POST /api/admin/mesh/withdrawals/:requestId/paid',
             'POST /api/admin/mesh/withdrawals/:requestId/failed',
+            'POST /api/identities/:collectiveId/collective-memberships',
+            'GET /api/identities/:memberId/collective-memberships',
+            'POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke',
+            'GET /api/blessed-collectives',
+            'POST /api/admin/blessed-collectives',
+            'DELETE /api/admin/blessed-collectives/:collectiveId',
             'GET /api/identities/:identityId/tax/summary',
             'POST /api/portable-attestation/init',
             'POST /api/portable-attestation/:tokenId/sign-tier0',
@@ -3415,7 +3428,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
-        const [earningsEntries, meshEvents, portableAttestations] = await Promise.all([
+        const [
+          earningsEntries,
+          meshEvents,
+          portableAttestations,
+          collectiveMemberships,
+          blessedCollectives
+        ] = await Promise.all([
           typeof store.listEarningsEntries === 'function'
             ? store.listEarningsEntries({ identityId: worker.id })
             : Promise.resolve([]),
@@ -3424,6 +3443,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             : Promise.resolve([]),
           typeof store.listPortableAttestations === 'function'
             ? store.listPortableAttestations({ workerId: worker.id, status: 'signed' })
+            : Promise.resolve([]),
+          // Phase 6.2 — surface verified collective memberships
+          // (signed by a blessed collective AND currently valid).
+          typeof store.listCollectiveMemberships === 'function'
+            ? store.listCollectiveMemberships({ memberId: worker.id, status: 'active' })
+            : Promise.resolve([]),
+          typeof store.listBlessedCollectives === 'function'
+            ? store.listBlessedCollectives()
             : Promise.resolve([])
         ]);
         const bundle = buildIncomeVerificationBundle({
@@ -3431,7 +3458,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           consent,
           earningsEntries,
           meshContributionEvents: meshEvents,
-          portableAttestations
+          portableAttestations,
+          collectiveMemberships,
+          blessedCollectives
         });
         // Burn one read. Persist + audit.
         const consumed = recordConsentRead(consent);
@@ -3446,6 +3475,272 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           at: new Date().toISOString()
         });
         jsonResponse(response, 200, { bundle });
+        return;
+      }
+
+      // Phase 6.2 — collective-membership endpoints.
+      //
+      //   POST /api/identities/:collectiveId/collective-memberships
+      //     Body: { memberId, collectiveName, memberRole?, region?,
+      //             joinedAt?, ttlDays? }
+      //     The collective (identified by :collectiveId, which must
+      //     have a privateKey server-side per Phase 2a's ADR 0066
+      //     demo-mode caveat) signs a membership attestation for
+      //     :memberId. Worker MUST be a known identity. Emits
+      //     `collective_membership.issued` ledger event.
+      //
+      //   GET /api/identities/:memberId/collective-memberships
+      //     Lists memberships where :memberId is the member.
+      //     Optional `status=active|revoked` filter.
+      //
+      //   POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke
+      //     Body: { reason }  (≥ 4 chars)
+      //     Collective revokes a previously-issued membership.
+      //     404 if caller isn't the original issuer (no ownership
+      //     leak via differential status).
+      //
+      //   GET /api/blessed-collectives
+      //     Public — returns the admin-curated trust list. Consuming
+      //     surfaces (MFI bundle, aggregator integrations, etc.)
+      //     read this to know which collectives to honor.
+      //
+      //   POST /api/admin/blessed-collectives
+      //     Admin-gated (Phase 5.7). Body: { collectiveId,
+      //     collectiveName, notes? }. Adds a collective to the
+      //     trust list.
+      //
+      //   DELETE /api/admin/blessed-collectives/:collectiveId
+      //     Admin-gated. Removes a collective from the trust list.
+
+      // POST /api/identities/:collectiveId/collective-memberships
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'collective-memberships' &&
+        request.method === 'POST'
+      ) {
+        const collectiveId = decodeURIComponent(parts[2]);
+        const collective = await store.readIdentity(collectiveId).catch(() => null);
+        if (!collective) return notFound(response);
+        if (!collective.privateKeyPem) {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'collective_missing_private_key',
+              message:
+                'The collective identity has no private key on this server. ' +
+                'In Phase 2a demo mode, signing identities must have the ' +
+                'privateKey present. Phase 2b moves signing client-side.'
+            }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        const memberId = body.memberId;
+        const member = memberId
+          ? await store.readIdentity(memberId).catch(() => null)
+          : null;
+        if (!member) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_member',
+              message: 'memberId must refer to an existing identity'
+            }
+          });
+          return;
+        }
+        let membership;
+        try {
+          membership = createMembershipAttestation({
+            collective,
+            memberId,
+            collectiveName: body.collectiveName ?? collective.displayName ?? null,
+            memberRole: body.memberRole,
+            region: body.region,
+            joinedAt: body.joinedAt,
+            ttlDays: body.ttlDays
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_membership', message: error.message }
+          });
+          return;
+        }
+        await store.saveCollectiveMembership(membership);
+        await store.appendLedger({
+          type: 'collective_membership.issued',
+          membershipId: membership.membershipId,
+          collectiveId: membership.collectiveId,
+          memberId: membership.memberId,
+          memberRole: membership.memberRole,
+          region: membership.region,
+          expiresAt: membership.expiresAt,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 201, { ok: true, membership });
+        return;
+      }
+
+      // GET /api/identities/:memberId/collective-memberships
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'collective-memberships' &&
+        request.method === 'GET'
+      ) {
+        const memberId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(memberId).catch(() => null);
+        if (!identity) return notFound(response);
+        const status = url.searchParams.get('status') ?? undefined;
+        if (status && !['active', 'revoked'].includes(status)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_status', message: 'status must be active|revoked' }
+          });
+          return;
+        }
+        const memberships =
+          typeof store.listCollectiveMemberships === 'function'
+            ? await store.listCollectiveMemberships({ memberId, status })
+            : [];
+        jsonResponse(response, 200, { memberships });
+        return;
+      }
+
+      // POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 6 &&
+        parts[3] === 'collective-memberships' &&
+        parts[5] === 'revoke' &&
+        request.method === 'POST'
+      ) {
+        const collectiveId = decodeURIComponent(parts[2]);
+        const membershipId = decodeURIComponent(parts[4]);
+        const collective = await store.readIdentity(collectiveId).catch(() => null);
+        if (!collective) return notFound(response);
+        const membership = await store
+          .readCollectiveMembership(membershipId)
+          .catch(() => null);
+        if (!membership) return notFound(response);
+        if (membership.collectiveId !== collectiveId) {
+          // §15 — non-issuer revoke attempt; 404 mirrors the
+          // income-verification pattern (no ownership leak).
+          return notFound(response);
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        let revoked;
+        try {
+          revoked = revokeMembershipAttestation(membership, { reason: body.reason });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_revocation', message: error.message }
+          });
+          return;
+        }
+        await store.saveCollectiveMembership(revoked);
+        await store.appendLedger({
+          type: 'collective_membership.revoked',
+          membershipId,
+          collectiveId,
+          memberId: membership.memberId,
+          reason: revoked.revokedReason,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, membership: revoked });
+        return;
+      }
+
+      // GET /api/blessed-collectives  (public read; trust list)
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'blessed-collectives' &&
+        parts.length === 2 &&
+        request.method === 'GET'
+      ) {
+        const blessed =
+          typeof store.listBlessedCollectives === 'function'
+            ? await store.listBlessedCollectives()
+            : [];
+        jsonResponse(response, 200, { blessed });
+        return;
+      }
+
+      // POST /api/admin/blessed-collectives  (admin-gated)
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'admin' &&
+        parts[2] === 'blessed-collectives' &&
+        parts.length === 3 &&
+        request.method === 'POST'
+      ) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const body = await readRequestJson(request).catch(() => ({}));
+        let record;
+        try {
+          record = createBlessedCollectiveRecord({
+            collectiveId: body.collectiveId,
+            collectiveName: body.collectiveName,
+            blessedBy: auth.operator,
+            notes: body.notes
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_blessing', message: error.message }
+          });
+          return;
+        }
+        // Sanity: the collective must exist as an identity. Avoids
+        // blessing a typo'd ID.
+        const collective = await store
+          .readIdentity(record.collectiveId)
+          .catch(() => null);
+        if (!collective) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_collective',
+              message: 'collectiveId must refer to an existing identity'
+            }
+          });
+          return;
+        }
+        await store.saveBlessedCollective(record);
+        await store.appendLedger({
+          type: 'blessed_collective.added',
+          collectiveId: record.collectiveId,
+          collectiveName: record.collectiveName,
+          operator: auth.operator,
+          at: record.blessedAt
+        });
+        jsonResponse(response, 201, { ok: true, blessed: record });
+        return;
+      }
+
+      // DELETE /api/admin/blessed-collectives/:collectiveId
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'admin' &&
+        parts[2] === 'blessed-collectives' &&
+        parts.length === 4 &&
+        request.method === 'DELETE'
+      ) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const collectiveId = decodeURIComponent(parts[3]);
+        if (typeof store.deleteBlessedCollective !== 'function') {
+          return notFound(response);
+        }
+        const removed = await store.deleteBlessedCollective(collectiveId);
+        if (!removed) return notFound(response);
+        await store.appendLedger({
+          type: 'blessed_collective.removed',
+          collectiveId,
+          operator: auth.operator,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, collectiveId });
         return;
       }
 

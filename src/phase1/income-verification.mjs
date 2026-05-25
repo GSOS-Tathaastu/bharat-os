@@ -43,6 +43,7 @@ import {
   verifySignature
 } from '../phase0/core.mjs';
 import { ATTESTATION_TIERS } from './portable-attestation.mjs';
+import { filterBlessedMemberships } from './collective-membership.mjs';
 
 export const INCOME_VERIFICATION_PROTOCOL_VERSION =
   'bos.phase1.income-verification.v0';
@@ -170,6 +171,8 @@ export function buildIncomeVerificationBundle({
   earningsEntries,
   meshContributionEvents,
   portableAttestations,
+  collectiveMemberships = [],
+  blessedCollectives = [],
   at = new Date().toISOString()
 }) {
   if (!identity?.id) throw new Error('identity is required.');
@@ -254,7 +257,27 @@ export function buildIncomeVerificationBundle({
     },
     credibility: {
       portableAttestationsByTier: attestationsByTier,
-      totalSignedAttestations: attestations.length
+      totalSignedAttestations: attestations.length,
+      // Phase 6.2 — surface verified collective memberships as a
+      // credibility signal. Only memberships signed by a BLESSED
+      // collective (admin-curated trust list) AND currently valid
+      // (active + not expired + not revoked) make it into the
+      // bundle. The MFI weights this independently from
+      // self-reported earnings + customer attestations.
+      verifiedCollectiveMemberships: filterBlessedMemberships(
+        (collectiveMemberships ?? []).filter((m) => m.memberId === identity.id),
+        blessedCollectives,
+        { at }
+      ).map((m) => ({
+        membershipId: m.membershipId,
+        collectiveId: m.collectiveId,
+        collectiveName: m.collectiveName,
+        memberRole: m.memberRole,
+        region: m.region,
+        joinedAt: m.joinedAt,
+        issuedAt: m.issuedAt,
+        expiresAt: m.expiresAt
+      }))
     },
     disclaimer:
       'This bundle summarises the worker\'s self-logged Bharat OS earnings ' +

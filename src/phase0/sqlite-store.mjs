@@ -284,6 +284,29 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_mesh_withdrawals_worker ON mesh_withdrawals(worker_id);
   CREATE INDEX IF NOT EXISTS idx_mesh_withdrawals_status ON mesh_withdrawals(status);
 
+  CREATE TABLE IF NOT EXISTS collective_memberships (
+    membership_id TEXT PRIMARY KEY,
+    collective_id TEXT,
+    member_id TEXT,
+    member_role TEXT,
+    status TEXT,
+    issued_at TEXT,
+    expires_at TEXT,
+    revoked_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_collective_memberships_collective ON collective_memberships(collective_id);
+  CREATE INDEX IF NOT EXISTS idx_collective_memberships_member ON collective_memberships(member_id);
+  CREATE INDEX IF NOT EXISTS idx_collective_memberships_status ON collective_memberships(status);
+
+  CREATE TABLE IF NOT EXISTS blessed_collectives (
+    collective_id TEXT PRIMARY KEY,
+    collective_name TEXT,
+    blessed_at TEXT,
+    blessed_by TEXT,
+    json TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -1310,6 +1333,103 @@ export class SqliteStore {
     return all(this.db.prepare(sql).all(...values));
   }
 
+  // ─── Collective memberships — Phase 6.2 ───────────────────────────────
+
+  async saveCollectiveMembership(membership) {
+    await this.init();
+    if (!membership?.membershipId) {
+      throw new Error('collective membership requires membershipId.');
+    }
+    this._upsert(
+      'collective_memberships',
+      [
+        'membership_id',
+        'collective_id',
+        'member_id',
+        'member_role',
+        'status',
+        'issued_at',
+        'expires_at',
+        'revoked_at',
+        'json'
+      ],
+      [
+        membership.membershipId,
+        membership.collectiveId ?? null,
+        membership.memberId ?? null,
+        membership.memberRole ?? null,
+        membership.status ?? 'active',
+        membership.issuedAt ?? null,
+        membership.expiresAt ?? null,
+        membership.revokedAt ?? null,
+        JSON.stringify(membership)
+      ]
+    );
+    return membership;
+  }
+
+  async readCollectiveMembership(membershipId) {
+    await this.init();
+    return this._readOne('collective_memberships', 'membership_id', membershipId);
+  }
+
+  async listCollectiveMemberships({ collectiveId, memberId, status } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (collectiveId) {
+      clauses.push('collective_id = ?');
+      values.push(collectiveId);
+    }
+    if (memberId) {
+      clauses.push('member_id = ?');
+      values.push(memberId);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      values.push(status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM collective_memberships ${where} ORDER BY issued_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
+  async saveBlessedCollective(record) {
+    await this.init();
+    if (!record?.collectiveId) {
+      throw new Error('blessed-collective record requires collectiveId.');
+    }
+    this._upsert(
+      'blessed_collectives',
+      ['collective_id', 'collective_name', 'blessed_at', 'blessed_by', 'json'],
+      [
+        record.collectiveId,
+        record.collectiveName ?? null,
+        record.blessedAt ?? null,
+        record.blessedBy ?? null,
+        JSON.stringify(record)
+      ]
+    );
+    return record;
+  }
+
+  async readBlessedCollective(collectiveId) {
+    await this.init();
+    return this._readOne('blessed_collectives', 'collective_id', collectiveId);
+  }
+
+  async listBlessedCollectives() {
+    await this.init();
+    return this._listAll('blessed_collectives');
+  }
+
+  async deleteBlessedCollective(collectiveId) {
+    await this.init();
+    const sql = 'DELETE FROM blessed_collectives WHERE collective_id = ?';
+    const info = this.db.prepare(sql).run(collectiveId);
+    return Number(info.changes) > 0;
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1565,6 +1685,18 @@ export class SqliteStore {
       sections.portableAttestations = sweep('portable_attestations', ['worker_id']);
       sections.incomeVerificationConsents = sweep('income_verification_consents', ['worker_id']);
       sections.meshWithdrawals = sweep('mesh_withdrawals', ['worker_id']);
+      // Phase 6.2 — erase memberships in which this identity is
+      // EITHER the member (most common case) OR the collective
+      // issuer. If a collective erases itself, its issued
+      // attestations become orphaned and should be cleared so
+      // verification consistently returns 'unknown_collective'.
+      sections.collectiveMemberships = sweep('collective_memberships', [
+        'member_id',
+        'collective_id'
+      ]);
+      // Blessed-collective registry entries — an erased identity
+      // that was on the registry is removed from it.
+      sections.blessedCollectives = sweep('blessed_collectives', ['collective_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

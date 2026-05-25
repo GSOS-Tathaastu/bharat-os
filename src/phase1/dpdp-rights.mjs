@@ -105,6 +105,7 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     portableAttestations,
     incomeVerificationConsents,
     meshWithdrawals,
+    collectiveMemberships,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -139,6 +140,14 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     // Phase 6.1b — mesh-earnings UPI withdrawal requests.
     store.listMeshWithdrawals
       ? store.listMeshWithdrawals({ workerId: identityId }).catch(() => [])
+      : Promise.resolve([]),
+    // Phase 6.2 — collective memberships where the identity is
+    // either the member or the issuing collective.
+    store.listCollectiveMemberships
+      ? Promise.all([
+          store.listCollectiveMemberships({ memberId: identityId }).catch(() => []),
+          store.listCollectiveMemberships({ collectiveId: identityId }).catch(() => [])
+        ]).then(([asMember, asCollective]) => [...asMember, ...asCollective])
       : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
@@ -227,6 +236,14 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
   const subjectMeshWithdrawals = (meshWithdrawals ?? []).filter(
     (w) => w.workerId === identityId
   );
+  // Collective memberships — already filtered to entries where
+  // the identity is either the member or the collective; dedupe
+  // by membershipId in case both halves matched.
+  const dedupedMemberships = new Map();
+  for (const m of collectiveMemberships ?? []) {
+    if (m?.membershipId) dedupedMemberships.set(m.membershipId, m);
+  }
+  const subjectCollectiveMemberships = [...dedupedMemberships.values()];
 
   return {
     protocolVersion: DPDP_RIGHTS_PROTOCOL_VERSION,
@@ -331,6 +348,12 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
       meshWithdrawals: {
         ...stats(subjectMeshWithdrawals),
         records: subjectMeshWithdrawals
+      },
+      // Phase 6.2 — collective memberships (worker side AND, if the
+      // identity is a collective, its issued attestations).
+      collectiveMemberships: {
+        ...stats(subjectCollectiveMemberships),
+        records: subjectCollectiveMemberships
       },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },
