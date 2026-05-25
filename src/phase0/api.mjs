@@ -1165,6 +1165,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/profile-auth/assertions',
             'GET /api/push/subscriptions',
             'POST /api/push/subscriptions',
+            'DELETE /api/push/subscriptions/:subscriptionId',
             'GET /api/worker-notifications',
             'POST /api/worker-notifications',
             'GET /api/voice/runtime',
@@ -1869,6 +1870,45 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           challenge: body.challenge
         });
         jsonResponse(response, verification.valid ? 200 : 403, { ok: verification.valid, verification });
+        return;
+      }
+
+      // Phase 8.4 — DELETE /api/push/subscriptions/:subscriptionId
+      // for the worker-initiated "Turn off notifications" flow.
+      // Returns 200 with `{ deleted: true }` on success, 404 with
+      // `{ deleted: false }` if the record was already gone. The
+      // 410 Gone auto-cleanup from Phase 7.0 also reuses the
+      // underlying `store.deletePushSubscription` — same delete,
+      // different trigger. Emits a `push_subscription.deleted`
+      // ledger event for the audit trail. §15: no body needed —
+      // possession of the subscriptionId from the worker's own
+      // listing is the authorization (same posture as Phase 6.1's
+      // MFI consent revoke).
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'push'
+        && parts[2] === 'subscriptions'
+        && parts.length === 4
+      ) {
+        if (request.method !== 'DELETE') return methodNotAllowed(response, ['DELETE']);
+        const subscriptionId = decodeURIComponent(parts[3]);
+        const existing = await (store.readPushSubscription
+          ? store.readPushSubscription(subscriptionId).catch(() => null)
+          : Promise.resolve(null));
+        const deleted = await store.deletePushSubscription(subscriptionId);
+        if (deleted && typeof store.appendLedger === 'function') {
+          await store.appendLedger({
+            type: 'push_subscription.deleted',
+            subscriptionId,
+            identityId: existing?.identityId ?? null,
+            at: new Date().toISOString()
+          }).catch(() => {});
+        }
+        jsonResponse(response, deleted ? 200 : 404, {
+          ok: deleted,
+          deleted,
+          subscriptionId
+        });
         return;
       }
 

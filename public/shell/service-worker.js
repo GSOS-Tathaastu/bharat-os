@@ -2,7 +2,7 @@
 // Caches the app shell only; API calls always go to the network so the
 // L4 audit ledger and §15 pointer-not-payload posture stay live.
 
-const CACHE_NAME = 'bharat-os-shell-v33';
+const CACHE_NAME = 'bharat-os-shell-v34';
 const APP_SHELL = [
   '/shell/',
   '/shell/index.html',

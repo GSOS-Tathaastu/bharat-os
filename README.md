@@ -144,6 +144,56 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 8.4 **shell UI for push subscription opt-in — Phase 7.x
+  ships ENABLED; Phase 8 shell arc closes** — Phase 7.0–7.3
+  shipped end-to-end VAPID Web Push (JWT signing + AES-128-GCM
+  payload encryption + retry/telemetry) but the shell still spoke
+  to push the Phase 2a.4 way: `pushManager.getSubscription()`
+  read-only, POST without `storeDeliveryKeys: true`, so the server
+  stored a `local_notification` placeholder it couldn't push to.
+  Phase 8.4 closes the loop. Upgraded `#workerAlertSection` on
+  Profile tab (renamed "Job alerts" → "🔔 Bharat OS notifications"
+  since it now covers recovery + cash-out + worker-job pushes);
+  three-item opt-in list naming each push category mapped to its
+  phase (🔑 Recovery / 💰 Cash-out / 🛠 Jobs); post-subscribe
+  mode chip showing real mode honestly (green "Real Web Push
+  (VAPID)" or amber "Local notifications only"); "Turn off
+  notifications" link button gated by `window.confirm`; "How push
+  works" collapsible explaining RFC 8291 encryption + delete-on-
+  opt-out. Rewrote `enableWorkerAlerts()` in `app.js`: fetches
+  VAPID public key via `/api/push-public-key` (returns 503
+  `push_disabled` when unset — fallback stays open); clears stale
+  subscription before `pushManager.subscribe()` so VAPID-key
+  rotation doesn't silently leave operator unable to send;
+  `urlBase64ToUint8Array()` helper; honest fallback on subscribe
+  failure (private-mode Safari, browser unsupported). New
+  `disableWorkerAlerts()`: browser `unsubscribe()` first, then
+  server DELETE (order prevents race between server-side delete
+  and operator's next push). New `DELETE
+  /api/push/subscriptions/:subscriptionId` route reusing existing
+  `store.deletePushSubscription` (Phase 7.0 added it for 410-Gone
+  auto-cleanup); emits `push_subscription.deleted` ledger event
+  bracketing the `push_subscription.saved` from POST; file-store
+  `store.mjs` got the same method for backend parity. New CSS
+  (`.push-opt-in-list`, `.push-opt-in-mode-real` green, `.push-
+  opt-in-mode-local` amber, `.push-opt-in-disable`, `.push-opt-in-
+  details`). SW cache v33 → v34. §15: real-push requires explicit
+  worker tap; `storeDeliveryKeys: true` only when subscribe
+  succeeded; one-tap-plus-confirm disable; idempotent server
+  DELETE (200 first, 404 retry); operator-without-VAPID can't
+  accidentally store delivery keys; honest mode disclosure
+  (never lies "Enabled" in local-only case); audit trail covers
+  both create AND delete. `api.test.mjs` updated for renamed card
+  copy. Live smoke: `/api/push-public-key` returns 503; shell HTML
+  contains new copy; POST creates `local_notification`
+  subscription; DELETE returns `{ok:true,deleted:true}` first /
+  HTTP 404 retry. **747/747 Node tests still pass** (in batches of
+  15 to dodge Windows OOM in parallel `--test`). ADR 0111.
+  **Phase 7.x is now actually delivering**: SIM-swap recovery
+  push → cash-out paid push → worker job push all fire for any
+  worker who tapped Enable, on any operator with VAPID configured.
+  **Phase 8 shell arc is done** — 8.0 earnings → 8.1 mesh
+  dashboard → 8.2 MFI consent → 8.3 cash-out → 8.4 notifications.
 - Phase 8.3 **shell UI for UPI mesh cash-out** — Phase 6.1b shipped
   the mesh-withdrawal endpoints (`GET /mesh/balance`, `POST
   /mesh/withdrawals`, `GET /mesh/withdrawals`) but had no

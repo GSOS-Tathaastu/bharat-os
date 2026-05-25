@@ -103,9 +103,11 @@ test('Phase 0 API serves the shell and operator console assets', async () => {
     assert.match(shellText, /Bharat OS/);
     assert.match(shellText, /What do you want to do today/);
     // Phase 2a.25 UX overhaul (ADR 0077) — copy de-jargoned from
-    // "Profile security" → "Sign-in security", "Worker alerts" → "Job alerts".
+    // "Profile security" → "Sign-in security". Phase 8.4 (ADR 0111)
+    // expanded the "Job alerts" card into "Bharat OS notifications"
+    // to cover recovery + cash-out + worker alerts under one opt-in.
     assert.match(shellText, /Sign-in security/);
-    assert.match(shellText, /Job alerts/);
+    assert.match(shellText, /Bharat OS notifications/);
 
     const shellScript = await fetch(`${baseUrl}/shell/app.js`);
     assert.equal(shellScript.status, 200);

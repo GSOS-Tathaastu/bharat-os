@@ -2749,3 +2749,63 @@ body {
 .mesh-withdrawal-status-badge.provider_accepted { background: #dbeafe; color: #1e40af; }
 .mesh-withdrawal-status-badge.paid { background: #d1fae5; color: #065f46; }
 .mesh-withdrawal-status-badge.failed { background: #fee2e2; color: #991b1b; }
+
+/* Phase 8.4 — push opt-in card additions. */
+.push-opt-in-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.push-opt-in-list li {
+  padding-left: 4px;
+}
+.push-opt-in-list strong {
+  font-weight: 650;
+}
+.push-opt-in-mode {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.push-opt-in-mode strong {
+  font-weight: 700;
+}
+.push-opt-in-mode-note {
+  font-size: 12px;
+  opacity: 0.85;
+}
+.push-opt-in-mode-real {
+  background: #ecfdf5;
+  color: #065f46;
+  border-left: 3px solid #10b981;
+}
+.push-opt-in-mode-local {
+  background: #fff7ed;
+  color: #9a3412;
+  border-left: 3px solid #f59e0b;
+}
+.push-opt-in-disable {
+  margin-top: 10px;
+  text-align: center;
+}
+.push-opt-in-details {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.push-opt-in-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.push-opt-in-details p {
+  margin: 8px 0;
+  line-height: 1.5;
+}

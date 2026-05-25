@@ -1037,21 +1037,74 @@ async function verifyProfilePasskey() {
   }
 }
 
-// Phase 2a.4 worker alert scaffold. Real Web Push delivery needs VAPID keys and
-// a push sender; this demo records capability and uses service-worker local
-// notifications when the browser grants permission.
+// Phase 8.4 — push opt-in UI on top of the Phase 7.x VAPID substrate.
+// `enableWorkerAlerts` now fetches the operator's VAPID public key (if
+// configured), subscribes via the browser's pushManager, and POSTs with
+// `storeDeliveryKeys: true` so the server can actually send pushes (RFC
+// 8030/8291). If the operator hasn't configured VAPID (returns 503
+// `push_disabled`), we fall back to the Phase 2a.4 local-only path —
+// no silent regression, the mode chip shows "Local" honestly.
 function workerAlertsAvailable() {
   return Boolean('Notification' in window && 'serviceWorker' in navigator);
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function fetchVapidPublicKey() {
+  try {
+    const response = await fetch('/api/push-public-key');
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.publicKey ? data : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function updateWorkerAlertStatus() {
-  const status = state.workerAlertSubscription
-    ? state.workerAlertSubscription.mode === 'web_push'
+  const sub = state.workerAlertSubscription;
+  const status = sub
+    ? sub.rawEndpointStored
       ? 'Web Push'
-      : 'Local'
+      : sub.mode === 'web_push'
+        ? 'Local'
+        : 'Local'
     : 'Off';
   $('workerAlertStatus').textContent = status;
-  $('workerAlertTestButton').disabled = !state.workerAlertSubscription;
+  $('workerAlertTestButton').disabled = !sub;
+  const enableBtn = $('workerAlertEnableButton');
+  if (enableBtn) enableBtn.textContent = sub ? 'Re-subscribe' : 'Enable notifications';
+
+  const disableRow = $('workerAlertDisableRow');
+  if (disableRow) disableRow.hidden = !sub;
+
+  const modeBlock = $('workerAlertMode');
+  if (modeBlock) {
+    if (!sub) {
+      modeBlock.hidden = true;
+      modeBlock.innerHTML = '';
+    } else {
+      modeBlock.hidden = false;
+      const realPush = Boolean(sub.rawEndpointStored);
+      const modeLabel = realPush ? 'Real Web Push (VAPID)' : 'Local notifications only';
+      const modeNote = realPush
+        ? 'Server can send notifications when you are offline. Push body is AES-128-GCM encrypted in transit (RFC 8291).'
+        : 'Operator has not configured VAPID. Notifications work only while this tab is open.';
+      modeBlock.innerHTML = `
+        <strong>${escapeHtml(modeLabel)}</strong>
+        <span class="push-opt-in-mode-note">${escapeHtml(modeNote)}</span>
+      `;
+      modeBlock.classList.toggle('push-opt-in-mode-real', realPush);
+      modeBlock.classList.toggle('push-opt-in-mode-local', !realPush);
+    }
+  }
 }
 
 function renderWorkerAlertResult(title, rows) {
@@ -1091,8 +1144,38 @@ async function enableWorkerAlerts() {
     if (permission !== 'granted') throw new Error('Notification permission was not granted.');
 
     const registration = await navigator.serviceWorker.ready;
-    const pushSubscription = await registration.pushManager?.getSubscription?.();
-    const serialized = pushSubscription?.toJSON?.() ?? {};
+
+    // Phase 8.4 — attempt real Web Push subscription with the
+    // operator's VAPID public key. If `/api/push-public-key`
+    // returns 503 (push_disabled) we fall back to the Phase 2a.4
+    // local-only path so the demo still works without VAPID.
+    const vapid = await fetchVapidPublicKey();
+    let serialized = {};
+    let storeDeliveryKeys = false;
+
+    if (vapid && registration.pushManager?.subscribe) {
+      try {
+        // Clear any stale subscription tied to an old VAPID key
+        // before subscribing fresh.
+        const existing = await registration.pushManager.getSubscription?.();
+        if (existing) await existing.unsubscribe();
+
+        const applicationServerKey = urlBase64ToUint8Array(vapid.publicKey);
+        const real = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        });
+        serialized = real.toJSON?.() ?? {};
+        storeDeliveryKeys = Boolean(serialized.endpoint && serialized.keys?.p256dh && serialized.keys?.auth);
+      } catch (subscribeError) {
+        // pushManager.subscribe can fail on unsupported browsers
+        // (private-mode Safari) or when the server rejects the
+        // VAPID key. Fall back to local-only — `serialized` stays
+        // empty, server records a local_notification subscription.
+        console.warn('pushManager.subscribe failed; falling back to local-only', subscribeError);
+      }
+    }
+
     const saved = await fetchJson('/api/push/subscriptions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1102,20 +1185,66 @@ async function enableWorkerAlerts() {
         keys: serialized.keys ?? {},
         permission,
         source: 'shell',
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
+        storeDeliveryKeys
       })
     });
 
     state.workerAlertSubscription = saved.subscription;
     updateWorkerAlertStatus();
-    renderWorkerAlertResult('Alerts enabled', [
-      ['Mode', saved.subscription.mode],
+    renderWorkerAlertResult('Notifications enabled', [
+      ['Mode', saved.subscription.rawEndpointStored ? 'Real Web Push (VAPID)' : 'Local notifications only'],
       ['Subscription', shortId(saved.subscription.subscriptionId)],
-      ['Endpoint', saved.subscription.rawEndpointStored ? 'stored' : 'hashed only']
+      ['Server can send', saved.subscription.rawEndpointStored ? 'yes' : 'no (operator VAPID not configured)']
     ]);
-    showToast('Worker alerts enabled.');
+    showToast(saved.subscription.rawEndpointStored
+      ? 'Real Web Push notifications enabled.'
+      : 'Local-only notifications enabled (VAPID not configured).');
   } catch (error) {
-    renderWorkerAlertResult('Alerts not enabled', [['Reason', error.message]]);
+    renderWorkerAlertResult('Notifications not enabled', [['Reason', error.message]]);
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function disableWorkerAlerts() {
+  if (!sanityCheckActor()) return;
+  if (!state.workerAlertSubscription) return;
+  const confirmed = window.confirm(
+    'Turn off Bharat OS notifications? The server will forget your push endpoint immediately. You can re-enable any time.'
+  );
+  if (!confirmed) return;
+
+  const button = $('workerAlertDisableButton');
+  button.disabled = true;
+  try {
+    // Unsubscribe browser-side first so the operator's push
+    // attempts can't beat the server-side delete in a race.
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager?.getSubscription?.();
+      if (existing) await existing.unsubscribe();
+    }
+
+    const subscriptionId = state.workerAlertSubscription.subscriptionId;
+    const response = await fetch(`/api/push/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok && response.status !== 404) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error?.message ?? `Server returned ${response.status}`);
+    }
+
+    state.workerAlertSubscription = null;
+    updateWorkerAlertStatus();
+    renderWorkerAlertResult('Notifications turned off', [
+      ['Subscription', shortId(subscriptionId)],
+      ['Server endpoint', 'deleted']
+    ]);
+    showToast('Notifications turned off.');
+  } catch (error) {
+    renderWorkerAlertResult('Could not turn off', [['Reason', error.message]]);
     showToast(error.message);
   } finally {
     button.disabled = false;
@@ -1456,6 +1585,7 @@ $('profileAuthBindButton').addEventListener('click', bindProfilePasskey);
 $('profileAuthVerifyButton').addEventListener('click', verifyProfilePasskey);
 $('workerAlertEnableButton').addEventListener('click', enableWorkerAlerts);
 $('workerAlertTestButton').addEventListener('click', testWorkerAlert);
+$('workerAlertDisableButton').addEventListener('click', disableWorkerAlerts);
 $('healthDocFile').addEventListener('change', handleHealthDocFile);
 $('healthDocUploadButton').addEventListener('click', uploadHealthDocument);
 

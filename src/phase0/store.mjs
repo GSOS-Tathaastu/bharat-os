@@ -948,6 +948,18 @@ export class BosStore {
     return listJson(this.pushSubscriptionsPath);
   }
 
+  // Phase 7.0 / 8.4 — explicit delete used by Phase 8.4 disable
+  // flow and by Phase 7.x 410 Gone cleanup (sqlite-store has the
+  // same method; this file-store variant keeps backend parity).
+  async deletePushSubscription(subscriptionId) {
+    try {
+      await fs.unlink(this.pushSubscriptionFile(subscriptionId));
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   async saveWorkerNotification(notification) {
     await this.init();
     await writeJson(this.workerNotificationFile(notification.notificationId), notification);

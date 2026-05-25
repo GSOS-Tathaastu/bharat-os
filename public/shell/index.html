@@ -564,19 +564,49 @@
 
         <section class="capture-card worker-alert-card" id="workerAlertSection">
           <div class="capture-header">
-            <span>🔔 Job alerts</span>
+            <span>🔔 Bharat OS notifications</span>
             <span id="workerAlertStatus" class="capture-meta">Off</span>
           </div>
           <p class="capture-note">
-            Get a notification when nearby work matching your profile is
-            available. Wages always come through escrow — you never pay to
-            apply.
+            Real Web Push when VAPID is configured on your operator. Falls
+            back to local-only notifications when it isn't. You can turn
+            this off any time — Bharat OS never silently re-enables it.
           </p>
+          <ul class="push-opt-in-list">
+            <li><strong>🔑 Account recovery</strong> — when a SIM-swap
+              recovery attempt or cooldown clear happens on your identity.</li>
+            <li><strong>💰 Mesh cash-out updates</strong> — your UPI
+              withdrawal flips to <code>paid</code> or <code>failed</code>.</li>
+            <li><strong>🛠 Nearby work alerts</strong> — escrowed jobs
+              matching your profile. Wages always through escrow.</li>
+          </ul>
+          <div id="workerAlertMode" class="push-opt-in-mode" hidden></div>
           <div class="passkey-actions">
-            <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable alerts</button>
+            <button id="workerAlertEnableButton" class="secondary-button" type="button">Enable notifications</button>
             <button id="workerAlertTestButton" class="link-button" type="button">Test alert</button>
           </div>
+          <div class="push-opt-in-disable" id="workerAlertDisableRow" hidden>
+            <button id="workerAlertDisableButton" class="link-button" type="button">Turn off notifications</button>
+          </div>
           <div id="workerAlertResult" class="capture-result" hidden></div>
+          <details class="push-opt-in-details">
+            <summary>How push works on Bharat OS</summary>
+            <p>
+              When VAPID is configured, your phone subscribes to your
+              browser's push service (Firebase / Mozilla / Apple). Bharat
+              OS gets back an <em>endpoint URL + two keys</em>. We store
+              them server-side so we can send you a notification — and
+              only we can, because the keys are scoped to our VAPID
+              identity. Push bodies are AES-128-GCM encrypted (RFC 8291)
+              before they leave the server.
+            </p>
+            <p>
+              Turning notifications off removes the endpoint and keys
+              from the server immediately. Your browser also forgets the
+              subscription. Next time you tap <strong>Enable</strong>,
+              you start fresh with a new endpoint.
+            </p>
+          </details>
         </section>
 
         <section class="capture-card" id="healthCaptureSection">
