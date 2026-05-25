@@ -144,6 +144,46 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.1 **MFI-consumable income-verification bundle + worker-issued
+  consent — the first hard-rupee external incentive** — ADR 0096's
+  Phase 6.1 plan paired MFI partnerships with UPI cash-out. The MFI
+  piece ships first. Workers who have logged earnings (6.0a) +
+  mesh contributions (6.0b) + portable attestations (5.9) can now
+  authorize a named MFI to read a signed income summary — the
+  substrate any lender can consume for KYC-supplementary income
+  proof without Bharat OS having to integrate per-partner first.
+  New `src/phase1/income-verification.mjs`:
+  `createIncomeVerificationConsent` (Ed25519-signed; default 30-day
+  TTL, single-use; rejects oversized mfiName since silent
+  truncation could mislead the worker),
+  `verifyIncomeVerificationConsent` (status enum: `valid` / `expired`
+  / `revoked` / `exhausted` / `signature_invalid` /
+  `unknown_worker`), `buildIncomeVerificationBundle` (filters to
+  worker + FY window April-March; aggregates totals + per-category
+  + working days + mesh payout + per-tier attestation counts; signs
+  with worker's key), `verifyIncomeVerificationBundle` (signature
+  round-trip for MFI-side validators), `revokeIncomeVerificationConsent`,
+  `recordConsentRead`. **Mandatory disclaimer on every bundle**:
+  "earnings TYPED BY THE WORKER (not scraped); portable attestations
+  at three quality tiers; Bharat OS does NOT verify identity
+  (Aadhaar does that) and does NOT guarantee performance." New
+  SqliteStore `income_verification_consents` table + DPDP cascade.
+  Four new API endpoints: POST `/consents` (worker issues),
+  GET `/consents` (worker lists), POST `/consents/:id/revoke`
+  (worker burns; **non-issuer attempts return 404 not 403** so
+  cross-user probing can't reveal whether a consentId exists),
+  GET `/api/income-verification/:consentId` (MFI fetch — verifies
+  consent, builds FRESH bundle on every fetch (never cached),
+  increments read count, returns 410 Gone on
+  expired/revoked/exhausted). §15: worker controls MFI access via
+  signed consent; MFI cannot silently poll (single-use bearer);
+  bundle is aggregates not raw entries; full audit trail in typed
+  ledger with `mfiName` so ops can detect anomalous reads. 620/620
+  tests (+25 new). ADR 0097. **A worker with 6 months of earnings
+  + 200 signed attestations can now hand a single consentId to an
+  MFI; that MFI fetches a verifiable signed income summary, reads
+  it once, decides on a loan — all without Bharat OS doing a
+  per-partner integration.**
 - Phase 5.9 **portable work-history attestation via worker-initiated
   QR handshake — the two-sided network turns on** — Phase 6.0 gave
   workers single-player reasons to install Bharat OS; Phase 5.9

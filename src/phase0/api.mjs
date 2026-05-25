@@ -129,6 +129,13 @@ import {
   verifyTier2
 } from '../phase1/portable-attestation.mjs';
 import { sha256Hex } from './core.mjs';
+import {
+  buildIncomeVerificationBundle,
+  createIncomeVerificationConsent,
+  recordConsentRead,
+  revokeIncomeVerificationConsent,
+  verifyIncomeVerificationConsent
+} from '../phase1/income-verification.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1148,6 +1155,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/portable-attestation/:tokenId/sign-tier2/payload',
             'POST /api/portable-attestation/:tokenId/sign-tier2',
             'GET /api/identities/:identityId/portable-attestation/summary',
+            'POST /api/identities/:identityId/income-verification/consents',
+            'GET /api/identities/:identityId/income-verification/consents',
+            'POST /api/identities/:identityId/income-verification/consents/:consentId/revoke',
+            'GET /api/income-verification/:consentId',
             'GET /sign/:tokenId',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
@@ -3223,6 +3234,203 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           category
         });
         jsonResponse(response, 200, { summary });
+        return;
+      }
+
+      // Phase 6.1 — MFI income-verification endpoints.
+      //
+      //   POST /api/identities/:id/income-verification/consents
+      //     Body: { mfiName, purpose, financialYear, ttlSeconds?,
+      //             maxReads? }
+      //     Worker creates a signed consent authorising the named
+      //     MFI to read their income-verification bundle. Returns
+      //     the consent (incl. `consentId` which doubles as the
+      //     bearer token).
+      //
+      //   GET /api/identities/:id/income-verification/consents
+      //     Worker lists the consents they've issued.
+      //
+      //   POST /api/identities/:id/income-verification/consents/:consentId/revoke
+      //     Worker revokes a consent before expiry.
+      //
+      //   GET /api/income-verification/:consentId
+      //     MFI presents the consentId. Server verifies the consent
+      //     is valid + non-expired + within maxReads, increments
+      //     the read count, builds the signed bundle from current
+      //     earnings/mesh/portable-attestation data, returns it.
+
+      // POST /api/identities/:id/income-verification/consents
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'income-verification' &&
+        parts[4] === 'consents' &&
+        request.method === 'POST'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const body = await readRequestJson(request).catch(() => ({}));
+        let consent;
+        try {
+          consent = createIncomeVerificationConsent({
+            identity,
+            mfiName: body.mfiName,
+            purpose: body.purpose,
+            financialYear: body.financialYear,
+            ttlSeconds: body.ttlSeconds,
+            maxReads: body.maxReads
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_consent', message: error.message }
+          });
+          return;
+        }
+        await store.saveIncomeVerificationConsent(consent);
+        await store.appendLedger({
+          type: 'income_verification_consent.issued',
+          consentId: consent.consentId,
+          workerId: consent.workerId,
+          mfiName: consent.mfiName,
+          financialYear: consent.financialYear,
+          expiresAt: consent.expiresAt,
+          maxReads: consent.maxReads,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          consent,
+          mfiFetchUrl: `/api/income-verification/${encodeURIComponent(consent.consentId)}`,
+          note:
+            'Share the consentId with the MFI privately (it is a bearer token; ' +
+            'anyone with it can read your bundle once). The MFI fetches the ' +
+            'signed bundle via the URL above.'
+        });
+        return;
+      }
+
+      // GET /api/identities/:id/income-verification/consents
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'income-verification' &&
+        parts[4] === 'consents' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const consents =
+          typeof store.listIncomeVerificationConsents === 'function'
+            ? await store.listIncomeVerificationConsents({ workerId: identityId })
+            : [];
+        jsonResponse(response, 200, { consents });
+        return;
+      }
+
+      // POST /api/identities/:id/income-verification/consents/:consentId/revoke
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 7 &&
+        parts[3] === 'income-verification' &&
+        parts[4] === 'consents' &&
+        parts[6] === 'revoke' &&
+        request.method === 'POST'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const consentId = decodeURIComponent(parts[5]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const consent = await store
+          .readIncomeVerificationConsent(consentId)
+          .catch(() => null);
+        if (!consent) return notFound(response);
+        if (consent.workerId !== identityId) {
+          // §15 — refusing to leak ownership info via differential
+          // status codes; same 404 as a non-existent consent.
+          return notFound(response);
+        }
+        const revoked = revokeIncomeVerificationConsent(consent);
+        await store.saveIncomeVerificationConsent(revoked);
+        await store.appendLedger({
+          type: 'income_verification_consent.revoked',
+          consentId,
+          workerId: identityId,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, consent: revoked });
+        return;
+      }
+
+      // GET /api/income-verification/:consentId  (MFI fetch)
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'income-verification' &&
+        parts.length === 3 &&
+        request.method === 'GET'
+      ) {
+        const consentId = decodeURIComponent(parts[2]);
+        const consent = await store
+          .readIncomeVerificationConsent(consentId)
+          .catch(() => null);
+        if (!consent) return notFound(response);
+        const worker = await store.readIdentity(consent.workerId).catch(() => null);
+        if (!worker) return notFound(response);
+        const check = verifyIncomeVerificationConsent(consent, worker);
+        if (!check.ok) {
+          const status =
+            check.status === 'expired'
+              ? 410
+              : check.status === 'revoked'
+                ? 410
+                : check.status === 'exhausted'
+                  ? 410
+                  : check.status === 'unknown_worker'
+                    ? 404
+                    : 400;
+          jsonResponse(response, status, {
+            error: {
+              code: `consent_${check.status}`,
+              message: `Consent ${check.status}.`
+            }
+          });
+          return;
+        }
+        const [earningsEntries, meshEvents, portableAttestations] = await Promise.all([
+          typeof store.listEarningsEntries === 'function'
+            ? store.listEarningsEntries({ identityId: worker.id })
+            : Promise.resolve([]),
+          typeof store.listMeshContributionEvents === 'function'
+            ? store.listMeshContributionEvents()
+            : Promise.resolve([]),
+          typeof store.listPortableAttestations === 'function'
+            ? store.listPortableAttestations({ workerId: worker.id, status: 'signed' })
+            : Promise.resolve([])
+        ]);
+        const bundle = buildIncomeVerificationBundle({
+          identity: worker,
+          consent,
+          earningsEntries,
+          meshContributionEvents: meshEvents,
+          portableAttestations
+        });
+        // Burn one read. Persist + audit.
+        const consumed = recordConsentRead(consent);
+        await store.saveIncomeVerificationConsent(consumed);
+        await store.appendLedger({
+          type: 'income_verification_bundle.read',
+          consentId,
+          workerId: worker.id,
+          mfiName: consent.mfiName,
+          readCount: consumed.readCount,
+          maxReads: consumed.maxReads,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { bundle });
         return;
       }
 

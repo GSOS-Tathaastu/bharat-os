@@ -255,6 +255,21 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_portable_attestations_status ON portable_attestations(status);
   CREATE INDEX IF NOT EXISTS idx_portable_attestations_category ON portable_attestations(category);
 
+  CREATE TABLE IF NOT EXISTS income_verification_consents (
+    consent_id TEXT PRIMARY KEY,
+    worker_id TEXT,
+    mfi_name TEXT,
+    financial_year TEXT,
+    issued_at TEXT,
+    expires_at TEXT,
+    read_count INTEGER,
+    max_reads INTEGER,
+    revoked_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_income_verification_consents_worker ON income_verification_consents(worker_id);
+  CREATE INDEX IF NOT EXISTS idx_income_verification_consents_expires ON income_verification_consents(expires_at);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -1172,6 +1187,58 @@ export class SqliteStore {
     return all(this.db.prepare(sql).all(...values));
   }
 
+  // ─── Income verification consents — Phase 6.1 ─────────────────────────
+
+  async saveIncomeVerificationConsent(consent) {
+    await this.init();
+    if (!consent?.consentId) {
+      throw new Error('income-verification consent requires consentId.');
+    }
+    this._upsert(
+      'income_verification_consents',
+      [
+        'consent_id',
+        'worker_id',
+        'mfi_name',
+        'financial_year',
+        'issued_at',
+        'expires_at',
+        'read_count',
+        'max_reads',
+        'revoked_at',
+        'json'
+      ],
+      [
+        consent.consentId,
+        consent.workerId ?? null,
+        consent.mfiName ?? null,
+        consent.financialYear ?? null,
+        consent.issuedAt ?? null,
+        consent.expiresAt ?? null,
+        consent.readCount ?? 0,
+        consent.maxReads ?? 1,
+        consent.revokedAt ?? null,
+        JSON.stringify(consent)
+      ]
+    );
+    return consent;
+  }
+
+  async readIncomeVerificationConsent(consentId) {
+    await this.init();
+    return this._readOne('income_verification_consents', 'consent_id', consentId);
+  }
+
+  async listIncomeVerificationConsents({ workerId } = {}) {
+    await this.init();
+    if (workerId) {
+      const sql =
+        'SELECT json FROM income_verification_consents WHERE worker_id = ? ORDER BY issued_at DESC';
+      return all(this.db.prepare(sql).all(workerId));
+    }
+    return this._listAll('income_verification_consents');
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1425,6 +1492,7 @@ export class SqliteStore {
       sections.phoneOtps = sweep('phone_otps', ['identity_id']);
       sections.earningsLog = sweep('earnings_log', ['identity_id']);
       sections.portableAttestations = sweep('portable_attestations', ['worker_id']);
+      sections.incomeVerificationConsents = sweep('income_verification_consents', ['worker_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

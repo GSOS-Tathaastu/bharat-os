@@ -103,6 +103,7 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     attestations,
     earningsEntries,
     portableAttestations,
+    incomeVerificationConsents,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -129,6 +130,10 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     // Phase 5.9 — portable attestations on the worker side.
     store.listPortableAttestations
       ? store.listPortableAttestations({ workerId: identityId }).catch(() => [])
+      : Promise.resolve([]),
+    // Phase 6.1 — MFI income-verification consents the user has issued.
+    store.listIncomeVerificationConsents
+      ? store.listIncomeVerificationConsents({ workerId: identityId }).catch(() => [])
       : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
@@ -209,6 +214,10 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
   const subjectPortableAttestations = (portableAttestations ?? []).filter(
     (a) => a.workerId === identityId
   );
+  // MFI income-verification consents — pre-filtered by workerId.
+  const subjectIncomeVerificationConsents = (
+    incomeVerificationConsents ?? []
+  ).filter((c) => c.workerId === identityId);
 
   return {
     protocolVersion: DPDP_RIGHTS_PROTOCOL_VERSION,
@@ -298,6 +307,14 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
       portableAttestations: {
         ...stats(subjectPortableAttestations),
         records: subjectPortableAttestations
+      },
+      // Phase 6.1 — income-verification consents the user has issued
+      // to MFIs / lenders. The consent record itself is user data
+      // (it authorises external read access) so it's in the export
+      // + erasure scope.
+      incomeVerificationConsents: {
+        ...stats(subjectIncomeVerificationConsents),
+        records: subjectIncomeVerificationConsents
       },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },
