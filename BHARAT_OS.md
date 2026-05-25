@@ -2038,7 +2038,7 @@ code lands; do not create a separate `STATUS.md` (§16).
 | L8 — Vernacular generative UI | deterministic intent normalization across five Indian languages (Hindi, Marathi, Bhojpuri, Tamil, Bengali — script + romanized) with localized response strings (`src/phase1/vernacular.mjs`); **user-facing shell at `/shell/`** (`public/shell/`) with voice + TTS runtime planning (`src/phase1/voice-runtime.mjs`), on-device SLM runtime planning (`src/phase1/on-device-model.mjs`), Web Speech / browser SpeechSynthesis fallbacks, persona-aware greeting, per-action result cards, health-document capture card, profile passkey card, Worker alerts card, device-claim model with owner + household | no actual IndicWhisper-WASM / IndicTTS-WASM / WebGPU SLM decoder/model pack bundled yet; no IndicTrans2-WASM yet; health OCR is deterministic text normalization, not real image OCR yet; Web Push is local-notification/VAPID-pending scaffold; generative UI is action-type-specific cards, not from-scratch UI synthesis |
 | Cross-cutting | Trust Passport v1 (derived + signed snapshots), integrity verifier, audit ledger, operator console, PWA shell, local identity creation, worker-notification receipts (`src/phase1/worker-notification.mjs`) | none unique to layer |
 
-### Team and operational state (2026-05-23)
+### Team and operational state (2026-05-25)
 
 - **Delivery team:** solo founder + Claude Code. The §12 "5–8 senior
   engineers" team is a Phase 2 target, not current state. Code work is
