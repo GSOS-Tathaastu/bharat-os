@@ -2365,3 +2365,84 @@ body {
   .prompt-greeting { font-size: 18px; }
   .send-button { padding: 12px 16px; }
 }
+
+/* ─── Phase 8.0 — earnings tracker card ─────────────────────────────── */
+
+.earnings-form {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.earnings-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.earnings-row label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+}
+
+.earnings-row input,
+.earnings-row select {
+  padding: 8px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  min-width: 0;
+}
+
+.earnings-list {
+  margin-top: 12px;
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+
+.earnings-list-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f3f3;
+  font-size: 13px;
+}
+
+.earnings-list-entry:last-child {
+  border-bottom: none;
+}
+
+.earnings-list-entry .delete-entry {
+  background: none;
+  border: none;
+  color: #c00;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.earnings-list-entry .delete-entry:hover {
+  text-decoration: underline;
+}
+
+.earnings-summary {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f7f9fc;
+  border-left: 3px solid #0a7;
+  border-radius: 4px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+@media (max-width: 380px) {
+  .earnings-row {
+    grid-template-columns: 1fr;
+  }
+}

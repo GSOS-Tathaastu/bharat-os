@@ -144,6 +144,35 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 8.0 **shell UI for the earnings tracker — first user-visible
+  surface of the Phase 5.9+ growth arc** — Phases 5.9 through 7.3
+  shipped ~10 API substrates but ZERO worker-facing shell UI. An
+  investor demo opening `localhost:8787/shell/` saw nothing
+  user-visible from those phases. Phase 8.0 opens the Phase 8 arc
+  by picking the foundational UI piece — the earnings tracker. New
+  `#earningsLogSection` card on the Earn tab with five form fields
+  (category select / amount in ₹ / hours optional / date / note)
+  and two action buttons (Save → POST /api/identities/:id/earnings,
+  Monthly summary → GET .../earnings/summary). Below: list of 30
+  most-recent entries with per-entry delete buttons + summary
+  block rendering Phase 6.0a's `monthlyStatement` output. New
+  `setupEarningsLog()` in `app.js` (~110 lines, pure DOM + fetch,
+  no new library; follows existing setup-function pattern; uses
+  `state.deviceOwnerId` to scope every call; HTML-escapes notes
+  for XSS prevention). New CSS rules in `styles.css` for the form
+  + list + summary; mobile-first stacking at <380px. SW cache v29
+  → v30. §15: data is user-typed not scraped (card copy says so
+  explicitly); identity-scoped via localStorage; integer paise on
+  submit; HTML escaping; no new PII surfaces. **No automated
+  browser tests** — codebase has no existing browser-test
+  infrastructure (per Phases 2a.25/2a.26/4.4/4.5 pattern). Live
+  smoke confirmed: shell loads with new card; styles.css contains
+  new rules; all 747 Node tests still pass. ADR 0105. **A worker
+  opening `/shell/` can now actually log earnings — investor demo
+  path is real**: install → identity wizard → Earn tab → log
+  delivery → see it appear → monthly summary. Sets the UI pattern
+  for subsequent Phase 8.x cards (mesh dashboard, MFI consent,
+  UPI cash-out, push opt-in).
 - Phase 7.3 **Web Push adaptive retry + per-vendor telemetry —
   closes Phase 7's observability+reliability story** — Phases
   7.0/7.1/7.2 shipped real Web Push delivery + reusable helper +

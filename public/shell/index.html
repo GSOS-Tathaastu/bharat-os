@@ -157,6 +157,88 @@
           </details>
         </section>
 
+        <!-- Phase 8.0 — earnings tracker card (Phase 6.0a wire). -->
+        <section class="capture-card earnings-log-card" id="earningsLogSection">
+          <div class="capture-header">
+            <span>📒 Log your earnings</span>
+            <span id="earningsLogStatus" class="capture-meta">—</span>
+          </div>
+          <p class="diagnostics-note">
+            Type what you earned today — across Swiggy, Zomato, Uber,
+            cash gigs, anything. Bharat OS keeps a clean monthly summary
+            you can show a landlord or MFI. Data stays on your device.
+          </p>
+          <div class="earnings-form">
+            <div class="earnings-row">
+              <label for="earningsCategory">Category</label>
+              <select id="earningsCategory">
+                <option value="delivery">🍔 Delivery (Swiggy / Zomato / Dunzo)</option>
+                <option value="ride">🚗 Ride (Uber / Ola / Rapido)</option>
+                <option value="service">🔧 Service (UC / direct)</option>
+                <option value="cash">💵 Cash gig</option>
+                <option value="other">📦 Other</option>
+              </select>
+            </div>
+            <div class="earnings-row">
+              <label for="earningsAmount">Amount (₹)</label>
+              <input
+                id="earningsAmount"
+                type="number"
+                min="0"
+                step="1"
+                inputmode="numeric"
+                placeholder="500"
+              />
+            </div>
+            <div class="earnings-row">
+              <label for="earningsHours">Hours (optional)</label>
+              <input
+                id="earningsHours"
+                type="number"
+                min="0"
+                max="24"
+                step="0.5"
+                inputmode="decimal"
+                placeholder="4.5"
+              />
+            </div>
+            <div class="earnings-row">
+              <label for="earningsDate">Date</label>
+              <input id="earningsDate" type="date" />
+            </div>
+            <div class="earnings-row">
+              <label for="earningsNote">Note (optional)</label>
+              <input
+                id="earningsNote"
+                type="text"
+                maxlength="200"
+                placeholder="e.g. lunch shift, 12 trips"
+              />
+            </div>
+            <div class="passkey-actions">
+              <button id="earningsSubmit" class="secondary-button" type="button">
+                Save
+              </button>
+              <button id="earningsViewSummary" class="link-button" type="button">
+                Monthly summary
+              </button>
+            </div>
+          </div>
+          <div id="earningsList" class="earnings-list" hidden></div>
+          <div id="earningsSummary" class="earnings-summary" hidden></div>
+          <details class="why-details">
+            <summary>What this is for</summary>
+            <p class="diagnostics-note">
+              The numbers you type stay on your device — Bharat OS never
+              scrapes Swiggy or Zomato. Use them to (a) see what you
+              actually earned each month, (b) hand a signed summary to
+              an MFI for KYC-supplementary loan eligibility, (c) get a
+              year-end tax estimate. §15: bracket-level summaries only
+              leave your device when you explicitly authorize it.
+            </p>
+          </details>
+        </section>
+
         <section class="capture-card federated-card" id="federatedRoundsSection">
           <div class="capture-header">
             <span>🧪 Help improve the AI</span>

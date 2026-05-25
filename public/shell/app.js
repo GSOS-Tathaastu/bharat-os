@@ -3618,6 +3618,155 @@ function setupPhoneOtp() {
   }
 }
 
+// Phase 8.0 — earnings tracker UI (Phase 6.0a API wire).
+function setupEarningsLog() {
+  const $el = (id) => document.getElementById(id);
+  const submitBtn = $el('earningsSubmit');
+  const summaryBtn = $el('earningsViewSummary');
+  const listEl = $el('earningsList');
+  const summaryEl = $el('earningsSummary');
+  const statusEl = $el('earningsLogStatus');
+  const dateInput = $el('earningsDate');
+  if (!submitBtn || !dateInput) return;
+
+  // Default the date to today.
+  const today = new Date().toISOString().slice(0, 10);
+  dateInput.value = today;
+  dateInput.max = today;
+
+  async function refreshList() {
+    if (!state.deviceOwnerId) {
+      listEl.hidden = true;
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/earnings`
+      );
+      if (!response.ok) {
+        statusEl.textContent = 'Could not load';
+        return;
+      }
+      const body = await response.json();
+      const entries = (body.entries ?? []).slice(0, 30);
+      if (entries.length === 0) {
+        listEl.hidden = true;
+        statusEl.textContent = 'No entries yet';
+        return;
+      }
+      listEl.innerHTML = entries
+        .map((entry) => {
+          const rupees = (entry.amountPaise / 100).toFixed(2);
+          const hours = entry.hoursWorked != null ? ` · ${entry.hoursWorked}h` : '';
+          const note = entry.note ? ` · ${escapeHtml(entry.note)}` : '';
+          return (
+            `<div class="earnings-list-entry" data-entry-id="${escapeHtml(entry.entryId)}">` +
+            `<span>${escapeHtml(entry.date)} · ${escapeHtml(entry.category)} · ₹${rupees}${hours}${note}</span>` +
+            `<button class="delete-entry" type="button" aria-label="Delete entry">remove</button>` +
+            `</div>`
+          );
+        })
+        .join('');
+      listEl.hidden = false;
+      statusEl.textContent = `${entries.length} recent entries`;
+      // Wire the delete buttons.
+      listEl.querySelectorAll('.delete-entry').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const entryEl = btn.closest('.earnings-list-entry');
+          const entryId = entryEl?.dataset.entryId;
+          if (!entryId) return;
+          await fetch(
+            `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/earnings/${encodeURIComponent(entryId)}`,
+            { method: 'DELETE' }
+          );
+          refreshList();
+        });
+      });
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    const category = $el('earningsCategory').value;
+    const amountRupees = Number($el('earningsAmount').value);
+    const hoursWorked = $el('earningsHours').value
+      ? Number($el('earningsHours').value)
+      : null;
+    const date = dateInput.value;
+    const note = $el('earningsNote').value.trim() || null;
+    if (!Number.isFinite(amountRupees) || amountRupees < 0) {
+      statusEl.textContent = 'Enter a valid amount';
+      return;
+    }
+    const amountPaise = Math.round(amountRupees * 100);
+    const body = { date, category, amountPaise, hoursWorked, note };
+    statusEl.textContent = 'Saving…';
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/earnings`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        statusEl.textContent = err.error?.message ?? `Save failed (${response.status})`;
+        return;
+      }
+      // Clear form on success.
+      $el('earningsAmount').value = '';
+      $el('earningsHours').value = '';
+      $el('earningsNote').value = '';
+      statusEl.textContent = 'Saved ✓';
+      summaryEl.hidden = true;
+      refreshList();
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  });
+
+  summaryBtn.addEventListener('click', async () => {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    const month = new Date().toISOString().slice(0, 7);
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/earnings/summary?month=${month}`
+      );
+      if (!response.ok) {
+        statusEl.textContent = 'Summary unavailable';
+        return;
+      }
+      const body = await response.json();
+      summaryEl.textContent = body.statement ?? '';
+      summaryEl.hidden = false;
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  });
+
+  refreshList();
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
@@ -3627,6 +3776,7 @@ setupPhoneOtp();
 setupNetworkStatus();
 setupPwaInstall();
 setupI18n();
+setupEarningsLog();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();
