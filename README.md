@@ -144,6 +144,27 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.1 **real SMS provider HTTP integrations — Gupshup / MSG91 /
+  Twilio go live** — Phase 4.3 shipped the SMS provider abstraction
+  with stubs that threw "configure env vars first." Phase 5.1 ships
+  the actual HTTP calls. `src/phase0/sms-provider.mjs` now implements:
+  **Gupshup** (`media.smsgupshup.com/GatewayAPI/rest`, GET with creds
+  in query string, parses both `success | <id>` text and JSON formats,
+  DLT-template + principal-entity slots), **MSG91** (POST to
+  `/api/v5/send` or `/api/v5/flow` when `FLOW_ID` set, `authkey` header
+  auth, auto-extracts 6-digit OTP for flow-API template variable),
+  **Twilio** (Basic auth + form body, detects Messaging Service SIDs
+  starting `MG` vs plain `+1…` numbers). Karix remains a stub pending
+  partner contract. Structured error contracts across all three:
+  `SMS_PROVIDER_NOT_CONFIGURED` (with `missing` env-var list) and
+  `SMS_PROVIDER_REJECTED` (with `providerResponse` + Twilio
+  `providerStatusCode`) — ops alerting can split on the codes without
+  parsing message text. Per-vendor phone formatting (Gupshup/MSG91
+  strip `+`; Twilio keeps E.164). `.env.example` updated with per-
+  vendor sign-up URLs + DLT-compliance notes. 399/399 tests (+14 new
+  using `global.fetch` mocking + `withEnv` env-var stubbing). No SW
+  change. ADR 0087. **Launch deploy is now provider-config, not
+  code-change — one env-var swap when the SMS contract arrives.**
 - Phase 5.0 **account recovery via phone OTP — post-launch arc starts** —
   Phase 4.3 attached phones to identities; Phase 5.0 closes the loop.
   Without it a user who lost their 12-word phrase was locked out forever.
