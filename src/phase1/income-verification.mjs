@@ -44,6 +44,10 @@ import {
 } from '../phase0/core.mjs';
 import { ATTESTATION_TIERS } from './portable-attestation.mjs';
 import { filterBlessedMemberships } from './collective-membership.mjs';
+import {
+  filterBlessedEShramRegistrations,
+  filterBlessedSchemeEntitlements
+} from './eshram-registration.mjs';
 
 export const INCOME_VERIFICATION_PROTOCOL_VERSION =
   'bos.phase1.income-verification.v0';
@@ -173,6 +177,8 @@ export function buildIncomeVerificationBundle({
   portableAttestations,
   collectiveMemberships = [],
   blessedCollectives = [],
+  eshramRegistrations = [],
+  schemeEntitlements = [],
   at = new Date().toISOString()
 }) {
   if (!identity?.id) throw new Error('identity is required.');
@@ -277,6 +283,49 @@ export function buildIncomeVerificationBundle({
         joinedAt: m.joinedAt,
         issuedAt: m.issuedAt,
         expiresAt: m.expiresAt
+      })),
+      // Phase 6.3 — e-Shram registration surfaces only when signed
+      // by a blessed issuer AND currently valid. The bundle exposes
+      // the MASKED UAN (last 4 digits) — the full UAN stays on the
+      // stored attestation record and is reachable only via DPDP
+      // export by the worker themselves. MFI sees enough to verify
+      // government registration without holding the worker's
+      // identifier verbatim.
+      verifiedEShramRegistrations: filterBlessedEShramRegistrations(
+        (eshramRegistrations ?? []).filter((r) => r.memberId === identity.id),
+        blessedCollectives,
+        { at }
+      ).map((r) => ({
+        registrationId: r.registrationId,
+        issuerId: r.issuerId,
+        issuerName: r.issuerName,
+        uanMasked: r.uanMasked,
+        occupationCategory: r.occupationCategory,
+        occupationDetail: r.occupationDetail,
+        state: r.state,
+        district: r.district,
+        educationLevel: r.educationLevel,
+        monthlyIncomeBracket: r.monthlyIncomeBracket,
+        registeredAt: r.registeredAt,
+        issuedAt: r.issuedAt,
+        expiresAt: r.expiresAt
+      })),
+      verifiedSchemeEntitlements: filterBlessedSchemeEntitlements(
+        (schemeEntitlements ?? []).filter((e) => e.memberId === identity.id),
+        blessedCollectives,
+        { at }
+      ).map((e) => ({
+        entitlementId: e.entitlementId,
+        issuerId: e.issuerId,
+        issuerName: e.issuerName,
+        schemeCode: e.schemeCode,
+        schemeName: e.schemeName,
+        enrolledAt: e.enrolledAt,
+        benefitPaise: e.benefitPaise,
+        benefitDescription: e.benefitDescription,
+        validThrough: e.validThrough,
+        issuedAt: e.issuedAt,
+        expiresAt: e.expiresAt
       }))
     },
     disclaimer:

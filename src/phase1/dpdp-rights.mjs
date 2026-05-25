@@ -106,6 +106,8 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     incomeVerificationConsents,
     meshWithdrawals,
     collectiveMemberships,
+    eshramRegistrations,
+    schemeEntitlements,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -148,6 +150,21 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
           store.listCollectiveMemberships({ memberId: identityId }).catch(() => []),
           store.listCollectiveMemberships({ collectiveId: identityId }).catch(() => [])
         ]).then(([asMember, asCollective]) => [...asMember, ...asCollective])
+      : Promise.resolve([]),
+    // Phase 6.3 — e-Shram registrations + welfare scheme
+    // entitlements where the identity is either the member or
+    // the issuer.
+    store.listEShramRegistrations
+      ? Promise.all([
+          store.listEShramRegistrations({ memberId: identityId }).catch(() => []),
+          store.listEShramRegistrations({ issuerId: identityId }).catch(() => [])
+        ]).then(([asMember, asIssuer]) => [...asMember, ...asIssuer])
+      : Promise.resolve([]),
+    store.listSchemeEntitlements
+      ? Promise.all([
+          store.listSchemeEntitlements({ memberId: identityId }).catch(() => []),
+          store.listSchemeEntitlements({ issuerId: identityId }).catch(() => [])
+        ]).then(([asMember, asIssuer]) => [...asMember, ...asIssuer])
       : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
@@ -244,6 +261,18 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     if (m?.membershipId) dedupedMemberships.set(m.membershipId, m);
   }
   const subjectCollectiveMemberships = [...dedupedMemberships.values()];
+  // Phase 6.3 — same dedupe pattern for e-Shram registrations and
+  // scheme entitlements where the identity is both member and issuer.
+  const dedupedRegistrations = new Map();
+  for (const r of eshramRegistrations ?? []) {
+    if (r?.registrationId) dedupedRegistrations.set(r.registrationId, r);
+  }
+  const subjectEShramRegistrations = [...dedupedRegistrations.values()];
+  const dedupedEntitlements = new Map();
+  for (const e of schemeEntitlements ?? []) {
+    if (e?.entitlementId) dedupedEntitlements.set(e.entitlementId, e);
+  }
+  const subjectSchemeEntitlements = [...dedupedEntitlements.values()];
 
   return {
     protocolVersion: DPDP_RIGHTS_PROTOCOL_VERSION,
@@ -354,6 +383,17 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
       collectiveMemberships: {
         ...stats(subjectCollectiveMemberships),
         records: subjectCollectiveMemberships
+      },
+      // Phase 6.3 — e-Shram registrations + welfare scheme
+      // entitlements (worker side AND, if the identity is an issuer,
+      // its issued attestations).
+      eshramRegistrations: {
+        ...stats(subjectEShramRegistrations),
+        records: subjectEShramRegistrations
+      },
+      schemeEntitlements: {
+        ...stats(subjectSchemeEntitlements),
+        records: subjectSchemeEntitlements
       },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },

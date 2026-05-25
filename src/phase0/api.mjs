@@ -152,6 +152,14 @@ import {
   revokeMembershipAttestation,
   verifyMembershipAttestation
 } from '../phase1/collective-membership.mjs';
+import {
+  createEShramRegistration,
+  createSchemeEntitlement,
+  OCCUPATION_CATEGORIES,
+  revokeEShramRegistration,
+  revokeSchemeEntitlement,
+  WELFARE_SCHEME_CODES
+} from '../phase1/eshram-registration.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1175,6 +1183,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/blessed-collectives',
             'POST /api/admin/blessed-collectives',
             'DELETE /api/admin/blessed-collectives/:collectiveId',
+            'POST /api/identities/:issuerId/eshram-registrations',
+            'GET /api/identities/:memberId/eshram-registrations',
+            'POST /api/identities/:issuerId/eshram-registrations/:registrationId/revoke',
+            'POST /api/identities/:issuerId/scheme-entitlements',
+            'GET /api/identities/:memberId/scheme-entitlements',
+            'POST /api/identities/:issuerId/scheme-entitlements/:entitlementId/revoke',
             'GET /api/identities/:identityId/tax/summary',
             'POST /api/portable-attestation/init',
             'POST /api/portable-attestation/:tokenId/sign-tier0',
@@ -3433,7 +3447,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           meshEvents,
           portableAttestations,
           collectiveMemberships,
-          blessedCollectives
+          blessedCollectives,
+          eshramRegistrations,
+          schemeEntitlements
         ] = await Promise.all([
           typeof store.listEarningsEntries === 'function'
             ? store.listEarningsEntries({ identityId: worker.id })
@@ -3451,6 +3467,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             : Promise.resolve([]),
           typeof store.listBlessedCollectives === 'function'
             ? store.listBlessedCollectives()
+            : Promise.resolve([]),
+          // Phase 6.3 — verified e-Shram registration + welfare
+          // scheme entitlements.
+          typeof store.listEShramRegistrations === 'function'
+            ? store.listEShramRegistrations({ memberId: worker.id, status: 'active' })
+            : Promise.resolve([]),
+          typeof store.listSchemeEntitlements === 'function'
+            ? store.listSchemeEntitlements({ memberId: worker.id, status: 'active' })
             : Promise.resolve([])
         ]);
         const bundle = buildIncomeVerificationBundle({
@@ -3460,7 +3484,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           meshContributionEvents: meshEvents,
           portableAttestations,
           collectiveMemberships,
-          blessedCollectives
+          blessedCollectives,
+          eshramRegistrations,
+          schemeEntitlements
         });
         // Burn one read. Persist + audit.
         const consumed = recordConsentRead(consent);
@@ -3741,6 +3767,299 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           at: new Date().toISOString()
         });
         jsonResponse(response, 200, { ok: true, collectiveId });
+        return;
+      }
+
+      // Phase 6.3 — e-Shram registrations + welfare-scheme
+      // entitlements. Same blessed-issuer pattern as Phase 6.2:
+      // anyone can sign; only blessed issuers surface in
+      // consuming flows.
+      //
+      //   POST   /api/identities/:issuerId/eshram-registrations
+      //   GET    /api/identities/:memberId/eshram-registrations
+      //   POST   .../eshram-registrations/:registrationId/revoke
+      //   POST   /api/identities/:issuerId/scheme-entitlements
+      //   GET    /api/identities/:memberId/scheme-entitlements
+      //   POST   .../scheme-entitlements/:entitlementId/revoke
+
+      // POST /api/identities/:issuerId/eshram-registrations
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'eshram-registrations' &&
+        request.method === 'POST'
+      ) {
+        const issuerId = decodeURIComponent(parts[2]);
+        const issuer = await store.readIdentity(issuerId).catch(() => null);
+        if (!issuer) return notFound(response);
+        if (!issuer.privateKeyPem) {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'issuer_missing_private_key',
+              message:
+                'Issuer identity has no privateKey on this server (Phase 2a demo-mode caveat).'
+            }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        const member = body.memberId
+          ? await store.readIdentity(body.memberId).catch(() => null)
+          : null;
+        if (!member) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_member',
+              message: 'memberId must refer to an existing identity'
+            }
+          });
+          return;
+        }
+        let registration;
+        try {
+          registration = createEShramRegistration({
+            issuer,
+            memberId: body.memberId,
+            issuerName: body.issuerName ?? issuer.displayName ?? null,
+            uan: body.uan,
+            occupationCategory: body.occupationCategory,
+            occupationDetail: body.occupationDetail,
+            state: body.state,
+            district: body.district,
+            educationLevel: body.educationLevel,
+            monthlyIncomeBracket: body.monthlyIncomeBracket,
+            ncoCode: body.ncoCode,
+            registeredAt: body.registeredAt,
+            ttlDays: body.ttlDays
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_registration', message: error.message }
+          });
+          return;
+        }
+        await store.saveEShramRegistration(registration);
+        await store.appendLedger({
+          type: 'eshram_registration.issued',
+          registrationId: registration.registrationId,
+          issuerId: registration.issuerId,
+          memberId: registration.memberId,
+          uanMasked: registration.uanMasked,
+          state: registration.state,
+          occupationCategory: registration.occupationCategory,
+          expiresAt: registration.expiresAt,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 201, { ok: true, registration });
+        return;
+      }
+
+      // GET /api/identities/:memberId/eshram-registrations
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'eshram-registrations' &&
+        request.method === 'GET'
+      ) {
+        const memberId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(memberId).catch(() => null);
+        if (!identity) return notFound(response);
+        const status = url.searchParams.get('status') ?? undefined;
+        if (status && !['active', 'revoked'].includes(status)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_status', message: 'status must be active|revoked' }
+          });
+          return;
+        }
+        const registrations =
+          typeof store.listEShramRegistrations === 'function'
+            ? await store.listEShramRegistrations({ memberId, status })
+            : [];
+        jsonResponse(response, 200, { registrations });
+        return;
+      }
+
+      // POST /api/identities/:issuerId/eshram-registrations/:registrationId/revoke
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 6 &&
+        parts[3] === 'eshram-registrations' &&
+        parts[5] === 'revoke' &&
+        request.method === 'POST'
+      ) {
+        const issuerId = decodeURIComponent(parts[2]);
+        const registrationId = decodeURIComponent(parts[4]);
+        const issuer = await store.readIdentity(issuerId).catch(() => null);
+        if (!issuer) return notFound(response);
+        const registration = await store
+          .readEShramRegistration(registrationId)
+          .catch(() => null);
+        if (!registration) return notFound(response);
+        if (registration.issuerId !== issuerId) {
+          // §15 — non-issuer revoke leaks no ownership.
+          return notFound(response);
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        let revoked;
+        try {
+          revoked = revokeEShramRegistration(registration, { reason: body.reason });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_revocation', message: error.message }
+          });
+          return;
+        }
+        await store.saveEShramRegistration(revoked);
+        await store.appendLedger({
+          type: 'eshram_registration.revoked',
+          registrationId,
+          issuerId,
+          memberId: registration.memberId,
+          reason: revoked.revokedReason,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, registration: revoked });
+        return;
+      }
+
+      // POST /api/identities/:issuerId/scheme-entitlements
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'scheme-entitlements' &&
+        request.method === 'POST'
+      ) {
+        const issuerId = decodeURIComponent(parts[2]);
+        const issuer = await store.readIdentity(issuerId).catch(() => null);
+        if (!issuer) return notFound(response);
+        if (!issuer.privateKeyPem) {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'issuer_missing_private_key',
+              message:
+                'Issuer identity has no privateKey on this server (Phase 2a demo-mode caveat).'
+            }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        const member = body.memberId
+          ? await store.readIdentity(body.memberId).catch(() => null)
+          : null;
+        if (!member) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_member',
+              message: 'memberId must refer to an existing identity'
+            }
+          });
+          return;
+        }
+        let entitlement;
+        try {
+          entitlement = createSchemeEntitlement({
+            issuer,
+            memberId: body.memberId,
+            issuerName: body.issuerName ?? issuer.displayName ?? null,
+            schemeCode: body.schemeCode,
+            schemeName: body.schemeName,
+            enrolledAt: body.enrolledAt,
+            benefitPaise: body.benefitPaise,
+            benefitDescription: body.benefitDescription,
+            validThrough: body.validThrough,
+            ttlDays: body.ttlDays
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_entitlement', message: error.message }
+          });
+          return;
+        }
+        await store.saveSchemeEntitlement(entitlement);
+        await store.appendLedger({
+          type: 'scheme_entitlement.issued',
+          entitlementId: entitlement.entitlementId,
+          issuerId: entitlement.issuerId,
+          memberId: entitlement.memberId,
+          schemeCode: entitlement.schemeCode,
+          expiresAt: entitlement.expiresAt,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 201, { ok: true, entitlement });
+        return;
+      }
+
+      // GET /api/identities/:memberId/scheme-entitlements
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'scheme-entitlements' &&
+        request.method === 'GET'
+      ) {
+        const memberId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(memberId).catch(() => null);
+        if (!identity) return notFound(response);
+        const schemeCode = url.searchParams.get('schemeCode') ?? undefined;
+        if (schemeCode && !WELFARE_SCHEME_CODES.includes(schemeCode)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_scheme_code',
+              message: `schemeCode must be one of: ${WELFARE_SCHEME_CODES.join(', ')}`
+            }
+          });
+          return;
+        }
+        const entitlements =
+          typeof store.listSchemeEntitlements === 'function'
+            ? await store.listSchemeEntitlements({ memberId, schemeCode })
+            : [];
+        jsonResponse(response, 200, { entitlements });
+        return;
+      }
+
+      // POST /api/identities/:issuerId/scheme-entitlements/:entitlementId/revoke
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 6 &&
+        parts[3] === 'scheme-entitlements' &&
+        parts[5] === 'revoke' &&
+        request.method === 'POST'
+      ) {
+        const issuerId = decodeURIComponent(parts[2]);
+        const entitlementId = decodeURIComponent(parts[4]);
+        const issuer = await store.readIdentity(issuerId).catch(() => null);
+        if (!issuer) return notFound(response);
+        const entitlement = await store
+          .readSchemeEntitlement(entitlementId)
+          .catch(() => null);
+        if (!entitlement) return notFound(response);
+        if (entitlement.issuerId !== issuerId) return notFound(response);
+        const body = await readRequestJson(request).catch(() => ({}));
+        let revoked;
+        try {
+          revoked = revokeSchemeEntitlement(entitlement, { reason: body.reason });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_revocation', message: error.message }
+          });
+          return;
+        }
+        await store.saveSchemeEntitlement(revoked);
+        await store.appendLedger({
+          type: 'scheme_entitlement.revoked',
+          entitlementId,
+          issuerId,
+          memberId: entitlement.memberId,
+          reason: revoked.revokedReason,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, entitlement: revoked });
         return;
       }
 

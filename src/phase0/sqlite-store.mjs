@@ -307,6 +307,38 @@ const SCHEMAS = `
     json TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS eshram_registrations (
+    registration_id TEXT PRIMARY KEY,
+    issuer_id TEXT,
+    member_id TEXT,
+    uan TEXT,
+    state TEXT,
+    occupation_category TEXT,
+    status TEXT,
+    issued_at TEXT,
+    expires_at TEXT,
+    revoked_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_eshram_registrations_issuer ON eshram_registrations(issuer_id);
+  CREATE INDEX IF NOT EXISTS idx_eshram_registrations_member ON eshram_registrations(member_id);
+  CREATE INDEX IF NOT EXISTS idx_eshram_registrations_status ON eshram_registrations(status);
+
+  CREATE TABLE IF NOT EXISTS scheme_entitlements (
+    entitlement_id TEXT PRIMARY KEY,
+    issuer_id TEXT,
+    member_id TEXT,
+    scheme_code TEXT,
+    status TEXT,
+    issued_at TEXT,
+    expires_at TEXT,
+    revoked_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scheme_entitlements_issuer ON scheme_entitlements(issuer_id);
+  CREATE INDEX IF NOT EXISTS idx_scheme_entitlements_member ON scheme_entitlements(member_id);
+  CREATE INDEX IF NOT EXISTS idx_scheme_entitlements_status ON scheme_entitlements(status);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -1430,6 +1462,136 @@ export class SqliteStore {
     return Number(info.changes) > 0;
   }
 
+  // ─── e-Shram registrations — Phase 6.3 ────────────────────────────────
+
+  async saveEShramRegistration(registration) {
+    await this.init();
+    if (!registration?.registrationId) {
+      throw new Error('eshram registration requires registrationId.');
+    }
+    this._upsert(
+      'eshram_registrations',
+      [
+        'registration_id',
+        'issuer_id',
+        'member_id',
+        'uan',
+        'state',
+        'occupation_category',
+        'status',
+        'issued_at',
+        'expires_at',
+        'revoked_at',
+        'json'
+      ],
+      [
+        registration.registrationId,
+        registration.issuerId ?? null,
+        registration.memberId ?? null,
+        registration.uan ?? null,
+        registration.state ?? null,
+        registration.occupationCategory ?? null,
+        registration.status ?? 'active',
+        registration.issuedAt ?? null,
+        registration.expiresAt ?? null,
+        registration.revokedAt ?? null,
+        JSON.stringify(registration)
+      ]
+    );
+    return registration;
+  }
+
+  async readEShramRegistration(registrationId) {
+    await this.init();
+    return this._readOne('eshram_registrations', 'registration_id', registrationId);
+  }
+
+  async listEShramRegistrations({ issuerId, memberId, status } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (issuerId) {
+      clauses.push('issuer_id = ?');
+      values.push(issuerId);
+    }
+    if (memberId) {
+      clauses.push('member_id = ?');
+      values.push(memberId);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      values.push(status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM eshram_registrations ${where} ORDER BY issued_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
+  // ─── Scheme entitlements — Phase 6.3 ──────────────────────────────────
+
+  async saveSchemeEntitlement(entitlement) {
+    await this.init();
+    if (!entitlement?.entitlementId) {
+      throw new Error('scheme entitlement requires entitlementId.');
+    }
+    this._upsert(
+      'scheme_entitlements',
+      [
+        'entitlement_id',
+        'issuer_id',
+        'member_id',
+        'scheme_code',
+        'status',
+        'issued_at',
+        'expires_at',
+        'revoked_at',
+        'json'
+      ],
+      [
+        entitlement.entitlementId,
+        entitlement.issuerId ?? null,
+        entitlement.memberId ?? null,
+        entitlement.schemeCode ?? null,
+        entitlement.status ?? 'active',
+        entitlement.issuedAt ?? null,
+        entitlement.expiresAt ?? null,
+        entitlement.revokedAt ?? null,
+        JSON.stringify(entitlement)
+      ]
+    );
+    return entitlement;
+  }
+
+  async readSchemeEntitlement(entitlementId) {
+    await this.init();
+    return this._readOne('scheme_entitlements', 'entitlement_id', entitlementId);
+  }
+
+  async listSchemeEntitlements({ issuerId, memberId, schemeCode, status } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (issuerId) {
+      clauses.push('issuer_id = ?');
+      values.push(issuerId);
+    }
+    if (memberId) {
+      clauses.push('member_id = ?');
+      values.push(memberId);
+    }
+    if (schemeCode) {
+      clauses.push('scheme_code = ?');
+      values.push(schemeCode);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      values.push(status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM scheme_entitlements ${where} ORDER BY issued_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1697,6 +1859,17 @@ export class SqliteStore {
       // Blessed-collective registry entries — an erased identity
       // that was on the registry is removed from it.
       sections.blessedCollectives = sweep('blessed_collectives', ['collective_id']);
+      // Phase 6.3 — e-Shram registrations + scheme entitlements
+      // where the identity is EITHER the member (most common) OR
+      // the issuer.
+      sections.eshramRegistrations = sweep('eshram_registrations', [
+        'member_id',
+        'issuer_id'
+      ]);
+      sections.schemeEntitlements = sweep('scheme_entitlements', [
+        'member_id',
+        'issuer_id'
+      ]);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

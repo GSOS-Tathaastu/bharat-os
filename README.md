@@ -144,6 +144,44 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.3 **state e-Shram + welfare-scheme entitlement substrate
+  — ADR 0096 growth-arc plan now fully shipped** — e-Shram (Ministry
+  of Labour & Employment) has registered ~300M unorganised workers,
+  each holding a 12-digit UAN linked to welfare schemes (PMJJBY,
+  PMSBY, PM-SYM, PMJAY, MGNREGA, PMAY, NSAP). The partnership is
+  out-of-tree; the substrate ships here. New
+  `src/phase1/eshram-registration.mjs`: `createEShramRegistration`
+  (Ed25519-signed; 12-digit UAN validated; **`maskUan` →
+  `xxxx-xxxx-1098` mandatory for any audit/ledger/metric surface**;
+  8 occupation categories; 6-band coarse income bracket — NEVER
+  precise amounts; NCO code; state/district),
+  `createSchemeEntitlement` (9 scheme codes incl. STATE_WELFARE +
+  OTHER; benefit in INTEGER paise; `validThrough` separate from
+  attestation `expiresAt`), `verifyEShramRegistration` /
+  `verifySchemeEntitlement` (status enum: valid / expired / revoked
+  / signature_invalid / unknown_issuer / malformed +
+  `scheme_validity_expired` distinct), revoke functions,
+  `filterBlessedEShramRegistrations` / `filterBlessedSchemeEntitlements`
+  (REUSES Phase 6.2 blessed-collectives registry as the generalised
+  "blessed issuers" trust list). Two new SqliteStore tables + DPDP
+  cascade. **Six new API endpoints**: POST/GET issue + list + revoke
+  for both registrations and entitlements. **MFI bundle (Phase
+  6.1/6.2) extended** with `credibility.verifiedEShramRegistrations`
+  (uanMasked ONLY) + `verifiedSchemeEntitlements`. §15: UAN masked
+  everywhere except the stored record; **Aadhaar NEVER stored** —
+  not requested, not accepted, not in schema; income bracketed not
+  precise; cross-issuer revoke 404; **tests assert raw UAN is
+  ABSENT from full bundle JSON**. 696/696 tests (+23 new — including
+  the **full end-to-end test**: bless 2 issuers → labour dept issues
+  registration → NHA issues PMJAY → worker issues MFI consent → MFI
+  fetches bundle → both surface with masked UAN + raw-UAN-absent
+  assertion). ADR 0100. **The ADR 0096 growth-arc plan is now fully
+  shipped end-to-end** — Phases 6.0a + 6.0b + 6.0c + 5.9 + 6.1 +
+  6.1b + 6.2 + 6.3 all complete. The substrate any growth-arc
+  partnership consumes (single-player tools through state-government
+  integration) is in production; partnership work itself is
+  out-of-tree, but every potential partner has one curl that
+  integrates them.
 - Phase 6.2 **worker-collective membership substrate — SEWA / IFAT
   partnership conversation has a code answer** — ADR 0096's Phase
   6.2 plan was worker-collective distribution. The partnership is
