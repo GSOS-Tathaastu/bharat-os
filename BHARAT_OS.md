@@ -2075,6 +2075,30 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 ### Phase 1 tie-offs — status
 
+🟡 **Proposed (design only — not yet implemented):**
+
+- **Phase 9.0 (ADR 0107)** — Tier-4 SLM download + runtime. Prerequisite
+  for the federated-learning-as-a-service pitch. Ships the model-pack
+  registry extension for 1.5-4GB SLMs (Phi-3-mini, Llama-3.2, Gemma-2B
+  family), opt-in capability-checked download flow, runtime adapter
+  layer wrapping llama.cpp-wasm / MLC-LLM / ONNX Runtime Web,
+  integration with Phase 3.x federated rounds + Phase 6.0b mesh-
+  contribution events. **First time we introduce third-party runtime
+  dependencies** (llama.cpp-wasm / MLC-LLM aren't zero-dep) — trade-off
+  vs. the SMS/backup zero-dep pattern documented in the ADR.
+  Estimated effort: ~6-8 weeks (substantial — multi-week vs. the
+  ~1-day Phase 8.x shell ships).
+- **Phase 9.1 (sketched)** — sponsored federated-round API. Depends on
+  Phase 9.0. Sells privacy-preserving fine-tuning to banks / hospitals
+  / government as a paid service routing through the operator network.
+
+Suggested sequencing: Phase 8.2 → 8.3 → 8.4 (small shell UI ships) →
+Phase 9.0 (big SLM infrastructure ship) → Phase 9.1 (demand-side
+revenue wire). The 8.x arc and 9.x arc can run in parallel after
+8.4 since they don't share code surfaces.
+
+---
+
 Closed in Phase 8.1 (ADR 0106 — shell UI for the mesh-contribution dashboard):
 1. ✅ **Shell UI for the mesh-contribution dashboard — monthly retrospective surface** — Phase 6.0b shipped the `aggregateMeshByMonth` + `GET /api/identities/:id/mesh/summary?month=YYYY-MM` substrate but had no worker-facing UI. The only mesh surface was the real-time ticker on `#meshNodeSection` showing "Earned today" + per-tick events. Phase 8.1 ships the monthly retrospective card. New `#meshDashboardSection` in `public/shell/index.html` between `#meshNodeSection` (real-time ticker) and `#earningsLogSection` (Phase 8.0 manual log). Earn tab now flows: real-time → monthly mesh → manual cross-platform → federated rounds. Card layout: header *"📊 Your mesh earnings this month"* + status caption; controls row with `<input type="month">` (defaults to current, `max=current` so no future months) + Refresh button; headline block with large `₹X,XXX.XX` total in accent green + secondary line *"N working days · M events"* (or *"No events yet"* when empty); per-workload breakdown showing only nonzero categories (`🧠 Inference`, `💾 Storage serve`, `🗄️ Storage store`, `🧪 Federated rounds`); daily timeline as a mini bar chart (3-column grid: date MM-DD + horizontal bar scaled to month max with `min-width: 2px` floor + rupees right-aligned). New `setupMeshDashboard()` in `public/shell/app.js` (~120 lines, pure DOM + fetch; follows the Phase 8.0 setup-function pattern; `state.deviceOwnerId` scopes every call; re-renders on month change OR Refresh; calls `refresh()` once at startup; HTML-escapes workload labels as defence-in-depth; `formatRupees(paise)` uses `toLocaleString('en-IN', ...)` for Indian-numbering output `₹50,000.00` / `₹1,00,000.00`). New CSS rules in `public/shell/styles.css`: `.mesh-dashboard-headline` (green gradient panel), `.mesh-dashboard-total` (32px tabular-numeric accent), `.mesh-dashboard-breakdown-row` (per-workload flat grid), `.mesh-dashboard-timeline-row` (3-col grid date/bar/amount with `width: <pct>%` inline-styled bar scaled to month max). SW cache v30 → v31. **§15 bindings preserved**: identity-scoped via `state.deviceOwnerId` (cross-user inspection impossible from UI); aggregates-only (the bar chart shows per-day totals + counts, never raw events); HTML escaping on workload labels even though they're server-constants (defence-in-depth); no new PII surface (summary endpoint already returns aggregates). **No automated browser tests** added (same pattern as Phase 8.0 — codebase has no browser-test infrastructure). Live smoke verification: shell HTML contains `meshDashboardSection` + month picker; with 5 seeded inference events (1M tokens × ₹16 each = 1600 paise/event), the `/mesh/summary?month=2026-05` API returns `totalPaise: 8000` + 5 daily timeline rows, so the UI would display *"₹80.00"* with 5 daily bars; all 747 Node tests still pass. **A worker scrolling the Earn tab now sees their mesh substrate's monthly arithmetic at a glance**: real-time ticker for *today*, the new dashboard for *this month* with per-workload + per-day breakdowns, and manual logging for cross-platform earnings beyond mesh. The investor demo path now has the compounding-earnings narrative the substrate was always designed to surface.
 
