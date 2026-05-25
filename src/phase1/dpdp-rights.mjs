@@ -104,6 +104,7 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     earningsEntries,
     portableAttestations,
     incomeVerificationConsents,
+    meshWithdrawals,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -134,6 +135,10 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     // Phase 6.1 — MFI income-verification consents the user has issued.
     store.listIncomeVerificationConsents
       ? store.listIncomeVerificationConsents({ workerId: identityId }).catch(() => [])
+      : Promise.resolve([]),
+    // Phase 6.1b — mesh-earnings UPI withdrawal requests.
+    store.listMeshWithdrawals
+      ? store.listMeshWithdrawals({ workerId: identityId }).catch(() => [])
       : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
@@ -218,6 +223,10 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
   const subjectIncomeVerificationConsents = (
     incomeVerificationConsents ?? []
   ).filter((c) => c.workerId === identityId);
+  // Mesh-earnings UPI withdrawals — pre-filtered by workerId.
+  const subjectMeshWithdrawals = (meshWithdrawals ?? []).filter(
+    (w) => w.workerId === identityId
+  );
 
   return {
     protocolVersion: DPDP_RIGHTS_PROTOCOL_VERSION,
@@ -315,6 +324,13 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
       incomeVerificationConsents: {
         ...stats(subjectIncomeVerificationConsents),
         records: subjectIncomeVerificationConsents
+      },
+      // Phase 6.1b — mesh-earnings UPI cash-out requests. Contains
+      // the UPI ID (stored in the JSON blob); export gives the user
+      // visibility into every payout request they've made.
+      meshWithdrawals: {
+        ...stats(subjectMeshWithdrawals),
+        records: subjectMeshWithdrawals
       },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },

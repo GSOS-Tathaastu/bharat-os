@@ -270,6 +270,20 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_income_verification_consents_worker ON income_verification_consents(worker_id);
   CREATE INDEX IF NOT EXISTS idx_income_verification_consents_expires ON income_verification_consents(expires_at);
 
+  CREATE TABLE IF NOT EXISTS mesh_withdrawals (
+    request_id TEXT PRIMARY KEY,
+    worker_id TEXT,
+    amount_paise INTEGER,
+    status TEXT,
+    requested_at TEXT,
+    accepted_at TEXT,
+    paid_at TEXT,
+    failed_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_mesh_withdrawals_worker ON mesh_withdrawals(worker_id);
+  CREATE INDEX IF NOT EXISTS idx_mesh_withdrawals_status ON mesh_withdrawals(status);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -1239,6 +1253,63 @@ export class SqliteStore {
     return this._listAll('income_verification_consents');
   }
 
+  // ─── Mesh withdrawals — Phase 6.1b ────────────────────────────────────
+
+  async saveMeshWithdrawal(request) {
+    await this.init();
+    if (!request?.requestId) {
+      throw new Error('mesh withdrawal requires requestId.');
+    }
+    this._upsert(
+      'mesh_withdrawals',
+      [
+        'request_id',
+        'worker_id',
+        'amount_paise',
+        'status',
+        'requested_at',
+        'accepted_at',
+        'paid_at',
+        'failed_at',
+        'json'
+      ],
+      [
+        request.requestId,
+        request.workerId ?? null,
+        request.amountPaise ?? 0,
+        request.status ?? 'pending',
+        request.requestedAt ?? null,
+        request.acceptedAt ?? null,
+        request.paidAt ?? null,
+        request.failedAt ?? null,
+        JSON.stringify(request)
+      ]
+    );
+    return request;
+  }
+
+  async readMeshWithdrawal(requestId) {
+    await this.init();
+    return this._readOne('mesh_withdrawals', 'request_id', requestId);
+  }
+
+  async listMeshWithdrawals({ workerId, status } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (workerId) {
+      clauses.push('worker_id = ?');
+      values.push(workerId);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      values.push(status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM mesh_withdrawals ${where} ORDER BY requested_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1493,6 +1564,7 @@ export class SqliteStore {
       sections.earningsLog = sweep('earnings_log', ['identity_id']);
       sections.portableAttestations = sweep('portable_attestations', ['worker_id']);
       sections.incomeVerificationConsents = sweep('income_verification_consents', ['worker_id']);
+      sections.meshWithdrawals = sweep('mesh_withdrawals', ['worker_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

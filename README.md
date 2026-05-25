@@ -144,6 +144,39 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.1b **UPI cash-out for mesh earnings — workers can finally
+  turn accumulated mesh paise into real rupees** — Phase 6.0b
+  promoted the mesh dashboard but earnings never left the system.
+  Phase 6.1b ships the substrate any UPI payout partner (Razorpay X
+  / Cashfree Payouts / Decentro) consumes without per-partner
+  integration code. New `src/phase1/mesh-withdrawal.mjs`:
+  `isValidUpiId` + `maskUpiId` (raw UPI NEVER outside the stored
+  record + outbound payout call), `computeAvailableBalance` (sums
+  payout of events NOT bundled into a non-failed withdrawal —
+  **failed withdrawals' events automatically return to the pool**
+  so partner-side failures don't strand balance),
+  `createWithdrawalRequest` (Ed25519-signed envelope bundling
+  ALL unsettled events; ₹10 floor / ₹10L ceiling; deterministic ID),
+  `verifyWithdrawalRequest` (strips mutable state fields before
+  verification so post-signing transitions don't invalidate).
+  **Four-status state machine** — `pending` → `provider_accepted` →
+  `paid` (or → `failed`), with a fast-path `pending → paid` for
+  synchronous partners. `markWithdrawalAccepted/Paid/Failed` enforce
+  valid-transitions-only. New SqliteStore `mesh_withdrawals` table
+  + DPDP cascade. **Seven new API endpoints**: worker side
+  (`GET /mesh/balance`, `POST /mesh/withdrawals` with structured
+  error codes, `GET /mesh/withdrawals`); admin side (Phase 5.7
+  admin-auth gated; `POST /admin/mesh/withdrawals/:id/accepted` +
+  `/paid` + `/failed`). Each transition emits typed ledger event
+  with operator attribution + masked UPI ID. §15: worker signs every
+  withdrawal (no silent payouts); UPI masked everywhere except the
+  stored record; idempotent settlement via event-locking; failed
+  payouts refundable automatically; DPDP cascade extends. 647/647
+  tests (+27 new — including the **full pending → paid round-trip**
+  with operator audit + the **failed → events-return-to-pool**
+  proof). ADR 0098. **Phase 6.1 fully shipped — MFI consumption
+  (6.1) + UPI cash-out (6.1b) both complete. The payout-partner
+  integration is one operator curl, not an SDK.**
 - Phase 6.1 **MFI-consumable income-verification bundle + worker-issued
   consent — the first hard-rupee external incentive** — ADR 0096's
   Phase 6.1 plan paired MFI partnerships with UPI cash-out. The MFI

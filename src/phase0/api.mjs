@@ -136,6 +136,15 @@ import {
   revokeIncomeVerificationConsent,
   verifyIncomeVerificationConsent
 } from '../phase1/income-verification.mjs';
+import {
+  computeAvailableBalance,
+  createWithdrawalRequest as createMeshWithdrawalRequest,
+  markWithdrawalAccepted,
+  markWithdrawalFailed,
+  markWithdrawalPaid,
+  maskUpiId,
+  MESH_WITHDRAWAL_LIMITS
+} from '../phase1/mesh-withdrawal.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1147,6 +1156,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/earnings/summary',
             'DELETE /api/identities/:identityId/earnings/:entryId',
             'GET /api/identities/:identityId/mesh/summary',
+            'GET /api/identities/:identityId/mesh/balance',
+            'POST /api/identities/:identityId/mesh/withdrawals',
+            'GET /api/identities/:identityId/mesh/withdrawals',
+            'POST /api/admin/mesh/withdrawals/:requestId/accepted',
+            'POST /api/admin/mesh/withdrawals/:requestId/paid',
+            'POST /api/admin/mesh/withdrawals/:requestId/failed',
             'GET /api/identities/:identityId/tax/summary',
             'POST /api/portable-attestation/init',
             'POST /api/portable-attestation/:tokenId/sign-tier0',
@@ -3551,6 +3566,200 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           summary,
           statement: meshMonthlyStatement(summary)
         });
+        return;
+      }
+
+      // Phase 6.1b — mesh-earnings UPI cash-out.
+      //
+      //   GET /api/identities/:id/mesh/balance
+      //     Returns the worker's currently-available (unsettled)
+      //     mesh-contribution payout.
+      //
+      //   POST /api/identities/:id/mesh/withdrawals
+      //     Body: { upiId }
+      //     Worker initiates a cash-out for the FULL available
+      //     balance (partial withdrawals are a future-polish item).
+      //     Bharat OS bundles every unsettled event into a single
+      //     signed request; once persisted, those events become
+      //     SETTLED (held in this withdrawal) so a concurrent
+      //     request can't double-claim.
+      //
+      //   GET /api/identities/:id/mesh/withdrawals
+      //     Lists the worker's withdrawal history.
+      //
+      //   POST /api/admin/mesh/withdrawals/:requestId/accepted
+      //     POST /api/admin/mesh/withdrawals/:requestId/paid
+      //     POST /api/admin/mesh/withdrawals/:requestId/failed
+      //     Ops-only state transitions (Phase 5.7 admin-auth).
+      //     The payout-provider integration boundary lives here:
+      //     ops marks the withdrawal as the partner reports back.
+
+      // GET /api/identities/:id/mesh/balance
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'mesh' &&
+        parts[4] === 'balance' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const events =
+          typeof store.listMeshContributionEvents === 'function'
+            ? await store.listMeshContributionEvents()
+            : [];
+        const withdrawals =
+          typeof store.listMeshWithdrawals === 'function'
+            ? await store.listMeshWithdrawals({ workerId: identityId })
+            : [];
+        const balance = computeAvailableBalance(events, withdrawals, {
+          operatorId: identityId
+        });
+        jsonResponse(response, 200, { balance });
+        return;
+      }
+
+      // POST /api/identities/:id/mesh/withdrawals
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'mesh' &&
+        parts[4] === 'withdrawals' &&
+        request.method === 'POST'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const body = await readRequestJson(request).catch(() => ({}));
+        const events =
+          typeof store.listMeshContributionEvents === 'function'
+            ? await store.listMeshContributionEvents()
+            : [];
+        const priorWithdrawals =
+          typeof store.listMeshWithdrawals === 'function'
+            ? await store.listMeshWithdrawals({ workerId: identityId })
+            : [];
+        let request_;
+        try {
+          request_ = createMeshWithdrawalRequest({
+            identity,
+            meshEvents: events,
+            priorWithdrawals,
+            upiId: body.upiId
+          });
+        } catch (error) {
+          const code = /insufficient_balance/.test(error.message)
+            ? 'insufficient_balance'
+            : /amount_exceeds_ceiling/.test(error.message)
+              ? 'amount_exceeds_ceiling'
+              : /upiId/.test(error.message)
+                ? 'invalid_upi_id'
+                : 'invalid_withdrawal_request';
+          jsonResponse(response, 400, {
+            error: { code, message: error.message }
+          });
+          return;
+        }
+        await store.saveMeshWithdrawal(request_);
+        await store.appendLedger({
+          type: 'mesh_withdrawal.requested',
+          requestId: request_.requestId,
+          workerId: request_.workerId,
+          amountPaise: request_.amountPaise,
+          upiMasked: request_.upiIdMasked,
+          eventCount: request_.eventCount,
+          at: request_.requestedAt
+        });
+        jsonResponse(response, 201, { ok: true, withdrawal: request_ });
+        return;
+      }
+
+      // GET /api/identities/:id/mesh/withdrawals
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'mesh' &&
+        parts[4] === 'withdrawals' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const withdrawals =
+          typeof store.listMeshWithdrawals === 'function'
+            ? await store.listMeshWithdrawals({ workerId: identityId })
+            : [];
+        jsonResponse(response, 200, { withdrawals });
+        return;
+      }
+
+      // POST /api/admin/mesh/withdrawals/:requestId/accepted|paid|failed
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'admin' &&
+        parts[2] === 'mesh' &&
+        parts[3] === 'withdrawals' &&
+        parts.length === 6 &&
+        request.method === 'POST'
+      ) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const transition = parts[5];
+        if (!['accepted', 'paid', 'failed'].includes(transition)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_transition',
+              message: 'transition must be accepted | paid | failed'
+            }
+          });
+          return;
+        }
+        const withdrawalId = decodeURIComponent(parts[4]);
+        const withdrawal = await store
+          .readMeshWithdrawal(withdrawalId)
+          .catch(() => null);
+        if (!withdrawal) return notFound(response);
+        const body = await readRequestJson(request).catch(() => ({}));
+        let updated;
+        try {
+          if (transition === 'accepted') {
+            updated = markWithdrawalAccepted(withdrawal, {
+              providerReference: body.providerReference
+            });
+          } else if (transition === 'paid') {
+            updated = markWithdrawalPaid(withdrawal, {
+              providerReference: body.providerReference
+            });
+          } else {
+            updated = markWithdrawalFailed(withdrawal, { reason: body.reason });
+          }
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_transition', message: error.message }
+          });
+          return;
+        }
+        await store.saveMeshWithdrawal(updated);
+        await store.appendLedger({
+          type: `mesh_withdrawal.${updated.status}`,
+          requestId: updated.requestId,
+          workerId: updated.workerId,
+          operator: auth.operator,
+          providerReference: updated.providerReference ?? null,
+          failureReason: updated.failureReason ?? null,
+          at: new Date().toISOString()
+        });
+        logger.info('admin_mesh_withdrawal_transition', {
+          requestId,
+          operator: auth.operator,
+          withdrawalId,
+          status: updated.status
+        });
+        jsonResponse(response, 200, { ok: true, withdrawal: updated });
         return;
       }
 
