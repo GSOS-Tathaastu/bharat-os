@@ -327,6 +327,43 @@ export class SqliteStore {
     }
   }
 
+  // Phase 5.5 — online snapshot. SQLite's `VACUUM INTO` produces a
+  // point-in-time consistent copy of the entire database to a
+  // target path. The source db remains fully writable during the
+  // operation (it acquires a read lock; WAL writers continue).
+  // The destination is a single .sqlite file — no WAL companion —
+  // so it's safe to copy/upload/restore as-is.
+  //
+  // Caller is responsible for choosing the path + ensuring the
+  // parent directory exists.
+  async snapshotTo(targetPath) {
+    if (!targetPath || typeof targetPath !== 'string') {
+      throw new Error('snapshotTo requires a target path.');
+    }
+    await this.init();
+    // VACUUM INTO refuses if the target exists. Surface a clear
+    // error instead of letting the cryptic SQLite message bubble.
+    if (existsSync(targetPath)) {
+      throw new Error(`snapshot target already exists: ${targetPath}`);
+    }
+    const dir = path.dirname(targetPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    // node:sqlite has no parameter binding for VACUUM INTO; safe
+    // because targetPath is operator-supplied (not user input).
+    const escaped = targetPath.replace(/'/g, "''");
+    this.db.exec(`VACUUM INTO '${escaped}'`);
+    const stats = await fs.stat(targetPath);
+    return {
+      kind: 'sqlite',
+      sourcePath: this.dbPath,
+      targetPath,
+      bytes: stats.size,
+      createdAt: stats.mtime.toISOString()
+    };
+  }
+
   // Generic helpers — each save/read/list method delegates here.
   _upsert(table, columns, values) {
     const placeholders = columns.map(() => '?').join(', ');

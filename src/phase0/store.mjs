@@ -191,6 +191,36 @@ export class BosStore {
     await fs.appendFile(this.ledgerPath, `${JSON.stringify(event)}\n`, 'utf8');
   }
 
+  // Phase 5.5 — file-store snapshot. Recursively copies the entire
+  // root directory tree to the target path. There is no atomic
+  // equivalent of SQLite's `VACUUM INTO` for a directory layout —
+  // a write that lands mid-copy will produce a snapshot that
+  // includes the new value of some files but not others. For
+  // launch we live with this (the file store is dev/migration-only;
+  // production runs SQLite per ADR 0081). Mirroring the SQLite
+  // store's surface here means scripts/snapshot-store.mjs is
+  // backend-agnostic.
+  async snapshotTo(targetPath) {
+    if (!targetPath || typeof targetPath !== 'string') {
+      throw new Error('snapshotTo requires a target path.');
+    }
+    try {
+      await fs.access(targetPath);
+      throw new Error(`snapshot target already exists: ${targetPath}`);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await fs.cp(this.rootPath, targetPath, { recursive: true });
+    const stats = await fs.stat(targetPath);
+    return {
+      kind: 'file',
+      sourcePath: this.rootPath,
+      targetPath,
+      bytes: stats.size,
+      createdAt: stats.mtime.toISOString()
+    };
+  }
+
   async listLedger({ limit = 100, type, newestFirst = true } = {}) {
     let raw = '';
     try {

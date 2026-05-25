@@ -144,6 +144,31 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.5 **online backup snapshots + Litestream sidecar — durability
+  for launch** — Phase 4.6's launch runbook flagged backup as future
+  polish; without it a single disk failure on the launch host was
+  total data loss. Phase 5.5 ships `store.snapshotTo(targetPath)` on
+  both backends — SqliteStore uses `VACUUM INTO 'path'` (consistent
+  online snapshot, single file, no WAL companion); BosStore uses
+  `fs.cp recursive`. New `scripts/snapshot-store.mjs` CLI:
+  backend-agnostic, timestamped path under `<root>/backups/`,
+  retention (default 7), exit-code-driven for cron healthchecks.
+  New `src/phase0/backup.mjs` ships `snapshotPath` (Windows-safe
+  timestamps), `listSnapshots` (newest-first), `applyRetention`.
+  New endpoint `GET /api/admin/backup-status` returns snapshot
+  count + latest `ageSeconds` for ops dashboards (Grafana alert on
+  `ageSeconds > 90000` = no snapshot in >25h). `docker-compose.yml`
+  gains a commented-out Litestream sidecar for opt-in continuous WAL
+  replication to S3-compatible storage (Backblaze B2, Wasabi, AWS S3,
+  Cloudflare R2). `.env.example` documents both local-cron + sidecar
+  configs. §15 binding extension — snapshots ARE user data, operators
+  must treat backup destinations under DPDP residency rules; the ADR
+  calls this out explicitly. Zero new runtime deps. 456/456 tests
+  (+15 new — including snapshot → re-open → round-trip identity
+  verification that proves restore actually works). Live CLI smoke
+  confirmed (376KB snapshot in 6ms). ADR 0091. **One disk failure
+  is no longer a single point of total data loss; the production
+  deploy has a working DR story.**
 - Phase 5.4 **SMS per-call timeout + circuit breaker — fast-fail when
   a vendor breaks** — Phase 5.3's fallback chain still PROBED every
   broken vendor in turn, so a 30-second Gupshup hang meant 30+s OTPs

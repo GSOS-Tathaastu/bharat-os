@@ -57,6 +57,37 @@ services:
       bos-api:
         condition: service_healthy
 
+  # Phase 5.5 — optional Litestream sidecar for continuous WAL
+  # replication of the SQLite database to S3-compatible object
+  # storage (AWS S3, Backblaze B2, Wasabi, MinIO, Cloudflare R2).
+  #
+  # Uncomment + set the LITESTREAM_* env vars to enable. Litestream
+  # is independent of the in-tree `scripts/snapshot-store.mjs`:
+  #   • snapshot-store.mjs: simple cron-friendly point-in-time
+  #     snapshots, kept locally in <root>/backups/.
+  #   • Litestream: continuous WAL streaming with second-granularity
+  #     point-in-time restore from object storage.
+  # Production should run both — the local snapshots are the fast
+  # recovery path; the Litestream replicas are the off-site DR path.
+  #
+  # litestream:
+  #   image: litestream/litestream:latest
+  #   container_name: bos-litestream
+  #   restart: unless-stopped
+  #   command: replicate /data/bos.db s3://${LITESTREAM_BUCKET}/bos.db
+  #   environment:
+  #     LITESTREAM_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID}
+  #     LITESTREAM_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY}
+  #     LITESTREAM_BUCKET: ${LITESTREAM_BUCKET}
+  #     LITESTREAM_REGION: ${LITESTREAM_REGION:-us-east-1}
+  #   volumes:
+  #     - bos-data:/data:ro
+  #   networks:
+  #     - bos-network
+  #   depends_on:
+  #     bos-api:
+  #       condition: service_healthy
+
 volumes:
   bos-data:
   caddy-data:

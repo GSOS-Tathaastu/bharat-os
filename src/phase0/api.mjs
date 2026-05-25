@@ -87,6 +87,7 @@ import {
 } from './rate-limiter.mjs';
 import { generateRequestId, logger, safePath } from './logger.mjs';
 import { recordRequest, renderMetrics } from './metrics.mjs';
+import { listSnapshots } from './backup.mjs';
 import { normalisePhone, sendSms } from './sms-provider.mjs';
 import {
   createPhoneOtp,
@@ -637,6 +638,55 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 5.5 — backup status. Reports the most recent snapshots
+      // produced by `scripts/snapshot-store.mjs`. Useful as an ops
+      // signal that the backup cron is healthy + as a manual
+      // verification surface before disaster-recovery testing.
+      //
+      // §15: snapshot metadata (filename + size + mtime) is
+      // operational, not user data — it never contains identity
+      // refs. The endpoint sits on the regular rate-limited surface
+      // (the 'read' policy) so a misconfigured scrape can't pin
+      // the API.
+      if (request.method === 'GET' && url.pathname === '/api/admin/backup-status') {
+        const rootPath = store.rootPath ?? null;
+        if (!rootPath) {
+          jsonResponse(response, 503, {
+            ok: false,
+            error: 'store has no rootPath — cannot enumerate snapshots'
+          });
+          return;
+        }
+        const backupDir = path.join(rootPath, 'backups');
+        const snapshots = await listSnapshots(backupDir);
+        const latest = snapshots[0] ?? null;
+        const nowMs = Date.now();
+        const latestAgeSeconds = latest
+          ? Math.max(0, Math.floor((nowMs - Date.parse(latest.createdAt)) / 1000))
+          : null;
+        jsonResponse(response, 200, {
+          ok: true,
+          backupDir,
+          snapshotCount: snapshots.length,
+          latest: latest
+            ? {
+                name: latest.name,
+                kind: latest.kind,
+                bytes: latest.bytes,
+                createdAt: latest.createdAt,
+                ageSeconds: latestAgeSeconds
+              }
+            : null,
+          snapshots: snapshots.slice(0, 20).map((s) => ({
+            name: s.name,
+            kind: s.kind,
+            bytes: s.bytes,
+            createdAt: s.createdAt
+          }))
+        });
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -742,6 +792,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /healthz',
             'GET /readyz',
             'GET /metrics',
+            'GET /api/admin/backup-status',
             'GET /api',
             'GET /shell/',
             'GET /console/',
