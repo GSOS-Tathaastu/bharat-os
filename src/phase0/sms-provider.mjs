@@ -15,7 +15,11 @@
 // the rate-limiter / database integration stays the same.
 
 import { logger } from './logger.mjs';
-import { recordCircuitState, recordSmsAttempt } from './metrics.mjs';
+import {
+  recordCircuitState,
+  recordSmsAttempt,
+  recordSmsInflight
+} from './metrics.mjs';
 
 export const SMS_PROVIDER_PROTOCOL_VERSION = 'bos.phase0.sms-provider.v0';
 
@@ -28,6 +32,11 @@ const E164_PATTERN = /^\+\d{10,15}$/;
 const DEFAULT_SMS_TIMEOUT_MS = 3000;
 const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
 const DEFAULT_CIRCUIT_OPEN_MS = 30_000;
+// Phase 5.8 — bulkhead concurrency cap. Default 10 in-flight per
+// provider — sane upper bound for an India-SMS API (vendor docs
+// typically rate-limit at 200-1000 req/s; 10 concurrent never
+// approaches that, but does cap exposure to a hung vendor).
+const DEFAULT_BULKHEAD_MAX = 10;
 
 function readPositiveIntEnv(name, fallback) {
   const raw = process.env?.[name];
@@ -50,6 +59,10 @@ function circuitFailureThreshold() {
 
 function circuitOpenMs() {
   return readPositiveIntEnv('BHARAT_OS_SMS_CIRCUIT_OPEN_MS', DEFAULT_CIRCUIT_OPEN_MS);
+}
+
+function bulkheadMaxConcurrent() {
+  return readPositiveIntEnv('BHARAT_OS_SMS_BULKHEAD_MAX', DEFAULT_BULKHEAD_MAX);
 }
 
 // Tiny `fetch` wrapper that aborts after `timeoutMs` and re-throws
@@ -528,13 +541,86 @@ export function circuitStatusSnapshot() {
   return out;
 }
 
+// Phase 5.8 — bulkhead (concurrency cap). A hung vendor with no
+// timeout fired yet can otherwise accumulate dozens of in-flight
+// fetches, each holding a socket + Node heap. The bulkhead caps
+// concurrent in-flight calls per provider; at capacity, future
+// calls fast-fail with SMS_PROVIDER_BULKHEAD_FULL — a recoverable
+// code so the fallback chain falls through to the next provider.
+//
+// Implementation: simple counter (no queue). Queuing would add
+// latency for callers waiting on capacity to free up; we'd rather
+// fail fast and let the fallback chain route around the busy
+// provider.
+//
+// The bulkhead state is per-provider-name + module-scoped so
+// concurrent calls through the same wrappedProvider share the
+// counter (which is what we want).
+
+const bulkheadStates = new Map(); // provider name → { inflight, maxConcurrent }
+
+export function createBulkheadProvider(provider, options = {}) {
+  const name = provider.name;
+  const state = {
+    inflight: 0,
+    maxConcurrent: options.maxConcurrent ?? bulkheadMaxConcurrent()
+  };
+  bulkheadStates.set(name, state);
+  recordSmsInflight(name, 0);
+
+  return {
+    name,
+    _bulkhead: state,
+    async send(args) {
+      if (state.inflight >= state.maxConcurrent) {
+        const error = new Error(
+          `${name} bulkhead full — ${state.inflight}/${state.maxConcurrent} in-flight. Try a different provider.`
+        );
+        error.code = 'SMS_PROVIDER_BULKHEAD_FULL';
+        error.provider = name;
+        error.inflight = state.inflight;
+        error.maxConcurrent = state.maxConcurrent;
+        throw error;
+      }
+      state.inflight += 1;
+      recordSmsInflight(name, state.inflight);
+      try {
+        return await provider.send(args);
+      } finally {
+        state.inflight = Math.max(0, state.inflight - 1);
+        recordSmsInflight(name, state.inflight);
+      }
+    }
+  };
+}
+
+export function bulkheadStatusSnapshot() {
+  const out = {};
+  for (const [name, s] of bulkheadStates) {
+    out[name] = { inflight: s.inflight, maxConcurrent: s.maxConcurrent };
+  }
+  return out;
+}
+
 function wrappedProvider(provider) {
-  // Order matters: outermost is the circuit-breaker (decides
-  // whether to call at all), inner is telemetry (records every
-  // attempt that DOES happen). A skipped-by-circuit send doesn't
-  // record an attempt — the metric `bos_sms_circuit_state` is the
-  // observability surface for that case.
-  return createCircuitBreakerProvider(instrumentedProvider(provider));
+  // Order (outermost → innermost):
+  //   bulkhead       — fastest rejection; doesn't waste a slot
+  //                    on a known-broken vendor that the circuit
+  //                    breaker is about to refuse anyway.
+  //   circuit breaker — short-circuits when the breaker is open.
+  //   telemetry       — records every attempt that survives the
+  //                    two layers above.
+  //   vendor          — actual fetch / send.
+  //
+  // The bulkhead going outermost matters: if a vendor's calls are
+  // hanging (slow socket reads), we DON'T want to count them
+  // against the breaker's failure threshold from inside a busy
+  // bulkhead. Fast-fail at the bulkhead → fallback chain → next
+  // vendor; the slow vendor's circuit eventually opens via
+  // existing timeouts on the inflight calls.
+  return createBulkheadProvider(
+    createCircuitBreakerProvider(instrumentedProvider(provider))
+  );
 }
 
 const PROVIDERS = {
@@ -587,7 +673,8 @@ export function createFallbackProvider(providerList) {
           const isKnown =
             error?.code === 'SMS_PROVIDER_NOT_CONFIGURED' ||
             error?.code === 'SMS_PROVIDER_REJECTED' ||
-            error?.code === 'SMS_PROVIDER_CIRCUIT_OPEN';
+            error?.code === 'SMS_PROVIDER_CIRCUIT_OPEN' ||
+            error?.code === 'SMS_PROVIDER_BULKHEAD_FULL';
           attempts.push({
             provider: provider.name,
             code: error?.code ?? 'UNKNOWN',

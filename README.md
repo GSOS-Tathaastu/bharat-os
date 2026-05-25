@@ -144,6 +144,32 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.8 **SMS bulkhead (per-provider concurrency cap) +
+  in-flight gauge — closes Phase 5.4 future-work** — Phase 5.4
+  shipped timeouts + circuit breakers but a slow-but-not-yet-timing-
+  out vendor (2.5s response floor under the 3s timeout) could
+  accumulate dozens of concurrent in-flight fetches under a storm,
+  exhausting the event loop. Phase 5.8 caps it. New
+  `createBulkheadProvider(provider, { maxConcurrent })` factory —
+  per-provider counter, no queue (queueing adds latency AND defeats
+  the fallback chain's "any vendor" goal). At capacity, throws
+  `SMS_PROVIDER_BULKHEAD_FULL` so the chain falls through. Default
+  10 concurrent via `BHARAT_OS_SMS_BULKHEAD_MAX`. Wrapper stack now
+  `bulkhead → breaker → telemetry → vendor` (bulkhead outermost so
+  busy-vendor calls don't pollute the breaker's failure threshold).
+  Fallback chain treats `BULKHEAD_FULL` as recoverable alongside
+  NOT_CONFIGURED / REJECTED / CIRCUIT_OPEN. New Prometheus gauge
+  `bos_sms_inflight{provider}` — alert rule
+  `bos_sms_inflight{provider="..."} >= max for 30s` catches hung
+  vendors. Three-axis SMS observability: rate
+  (`bos_sms_send_total`), state (`bos_sms_circuit_state`),
+  saturation (`bos_sms_inflight`). §15 — bulkhead never touches
+  phone/body; fast-fail-over-queue means no in-memory ring of
+  pending OTPs. Worst-case memory: 40 sockets per process under
+  storms. 491/491 tests (+7 new — using a `controllableProvider`
+  that hangs on a manually-resolved deferred to drive concurrency
+  without sleeps). ADR 0094. **Bounded memory under OTP storms;
+  three-axis vendor health visibility.**
 - Phase 5.7 **ops admin endpoints — circuit reset, cooldown override,
   manual snapshot** — Phases 5.2/5.4/5.5 shipped helpers
   (`clearRecoveryCooldown`, `resetCircuit`, `store.snapshotTo`) but

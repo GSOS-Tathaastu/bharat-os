@@ -16,6 +16,7 @@ const counters = new Map(); // `${method}|${routePattern}|${status}` → count
 const latencyBuckets = new Map(); // `${method}|${routePattern}` → { buckets, sum, count }
 const smsCounters = new Map(); // `${provider}|${outcome}` → count — Phase 5.3
 const smsCircuitStates = new Map(); // `${provider}` → 0|1|2 — Phase 5.4
+const smsInflight = new Map(); // `${provider}` → integer count — Phase 5.8
 // Phase 5.6 — backup age. `recordBackupAge({ ageSeconds, … })` is
 // called by the /api/admin/backup-status handler so the freshness
 // data feeds both the JSON endpoint AND /metrics from a single
@@ -89,6 +90,25 @@ export function recordCircuitState(provider, state) {
 export function circuitStateSnapshot() {
   const out = {};
   for (const [provider, value] of smsCircuitStates) {
+    out[provider] = value;
+  }
+  return out;
+}
+
+// Phase 5.8 — SMS bulkhead in-flight gauge. Updated by the
+// bulkhead wrapper on every enter / exit. Operators alert on
+// `bos_sms_inflight{provider="..."} >= maxConcurrent for 30s` to
+// catch a hung vendor before its calls finally time out.
+export function recordSmsInflight(provider, value) {
+  if (!provider || typeof provider !== 'string') return;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return;
+  smsInflight.set(provider, Math.floor(n));
+}
+
+export function smsInflightSnapshot() {
+  const out = {};
+  for (const [provider, value] of smsInflight) {
     out[provider] = value;
   }
   return out;
@@ -210,6 +230,17 @@ export function renderMetrics() {
     lines.push(`bos_sms_circuit_state{provider="${escapeLabel(provider)}"} ${value}`);
   }
 
+  // Phase 5.8 — SMS bulkhead in-flight count per provider. Alert
+  // rule: `bos_sms_inflight{provider="..."} >= max_concurrent for
+  // 30s` catches a hung vendor before its calls finally time out.
+  lines.push('# HELP bos_sms_inflight SMS sends currently in flight per provider.');
+  lines.push('# TYPE bos_sms_inflight gauge');
+  const inflightKeys = [...smsInflight.keys()].sort();
+  for (const provider of inflightKeys) {
+    const value = smsInflight.get(provider);
+    lines.push(`bos_sms_inflight{provider="${escapeLabel(provider)}"} ${value}`);
+  }
+
   // Phase 5.6 — backup freshness gauges. Emitted unconditionally:
   // when no snapshot exists yet, age is rendered as NaN (Prometheus
   // accepts NaN; Grafana renders it as a gap) so ops alerts trigger.
@@ -246,6 +277,7 @@ export function resetMetrics() {
   latencyBuckets.clear();
   smsCounters.clear();
   smsCircuitStates.clear();
+  smsInflight.clear();
   latestBackupAt = null;
   latestBackupBytes = null;
   latestBackupKind = null;
