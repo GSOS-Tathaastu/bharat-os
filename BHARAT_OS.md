@@ -2077,6 +2077,29 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 🟡 **Proposed (design only — not yet implemented):**
 
+- **Phase 10 (ADR 0110)** — Labeling marketplace (sponsor-paid, worker-
+  executed, DPDP-audited Indic-language data labels). Strongest near-
+  term monetisation lever surfaced in the 2026-05-25 strategy thread:
+  Scale AI / Surge AI / Labelbox occupy a priced ~$15B+ market with
+  thin Indic-language coverage; Bharat OS already ships ~70% of the
+  substrate it needs (DPDP consent + signed ledger + UPI cash-out +
+  Trust Passport provenance) and ~50% of the worker-side input
+  modality (Phase 2a.5 voice / 2a.8 OCR; Phase 9.0 SLM when shipped).
+  Six sub-phases: 10.0 sponsor onboarding + escrow; 10.1 job spec +
+  corpus upload; 10.2 worker discovery + new **🏷️ Label** tab; 10.3
+  per-task-kind UIs (preference pair / classification / span /
+  transcription); 10.4 QC pipeline (golden-set + inter-annotator α +
+  sponsor sample); 10.5 signed JSONL export bundle; 10.6 SLM pre-
+  labeling hint (depends on Phase 9.0). Per-label payouts flow into
+  the existing `mesh_events` ledger and drain via the Phase 8.3
+  cash-out UI. Worker preference-pair throughput at ~₹40/label × 6/min
+  ≈ ₹240/hour gross — beats the ₹0.16/M-token inference rate as a
+  near-term worker hook. Sponsor escrow + platform fee
+  (`bharatOsFeePaise`) is the FIRST non-investor revenue line. §15:
+  per-job consent grants via Phase 1.27 remediation; rotating
+  `identityHash` per `(identityId, jobId)` prevents sponsor cross-job
+  correlation; refund-on-failed semantics extend to labeling.
+  Estimated effort: ~9-10 weeks across the six sub-phases.
 - **Phase 9.0 (ADR 0107)** — Tier-4 SLM download + runtime. Prerequisite
   for the federated-learning-as-a-service pitch. Ships the model-pack
   registry extension for 1.5-4GB SLMs (Phi-3-mini, Llama-3.2, Gemma-2B
@@ -2092,10 +2115,15 @@ code lands; do not create a separate `STATUS.md` (§16).
   Phase 9.0. Sells privacy-preserving fine-tuning to banks / hospitals
   / government as a paid service routing through the operator network.
 
-Suggested sequencing: Phase 8.2 → 8.3 → 8.4 (small shell UI ships) →
-Phase 9.0 (big SLM infrastructure ship) → Phase 9.1 (demand-side
-revenue wire). The 8.x arc and 9.x arc can run in parallel after
-8.4 since they don't share code surfaces.
+Suggested sequencing: Phase 8.4 (small shell UI — push opt-in,
+activates Phase 7.x) → Phase 9.0 (big SLM infrastructure ship) →
+Phase 9.1 (sponsored federated rounds — demand-side revenue) →
+Phase 10.0–10.5 (labeling marketplace, sponsor-funded revenue line;
+sub-phases 10.0–10.2 launchable without Phase 9.0 — 10.3 SLM
+pre-labeling hint layers on after 9.0 lands; 10.4–10.5 QC + signed
+export harden before any commercial pilot). The 8.x, 9.x, and 10.x
+arcs share the existing consent / ledger / UPI rails but don't share
+code surfaces — can run in parallel after Phase 8.4.
 
 ---
 
