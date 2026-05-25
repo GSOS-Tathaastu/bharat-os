@@ -103,9 +103,17 @@ import {
 import {
   applyRecoveryCooldown,
   assertNoCooldown,
+  clearRecoveryCooldown,
   cooldownState,
   COOLDOWN_SCOPES
 } from '../phase1/recovery-cooldown.mjs';
+import { checkAdminAuth } from './admin-auth.mjs';
+import { resetCircuit } from './sms-provider.mjs';
+import {
+  applyRetention,
+  ensureBackupDir,
+  snapshotPath
+} from './backup.mjs';
 
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB — guards against OOM
 const TRUST_PROXY = process.env?.BHARAT_OS_TRUST_PROXY === '1';
@@ -713,6 +721,191 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 5.7 — ops admin endpoints. All gated by
+      // `BHARAT_OS_ADMIN_TOKEN` shared secret via
+      // Authorization: Bearer <token>; refuse with 503 when the
+      // token isn't configured (safe default).
+
+      // POST /api/admin/sms/circuit/reset
+      // Body: { provider?: string }
+      //   - provider given → reset that one
+      //   - provider omitted → reset every provider
+      // Emits a `sms.circuit.reset` ledger event with operator
+      // attribution.
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/api/admin/sms/circuit/reset'
+      ) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const body = await readRequestJson(request).catch(() => ({}));
+        const provider = typeof body.provider === 'string' ? body.provider.trim() : null;
+        resetCircuit(provider || undefined);
+        await store.appendLedger({
+          type: 'sms.circuit.reset',
+          provider: provider || 'all',
+          operator: auth.operator,
+          at: new Date().toISOString()
+        });
+        logger.info('admin_circuit_reset', {
+          requestId,
+          operator: auth.operator,
+          provider: provider || 'all'
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          provider: provider || 'all',
+          operator: auth.operator
+        });
+        return;
+      }
+
+      // POST /api/admin/identities/:id/recovery-cooldown/clear
+      // Body: { reason: string }
+      // SIM-swap incident-response: ops confirms identity via a
+      // secondary channel and lifts the 24h Phase 5.2 cooldown so
+      // the legitimate user can resume sensitive actions.
+      // ALWAYS audited via `cooldown_override.applied` ledger event.
+      const cooldownClearMatch =
+        /^\/api\/admin\/identities\/([^/]+)\/recovery-cooldown\/clear$/.exec(
+          url.pathname
+        );
+      if (request.method === 'POST' && cooldownClearMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const identityId = decodeURIComponent(cooldownClearMatch[1]);
+        const body = await readRequestJson(request).catch(() => ({}));
+        const reason = (typeof body.reason === 'string' ? body.reason : '').trim();
+        if (!reason || reason.length < 8) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'reason_required',
+              message:
+                'Provide a `reason` (>=8 chars) describing the out-of-band identity verification. ' +
+                'This is the audit-trail anchor for an irreversible operator action.'
+            }
+          });
+          return;
+        }
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const state = cooldownState(identity);
+        const cleared = clearRecoveryCooldown(identity);
+        await store.saveIdentity(cleared);
+        await store.appendLedger({
+          type: 'cooldown_override.applied',
+          identityId,
+          operator: auth.operator,
+          reason: reason.slice(0, 240),
+          priorCooldownUntil: state.until,
+          at: new Date().toISOString()
+        });
+        logger.info('admin_cooldown_cleared', {
+          requestId,
+          operator: auth.operator,
+          identityId
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          identityId,
+          priorCooldown: state,
+          operator: auth.operator,
+          message:
+            'Cooldown cleared. The identity can resume sensitive actions. The override is in the audit ledger.'
+        });
+        return;
+      }
+
+      // POST /api/admin/backup/snapshot
+      // Body: { keep?: number }   (default 7)
+      // Triggers a snapshot immediately instead of waiting for the
+      // cron. Useful before risky operations (planned migration,
+      // schema change), or just to verify the snapshot pipeline is
+      // working in the live deploy.
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/api/admin/backup/snapshot'
+      ) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const rootPath = store.rootPath ?? null;
+        if (!rootPath || typeof store.snapshotTo !== 'function') {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'snapshot_unavailable',
+              message: 'Store has no snapshotTo() method or no rootPath.'
+            }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        const keep = Number.isFinite(body.keep) && body.keep > 0 ? Math.floor(body.keep) : 7;
+        const kind = store.dbPath ? 'sqlite' : 'file';
+        const { backupDir, fullPath } = snapshotPath({ rootPath, kind });
+        await ensureBackupDir(backupDir);
+        const startedMs = Date.now();
+        let report;
+        try {
+          report = await store.snapshotTo(fullPath);
+        } catch (error) {
+          logger.error('admin_snapshot_failed', { requestId, reason: error.message });
+          jsonResponse(response, 500, {
+            error: { code: 'snapshot_failed', message: error.message }
+          });
+          return;
+        }
+        const integrity =
+          typeof store.verifyIntegrity === 'function'
+            ? await store.verifyIntegrity(fullPath)
+            : { ok: true, messages: ['integrity-check not supported on this backend'] };
+        if (!integrity.ok) {
+          // Discard the corrupt snapshot; do NOT touch retention.
+          try {
+            const fsModule = await import('node:fs/promises');
+            await fsModule.rm(fullPath, { recursive: true, force: true });
+          } catch (_error) {
+            // best-effort
+          }
+          logger.error('admin_snapshot_integrity_failed', {
+            requestId,
+            messages: integrity.messages
+          });
+          jsonResponse(response, 500, {
+            error: {
+              code: 'snapshot_integrity_failed',
+              messages: integrity.messages
+            }
+          });
+          return;
+        }
+        const removed = await applyRetention(backupDir, { keep });
+        const durationMs = Date.now() - startedMs;
+        await store.appendLedger({
+          type: 'backup.snapshot.created',
+          kind: report.kind,
+          bytes: report.bytes,
+          targetPath: report.targetPath,
+          operator: auth.operator,
+          trigger: 'admin_endpoint',
+          at: new Date().toISOString()
+        });
+        logger.info('admin_snapshot_complete', {
+          requestId,
+          operator: auth.operator,
+          bytes: report.bytes,
+          durationMs
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          snapshot: report,
+          integrity: { ok: true, messages: integrity.messages },
+          retentionRemoved: removed.length,
+          durationMs,
+          operator: auth.operator
+        });
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -819,6 +1012,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /readyz',
             'GET /metrics',
             'GET /api/admin/backup-status',
+            'POST /api/admin/sms/circuit/reset',
+            'POST /api/admin/identities/:id/recovery-cooldown/clear',
+            'POST /api/admin/backup/snapshot',
             'GET /api',
             'GET /shell/',
             'GET /console/',

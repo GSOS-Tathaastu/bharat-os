@@ -144,6 +144,32 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.7 **ops admin endpoints — circuit reset, cooldown override,
+  manual snapshot** — Phases 5.2/5.4/5.5 shipped helpers
+  (`clearRecoveryCooldown`, `resetCircuit`, `store.snapshotTo`) but
+  never wired them to HTTP. Operationally awful for incident
+  response — SREs had to ssh in to run one-off scripts. Phase 5.7
+  ships thin HTTP wrappers + a shared auth gate. New
+  `src/phase0/admin-auth.mjs` — `BHARAT_OS_ADMIN_TOKEN` shared-secret
+  bearer auth with constant-time comparison, 16-char minimum,
+  safe-default 503 when unset (no accidental exposure). Optional
+  `X-Bharat-Os-Operator` header for audit attribution. Three
+  endpoints: `POST /api/admin/sms/circuit/reset` (body `{ provider? }`;
+  emits `sms.circuit.reset`), `POST /api/admin/identities/:id/recovery-
+  cooldown/clear` (body `{ reason }` 8-char min — friction-by-design
+  so the operator articulates the override; emits
+  `cooldown_override.applied` with reason + priorCooldownUntil),
+  `POST /api/admin/backup/snapshot` (runs the same
+  snapshotTo → verifyIntegrity → applyRetention pipeline as the
+  cron CLI; emits `backup.snapshot.created`). All three under the
+  `write` rate-limit policy. §15 audit binding — every admin action
+  is in the typed ledger so token compromise is detectable
+  post-hoc. 484/484 tests (+17 new — including 6 end-to-end live
+  HTTP tests that boot `createPhase0ApiServer` on a random port and
+  curl real fetch calls; first API-server boot tests in the
+  codebase). ADR 0093. **SIM-swap incident response is now a
+  1-minute curl-from-jumphost flow; vendor outage recovery is one
+  POST; planned-migration snapshots are operator-initiated.**
 - Phase 5.6 **snapshot integrity verification + restore CLI +
   backup-age Prometheus gauge — closes Phase 5.5's future-work** —
   Phase 5.5 shipped snapshots but left three gaps. (1) Without
