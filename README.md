@@ -144,6 +144,43 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 8.3 **shell UI for UPI mesh cash-out** — Phase 6.1b shipped
+  the mesh-withdrawal endpoints (`GET /mesh/balance`, `POST
+  /mesh/withdrawals`, `GET /mesh/withdrawals`) but had no
+  worker-facing UI. Phase 8.3 ships the cash-out card on the Earn
+  tab between the Phase 8.1 mesh dashboard and the Phase 8.0 manual
+  earnings log. New `#meshWithdrawalSection` with: blue-gradient
+  balance block (36px tabular-numeric `₹X,XXX.XX` for
+  `availablePaise` + unsettled-event count + min-withdrawal
+  threshold when applicable); UPI ID input (`autocomplete="off"`
+  per §15 — don't autofill, don't prompt save) + [Request
+  withdrawal] button + [Refresh balance] link; history list with
+  amount, status badge (pending amber / provider_accepted blue /
+  paid green / failed red), request date, masked UPI, provider
+  reference if available, failure reason if failed; "How cash-out
+  works" collapsible explaining the state machine + refund-on-
+  failed property. New `setupMeshWithdrawal()` in `app.js` (~150
+  lines, follows Phase 8.0/8.1/8.2 pattern; balance auto-refresh on
+  tab visit + after every successful request; disabled-state logic
+  based on available vs minimum; `window.confirm` gate matching
+  Phase 8.2 revoke + Phase 2a.26 reset patterns; UPI cleared on
+  success; `toLocaleString('en-IN')` Indian-numbering;
+  `escapeHtml()` on provider-controlled fields). New CSS for blue
+  gradient panel + tabular-numeric value + 2-col list grid + 4
+  status-coloured badge variants. SW cache v32→v33. §15: UPI never
+  on ledger / metrics (server enforces); `autocomplete="off"`;
+  form clears on success eliminating set-and-forget; explicit
+  confirm gate; refund-on-failed communicated honestly; HTML
+  escaping. No automated browser tests (same pattern as 8.0/8.1/
+  8.2). Live smoke verified: 15 seeded inference events at 1M
+  tokens (1600 paise each = ₹120 total) → `/mesh/balance` returns
+  `availablePaise: 12000` → POST withdrawal returns `status:
+  'pending', amountPaise: 12000, upiIdMasked: 'r***h@hdfcbank'`.
+  747/747 Node tests still pass. ADR 0109. **Earn tab story is
+  now complete for the mesh-contribution flow.** Real-time ticker
+  → monthly retrospective → cash-out to UPI → status visible in
+  history. An investor demo can show the full earn-and-spend loop
+  without leaving the tab.
 - Phase 8.2 **shell UI for MFI income-verification consent issuance**
   — Phase 6.1 shipped the MFI consent endpoints but had no
   worker-facing UI. Phase 8.2 ships the card on the Trust tab (same

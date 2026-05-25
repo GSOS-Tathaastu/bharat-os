@@ -4084,6 +4084,168 @@ function setupMfiConsent() {
   refreshList();
 }
 
+// Phase 8.3 — UPI cash-out UI (Phase 6.1b API wire).
+function setupMeshWithdrawal() {
+  const $el = (id) => document.getElementById(id);
+  const balanceEl = $el('meshWithdrawalBalance');
+  const balanceMetaEl = $el('meshWithdrawalBalanceMeta');
+  const statusEl = $el('meshWithdrawalStatus');
+  const upiInput = $el('meshWithdrawalUpiId');
+  const requestBtn = $el('meshWithdrawalRequest');
+  const refreshBtn = $el('meshWithdrawalRefresh');
+  const listEl = $el('meshWithdrawalList');
+  if (!requestBtn || !upiInput) return;
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatRupees(paise) {
+    const rupees = (paise ?? 0) / 100;
+    return `₹${rupees.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }
+
+  async function refreshBalance() {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/mesh/balance`
+      );
+      if (!response.ok) {
+        statusEl.textContent = 'Could not load balance';
+        return;
+      }
+      const body = await response.json();
+      const balance = body.balance ?? {};
+      const available = balance.availablePaise ?? 0;
+      balanceEl.textContent = formatRupees(available);
+      const minPaise = balance.minWithdrawalPaise ?? 1000;
+      const eventCount = balance.unsettledEventCount ?? 0;
+      if (available === 0) {
+        balanceMetaEl.textContent = 'No unsettled events yet';
+        requestBtn.disabled = true;
+      } else if (available < minPaise) {
+        balanceMetaEl.textContent = `${eventCount} unsettled event${eventCount === 1 ? '' : 's'} · ${formatRupees(minPaise)} minimum to withdraw`;
+        requestBtn.disabled = true;
+      } else {
+        balanceMetaEl.textContent = `${eventCount} unsettled event${eventCount === 1 ? '' : 's'} ready`;
+        requestBtn.disabled = false;
+      }
+      statusEl.textContent = '';
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  }
+
+  async function refreshList() {
+    if (!state.deviceOwnerId) return;
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/mesh/withdrawals`
+      );
+      if (!response.ok) return;
+      const body = await response.json();
+      const withdrawals = body.withdrawals ?? [];
+      if (withdrawals.length === 0) {
+        listEl.innerHTML =
+          '<div class="mesh-withdrawal-list-empty">No withdrawals yet.</div>';
+        return;
+      }
+      listEl.innerHTML = withdrawals
+        .map((w) => {
+          const status = w.status ?? 'pending';
+          const requestedAt = w.requestedAt
+            ? new Date(w.requestedAt).toLocaleDateString('en-IN')
+            : '—';
+          const upiMasked = w.upiIdMasked ?? '—';
+          const ref = w.providerReference
+            ? ` · ref ${escapeHtml(w.providerReference.slice(0, 24))}`
+            : '';
+          const failureReason = w.failureReason
+            ? ` · ${escapeHtml(w.failureReason)}`
+            : '';
+          return `
+            <div class="mesh-withdrawal-list-entry">
+              <div>
+                <span class="mesh-withdrawal-list-entry-amount">
+                  ${formatRupees(w.amountPaise)}
+                </span>
+                <span class="mesh-withdrawal-status-badge ${status}">${status.replace('_', ' ')}</span>
+                <div class="mesh-withdrawal-list-entry-meta">
+                  ${escapeHtml(requestedAt)} → ${escapeHtml(upiMasked)}${ref}${failureReason}
+                </div>
+              </div>
+            </div>`;
+        })
+        .join('');
+    } catch (_error) {
+      /* silent */
+    }
+  }
+
+  async function refreshAll() {
+    await refreshBalance();
+    await refreshList();
+  }
+
+  requestBtn.addEventListener('click', async () => {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    const upiId = upiInput.value.trim();
+    if (!upiId || !upiId.includes('@')) {
+      statusEl.textContent = 'Enter a valid UPI ID (e.g. yourname@hdfcbank)';
+      return;
+    }
+    if (
+      !window.confirm(
+        `Withdraw your entire mesh-contribution balance to ${upiId}? The events will be locked into this request until paid.`
+      )
+    )
+      return;
+    statusEl.textContent = 'Requesting…';
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/mesh/withdrawals`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ upiId })
+        }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        statusEl.textContent = err.error?.message ?? `Failed (${response.status})`;
+        return;
+      }
+      const body = await response.json();
+      statusEl.textContent = `Requested ${formatRupees(body.withdrawal?.amountPaise ?? 0)}`;
+      // Clear the UPI input on success — explicit re-entry next time
+      // is a privacy choice (don't leave the masked-but-readable
+      // ID lingering in the form).
+      upiInput.value = '';
+      await refreshAll();
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  });
+
+  refreshBtn.addEventListener('click', refreshAll);
+  refreshAll();
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
@@ -4096,6 +4258,7 @@ setupI18n();
 setupEarningsLog();
 setupMeshDashboard();
 setupMfiConsent();
+setupMeshWithdrawal();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

@@ -188,6 +188,60 @@
           </details>
         </section>
 
+        <!-- Phase 8.3 — UPI cash-out card (Phase 6.1b wire). -->
+        <section class="capture-card mesh-withdrawal-card" id="meshWithdrawalSection">
+          <div class="capture-header">
+            <span>🏧 Cash out your mesh earnings</span>
+            <span id="meshWithdrawalStatus" class="capture-meta">—</span>
+          </div>
+          <div class="mesh-withdrawal-balance">
+            <div class="mesh-withdrawal-balance-label">Available to withdraw</div>
+            <div class="mesh-withdrawal-balance-value" id="meshWithdrawalBalance">₹0.00</div>
+            <div class="mesh-withdrawal-balance-meta" id="meshWithdrawalBalanceMeta">
+              No unsettled events yet
+            </div>
+          </div>
+          <div class="mesh-withdrawal-form">
+            <div class="earnings-row">
+              <label for="meshWithdrawalUpiId">UPI ID</label>
+              <input
+                id="meshWithdrawalUpiId"
+                type="text"
+                maxlength="80"
+                inputmode="email"
+                placeholder="yourname@hdfcbank"
+                autocomplete="off"
+              />
+            </div>
+            <div class="passkey-actions">
+              <button id="meshWithdrawalRequest" class="secondary-button" type="button">
+                Request withdrawal
+              </button>
+              <button id="meshWithdrawalRefresh" class="link-button" type="button">
+                Refresh balance
+              </button>
+            </div>
+          </div>
+          <div class="mesh-withdrawal-list-heading">Past withdrawals</div>
+          <div id="meshWithdrawalList" class="mesh-withdrawal-list"></div>
+          <details class="why-details">
+            <summary>How cash-out works</summary>
+            <p class="diagnostics-note">
+              Every paise you earned from mesh-contribution ticks (inference,
+              storage serve / store, federated rounds) accumulates as an
+              "unsettled balance." When you tap Request, Bharat OS bundles
+              ALL unsettled events into a single signed withdrawal request,
+              locks those events, and forwards the request to a payout
+              partner. You'll see status updates: <strong>pending</strong>
+              → <strong>provider_accepted</strong> → <strong>paid</strong>
+              (or <strong>failed</strong>, in which case the events return
+              to your available balance — no money lost). Your UPI ID never
+              appears on the public ledger; only the last few characters
+              show in audit logs.
+            </p>
+          </details>
+        </section>
+
         <!-- Phase 8.0 — earnings tracker card (Phase 6.0a wire). -->
         <section class="capture-card earnings-log-card" id="earningsLogSection">
           <div class="capture-header">
