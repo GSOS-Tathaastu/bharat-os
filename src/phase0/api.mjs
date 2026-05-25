@@ -1950,9 +1950,65 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             urgency: body.urgency,
             subscription
           });
+
+          // Phase 7.2 — when the worker's subscription is
+          // delivery-keyed (Phase 7.0 `storeDeliveryKeys: true`),
+          // send a REAL Web Push via Phase 7.1's helper instead of
+          // the Phase 2a.4 local-only scaffold. Updates the
+          // notification record with the actual delivery outcome.
+          // §15: the push body uses the notification's title +
+          // body verbatim (caller is responsible for ensuring no
+          // PII in them — same contract as ADR 0053).
+          const pushResult = await sendPushToIdentity(
+            store,
+            body.workerId,
+            {
+              type: 'worker_job_alert',
+              title: notification.content.title,
+              body: notification.content.body,
+              jobReference: notification.jobReference,
+              locale: notification.content.locale
+            },
+            {
+              urgency: notification.content.urgency === 'high' ? 'high' : 'normal',
+              ledgerType: 'worker_notification.pushed',
+              requestId,
+              logger
+            }
+          );
+          if (!pushResult.skipped && pushResult.sent > 0) {
+            // Flip the scaffold's vapidIntegrated: false to true +
+            // mark delivered. The notification record IS user data
+            // (DPDP §11 export surface) so we don't include the
+            // push endpoint here — only the outcome.
+            notification.delivery = {
+              ...notification.delivery,
+              status: 'delivered_web_push',
+              vapidIntegrated: true,
+              sent: true,
+              sentToEndpoints: pushResult.sent,
+              reason: null
+            };
+          } else if (!pushResult.skipped && pushResult.failed > 0) {
+            notification.delivery = {
+              ...notification.delivery,
+              status: 'web_push_failed',
+              vapidIntegrated: true,
+              sent: false,
+              reason: `${pushResult.failed} push delivery failure(s)`
+            };
+          }
           await store.saveWorkerNotification(notification);
-          jsonResponse(response, notification.delivery.status === 'blocked_no_subscription' ? 202 : 201, {
-            ok: notification.delivery.status !== 'blocked_no_subscription',
+          const httpStatus =
+            notification.delivery.status === 'blocked_no_subscription'
+              ? 202
+              : notification.delivery.status === 'web_push_failed'
+                ? 502
+                : 201;
+          jsonResponse(response, httpStatus, {
+            ok:
+              notification.delivery.status !== 'blocked_no_subscription' &&
+              notification.delivery.status !== 'web_push_failed',
             notification
           });
           return;

@@ -144,6 +144,31 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 7.2 **§9A worker-notification VAPID delivery — closes ADR
+  0053's `vapidIntegrated: false` gap** — Phase 2a.4 (August 2025)
+  scaffolded the §9A worker-notification envelope but stopped at
+  local service-worker notifications because real Web Push didn't
+  exist. All four prerequisites (VAPID, endpoint storage, retries
+  + unsubscribe, production integration) now exist via Phase 7.0/7.1.
+  Phase 7.2 wires them. `POST /api/worker-notifications` handler
+  now calls `sendPushToIdentity` with a `worker_job_alert` payload;
+  the notification record's `delivery` block flips based on
+  outcome through five state branches: delivered_web_push (HTTP
+  201), web_push_failed (HTTP 502 — partial failure), scaffold-
+  only fallback (Phase 2a.4 backward-compat path, no push),
+  blocked_no_subscription (HTTP 202), VAPID-unset graceful
+  degradation. Notification urgency maps to push HTTP `Urgency`
+  header (`high` for time-sensitive job alerts vs `normal` for
+  routine matches). §15: notification content's no-PII contract
+  from ADR 0053 (`exactLocationIncluded: false` etc.) extends
+  into the push body verbatim. 731/731 tests (+5 new — including
+  the **end-to-end §9A push delivery test** that proves the
+  scaffold's `vapidIntegrated: false` flips to `true` after real
+  delivery, PLUS the scaffold-only-fallback test proving ADR
+  0053 backward compat, PLUS the VAPID-unset graceful-degradation
+  test, PLUS the urgency-passthrough test). ADR 0103. **§9A loop
+  is fully operational — workers actually get job alerts now,
+  not demos.**
 - Phase 7.1 **push alerts for audit-significant events — three new
   wire-points + reusable `sendPushToIdentity` helper** — Phase 7.0
   shipped the SIM-swap detection push as ~60 lines of inline
