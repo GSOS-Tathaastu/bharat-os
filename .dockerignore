@@ -1,0 +1,39 @@
+# Phase 4.6 — Docker build context excludes.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Node
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Dev / scratch
+.tmp
+.demo-*
+.bharat-os
+*.tar.gz
+*.zip
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Tests + docs aren't needed at runtime, but the builder stage
+# needs them — kept in for now since the build runs `node --test`.
+# Once we split test execution out to CI-only, uncomment:
+# tests
+# docs
+
+# Docker artefacts
+Dockerfile
+.dockerignore
+docker-compose*.yml
+.env
+.env.local

@@ -1,0 +1,70 @@
+# Bharat OS — Caddy reverse proxy config (Phase 4.6).
+#
+# Terminates TLS, handles automatic Let's Encrypt cert issuance,
+# proxies all traffic to the bos-api container on the internal
+# Docker network.
+#
+# The API server emits its own security headers (CSP, X-Frame,
+# Referrer-Policy, Permissions-Policy, HSTS — when BHARAT_OS_HSTS=1)
+# per Phase 4.1. Caddy passes them through unchanged. We add only
+# the headers Caddy is uniquely positioned to set (the `Server`
+# header we want to suppress, and `Strict-Transport-Security` as a
+# belt-and-braces fallback in case BHARAT_OS_HSTS is misconfigured).
+#
+# To launch:
+#   1. Set BHARAT_OS_DOMAIN in .env to your real domain
+#   2. Point DNS A record to the host
+#   3. `docker compose up -d`
+#   4. Caddy auto-provisions the cert on first request.
+
+{
+	# Email for Let's Encrypt registration. Override via env var if
+	# you want renewal notifications somewhere specific.
+	email {$BHARAT_OS_LETSENCRYPT_EMAIL:dpo@bharat-os.in}
+}
+
+{$BHARAT_OS_DOMAIN} {
+	# Forward original client IP so the rate-limiter
+	# (`BHARAT_OS_TRUST_PROXY=1`) sees the right address.
+	reverse_proxy bos-api:8787 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+	}
+
+	# Defence-in-depth security headers (the API also sets these,
+	# but Caddy lets a misconfigured backend still be safe).
+	header {
+		# HSTS — Caddy issues HTTPS by default, so 2-year HSTS is
+		# safe. The `preload` directive only matters once the
+		# domain is on the HSTS preload list (apply at
+		# hstspreload.org).
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		# Hide implementation details.
+		-Server
+		X-Powered-By "Bharat OS"
+	}
+
+	# Access log to stdout — picked up by Docker / k8s log scrapers.
+	# Caddy's JSON format is structured-log-friendly.
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Local-dev / non-HTTPS fallback. Triggered when BHARAT_OS_DOMAIN
+# isn't set or equals "localhost".
+:80 {
+	reverse_proxy bos-api:8787 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+	}
+	log {
+		output stdout
+		format json
+	}
+}

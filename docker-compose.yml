@@ -1,0 +1,67 @@
+# Bharat OS — production-style docker-compose (Phase 4.6).
+#
+# Two services:
+#   • bos-api  — the Phase 0 API + shell, behind Caddy
+#   • caddy    — reverse proxy with automatic Let's Encrypt HTTPS
+#                + security-header passthrough
+#
+# Persisted volumes:
+#   • bos-data  — the SQLite database + the ledger
+#   • caddy-data, caddy-config — Let's Encrypt certs + state
+
+services:
+  bos-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bharat-os:latest
+    container_name: bos-api
+    restart: unless-stopped
+    expose:
+      - "8787"
+    environment:
+      BHARAT_OS_STORE_KIND: ${BHARAT_OS_STORE_KIND:-sqlite}
+      BHARAT_OS_HSTS: ${BHARAT_OS_HSTS:-1}
+      BHARAT_OS_TRUST_PROXY: ${BHARAT_OS_TRUST_PROXY:-1}
+      BHARAT_OS_CORS_ORIGINS: ${BHARAT_OS_CORS_ORIGINS:-}
+      BHARAT_OS_LOG_LEVEL: ${BHARAT_OS_LOG_LEVEL:-info}
+      BHARAT_OS_SMS_PROVIDER: ${BHARAT_OS_SMS_PROVIDER:-log}
+      BHARAT_OS_LOG_OTP_BODIES: "0"
+    volumes:
+      - bos-data:/data
+    networks:
+      - bos-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: bos-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      BHARAT_OS_DOMAIN: ${BHARAT_OS_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - bos-network
+    depends_on:
+      bos-api:
+        condition: service_healthy
+
+volumes:
+  bos-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  bos-network:
+    driver: bridge

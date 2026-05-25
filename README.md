@@ -144,6 +144,24 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.6 **deployment scripts — Docker + Caddy + CI + runbook
+  (launch arc complete)** — multi-stage Dockerfile (builder runs the
+  full test suite; runtime is `gcr.io/distroless/nodejs24-debian12:
+  nonroot`, no shell, uid 65532; production env defaults baked in;
+  `/readyz` healthcheck every 30 s). `docker-compose.yml` orchestrates
+  `bos-api` + Caddy 2-alpine reverse proxy with auto-Let's-Encrypt +
+  3 named volumes. `Caddyfile` forwards X-Forwarded-For, passes through
+  Phase 4.1 security headers, adds belt-and-braces HSTS at the proxy.
+  `.env.example` documents every BHARAT_OS_* env var. `.dockerignore`
+  keeps `.git`/`.tmp`/`.env` out of the image. `.github/workflows/ci.yml`:
+  `test` job (full 372-test suite + live `/healthz` smoke), `docker-build`
+  (verifies Dockerfile), `publish` (tagged releases auto-push to GHCR).
+  `docs/launch-runbook.md` — 8-section end-to-end deploy procedure
+  (partner/regulatory prereqs, code checklist, host options, compose
+  bring-up, verification, observability hookup, backup strategy,
+  day-of-launch checklist, known limitations, rollback). 372/372 tests
+  unchanged. ADR 0085. **Phase 4 launch arc complete — Bharat OS
+  deployable in one command.**
 - Phase 4.5 **i18n framework — localized UI shell** — `public/shell/i18n.mjs`
   ships seven supported locales (en-IN, hi-IN, hi-Latn-IN, mr-IN, bho-IN,
   ta-IN, bn-IN). Public surface: `t(key, { fallback })`, `setLocale` /
