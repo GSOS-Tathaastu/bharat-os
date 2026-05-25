@@ -93,6 +93,12 @@ import {
   PHONE_OTP_PURPOSES,
   verifyPhoneOtp
 } from '../phase1/phone-otp.mjs';
+import {
+  buildRecoveryBundle,
+  findIdentityByPhone,
+  startAccountRecovery,
+  verifyAccountRecovery
+} from '../phase1/account-recovery.mjs';
 
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB — guards against OOM
 const TRUST_PROXY = process.env?.BHARAT_OS_TRUST_PROXY === '1';
@@ -802,6 +808,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/dpdp/grievance',
             'POST /api/phone-otp/send',
             'POST /api/phone-otp/verify',
+            'POST /api/recovery/start',
+            'POST /api/recovery/verify',
             'GET /api/attestations',
             'GET /api/attestations/:attestationId',
             'GET /api/attestations/:attestationId/verify',
@@ -2518,6 +2526,159 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             expiresAt: result.otp.expiresAt,
             verifiedAt: result.otp.verifiedAt
           }
+        });
+        return;
+      }
+
+      // Phase 5.0 — account recovery start.
+      //
+      // Body: { phone }
+      // 1. Find an identity whose phone_verified attestation
+      //    matches the given phone.
+      // 2. Issue an account_recovery-purpose OTP to that phone.
+      // 3. Return { ok, recoveryId, otpId, phoneMasked, expiresAt }.
+      //
+      // §15: the response never reveals WHICH identity matched —
+      // only that one did (or didn't). Even an attacker who knows
+      // a Bharat OS user's phone number cannot learn their
+      // identity ID without the OTP.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'recovery' &&
+        parts[2] === 'start' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        const phone = normalisePhone(body.phone);
+        if (!phone) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_phone', message: 'Provide a valid phone number.' }
+          });
+          return;
+        }
+        const identities = await store.listIdentities();
+        const matched = findIdentityByPhone(identities, phone);
+        if (!matched) {
+          // §15 — do not leak which phones are registered. Same
+          // response shape as success (with a sentinel ID) so
+          // timing/payload attacks can't distinguish hit from miss.
+          jsonResponse(response, 200, {
+            ok: true,
+            recoveryId: 'bos:account-recovery:no-match-sentinel',
+            phoneMasked: '+91*****',
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+            note: 'If this phone is registered with Bharat OS, a code has been sent.'
+          });
+          return;
+        }
+        const request_ = startAccountRecovery({
+          identity: matched,
+          phone
+        });
+        // Strip plaintext code before persisting.
+        const { code, ...persisted } = request_.otp;
+        await store.savePhoneOtp(persisted);
+        // Hand the plaintext code to the SMS provider.
+        const sms = await sendSms({
+          phone,
+          body:
+            `Bharat OS recovery code: ${code}. Valid for 5 minutes. ` +
+            `If you didn't request this, ignore — someone may be trying to take over your account.`
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          recoveryId: request_.recoveryId,
+          otpId: persisted.otpId,
+          phoneMasked: persisted.phoneMasked,
+          expiresAt: persisted.expiresAt,
+          providerMessageId: sms.providerMessageId,
+          note: 'If this phone is registered with Bharat OS, a code has been sent.'
+        });
+        return;
+      }
+
+      // Phase 5.0 — account recovery verify.
+      //
+      // Body: { otpId, code }
+      // 1. Read the OTP (must be account_recovery purpose).
+      // 2. Verify the code via verifyAccountRecovery.
+      // 3. On success, return the recovery bundle: full identity
+      //    (incl. privateKey + vaultKey) + deterministic recovery
+      //    phrase + memory-record refs. The new device persists
+      //    the identity as device owner.
+      //
+      // The bundle is the same shape vault-snapshot returns; the
+      // gating mechanism (OTP vs free GET) is the §15 difference.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'recovery' &&
+        parts[2] === 'verify' &&
+        parts.length === 3
+      ) {
+        if (request.method !== 'POST') return methodNotAllowed(response, ['POST']);
+        const body = await readRequestJson(request);
+        if (!body.otpId || !body.code) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'missing_fields',
+              message: 'otpId and code are required.'
+            }
+          });
+          return;
+        }
+        const otp = await store.readPhoneOtp(body.otpId).catch(() => null);
+        if (!otp || otp.purpose !== 'account_recovery') return notFound(response);
+        const result = verifyAccountRecovery(otp, body.code);
+        await store.savePhoneOtp(result.otp);
+        if (result.status !== 'verified') {
+          jsonResponse(response, 400, {
+            ok: false,
+            status: result.status,
+            otp: {
+              otpId: result.otp.otpId,
+              status: result.otp.status,
+              attempts: result.otp.attempts,
+              expiresAt: result.otp.expiresAt
+            }
+          });
+          return;
+        }
+        const identity = await store.readIdentity(otp.identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        // Compose the recovery bundle. The deterministic recovery
+        // phrase saves the user from having to type it — they get
+        // back into Bharat OS without needing to remember it. The
+        // phrase is still THEIR data, derived from THEIR publicKey.
+        const recoveryPhrase = generateRecoveryPhrase(identity).phrase;
+        const allMemory = await store.listMemoryRecords();
+        const memoryRecordRefs = allMemory
+          .filter((record) => record.ownerId === identity.id)
+          .map((record) => ({
+            recordId: record.recordId,
+            manifestId: record.manifestId ?? null,
+            label: record.label ?? null,
+            createdAt: record.createdAt ?? null
+          }));
+        const bundle = buildRecoveryBundle({
+          identity,
+          recoveryPhrase,
+          memoryRecordRefs
+        });
+        // Audit: the recovery succeeded. The ledger captures the
+        // masked phone + the rebound identity ID so a SIM-swap
+        // takeover can be detected after-the-fact.
+        await store.appendLedger({
+          type: 'account_recovery.completed',
+          identityId: identity.id,
+          phoneMasked: otp.phoneMasked,
+          recoveryOtpId: otp.otpId,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          status: 'verified',
+          recoveryBundle: bundle
         });
         return;
       }

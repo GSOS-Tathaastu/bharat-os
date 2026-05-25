@@ -802,6 +802,27 @@ body {
   color: var(--accent);
 }
 
+.first-run-recovery-link {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.first-run-recovery-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ─── Phone OTP card (Phase 4.3) ─────────────────────────────────────── */
 
 .phone-otp-card input[type="tel"],

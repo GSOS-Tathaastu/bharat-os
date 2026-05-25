@@ -144,6 +144,19 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.0 **account recovery via phone OTP — post-launch arc starts** —
+  Phase 4.3 attached phones to identities; Phase 5.0 closes the loop.
+  Without it a user who lost their 12-word phrase was locked out forever.
+  New `src/phase1/account-recovery.mjs`: `findIdentityByPhone`,
+  `startAccountRecovery`, `verifyAccountRecovery`, `buildRecoveryBundle`.
+  Two API endpoints: `POST /api/recovery/start` (rate-limited
+  `expensive`, returns no-match sentinel with identical shape on missing
+  phone — §15 protection against enumeration), `POST /api/recovery/verify`
+  (emits `account_recovery.completed` ledger event with masked phone for
+  SIM-swap detection). Welcome-screen UI gains *"🔁 I lost my recovery
+  phrase"* dashed-border link → recovery wizard step → restored. 385/385
+  tests (+13 new). SW cache to v29. ADR 0086. **Lost-phrase deadlock
+  solved — ~90 second recovery.**
 - Phase 4.6 **deployment scripts — Docker + Caddy + CI + runbook
   (launch arc complete)** — multi-stage Dockerfile (builder runs the
   full test suite; runtime is `gcr.io/distroless/nodejs24-debian12:

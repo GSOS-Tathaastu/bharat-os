@@ -157,6 +157,9 @@ export function policyFor(method, pathname) {
   // stays in the cheap 'write' policy because legitimate users may
   // retry.
   if (method === 'POST' && pathname === '/api/phone-otp/send') return 'expensive';
+  // Account recovery start — sends SMS AND scans the identity list.
+  // Definitely expensive. Verify stays write (retry-friendly).
+  if (method === 'POST' && pathname === '/api/recovery/start') return 'expensive';
   // Mutating routes — anything that POSTs / PUTs / DELETEs.
   if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
     return 'write';

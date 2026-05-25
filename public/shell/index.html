@@ -528,6 +528,9 @@
               </span>
             </button>
           </div>
+          <button class="first-run-recovery-link" type="button" data-fr-go="recover">
+            🔁 I lost my recovery phrase (use phone instead)
+          </button>
           <p class="first-run-legal-notice" data-i18n="welcome.legal">
             By continuing, you accept our Terms of Service and acknowledge our Privacy Policy.
           </p>
@@ -603,6 +606,44 @@
             <button class="first-run-primary" type="button" id="firstRunMigrateClaim">Receive identity</button>
           </div>
           <div id="firstRunMigrateStatus" class="first-run-status" hidden></div>
+        </div>
+
+        <!-- Step: account recovery via phone OTP (Phase 5.0) -->
+        <div class="first-run-step" data-fr-step="recover" hidden>
+          <button class="first-run-back" type="button" data-fr-back="welcome">← Back</button>
+          <div class="first-run-section-title">Recover your account</div>
+          <div class="first-run-section-sub">
+            Enter the phone number you verified earlier. Bharat OS will
+            send a 6-digit code. If the phone matches a registered
+            account, you'll be back in.
+          </div>
+          <input
+            id="firstRunRecoverPhone"
+            type="tel"
+            inputmode="tel"
+            placeholder="10-digit number or +91…"
+            autocomplete="tel"
+            class="first-run-input"
+          />
+          <div class="first-run-actions">
+            <button class="first-run-primary" type="button" id="firstRunRecoverSendButton">Send code</button>
+          </div>
+          <div id="firstRunRecoverVerifyBlock" hidden>
+            <div class="first-run-section-sub" id="firstRunRecoverCodeHint">Code sent to phone</div>
+            <input
+              id="firstRunRecoverCode"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6-digit code"
+              autocomplete="one-time-code"
+              class="first-run-input"
+            />
+            <div class="first-run-actions">
+              <button class="first-run-primary" type="button" id="firstRunRecoverVerifyButton">Verify &amp; restore</button>
+            </div>
+          </div>
+          <div id="firstRunRecoverStatus" class="first-run-status" hidden></div>
         </div>
 
         <!-- Step: demo persona picker -->

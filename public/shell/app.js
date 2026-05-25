@@ -2953,6 +2953,114 @@ function resetThisDevice() {
   window.location.reload();
 }
 
+async function startRecoveryFromShell() {
+  const phone = $('firstRunRecoverPhone').value.trim();
+  if (!phone) {
+    const status = $('firstRunRecoverStatus');
+    status.hidden = false;
+    status.textContent = 'Enter your phone number first.';
+    return;
+  }
+  const status = $('firstRunRecoverStatus');
+  status.hidden = false;
+  status.textContent = 'Looking up your account + sending code…';
+  try {
+    const data = await fetchJson('/api/recovery/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ phone })
+    });
+    recoveryState.otpId = data.otpId ?? null;
+    recoveryState.phoneMasked = data.phoneMasked ?? null;
+    status.textContent = data.note ?? 'Code sent. Check your phone.';
+    if (data.otpId) {
+      $('firstRunRecoverVerifyBlock').hidden = false;
+      $('firstRunRecoverCodeHint').textContent = `Code sent to ${data.phoneMasked}. Valid for 5 minutes.`;
+      setTimeout(() => $('firstRunRecoverCode')?.focus(), 50);
+    } else {
+      // No-match sentinel — don't reveal whether the phone is
+      // registered. Show the same hint either way; the user just
+      // doesn't get a code.
+      $('firstRunRecoverVerifyBlock').hidden = false;
+      $('firstRunRecoverCodeHint').textContent = 'If this phone is registered, a code will arrive shortly.';
+    }
+  } catch (error) {
+    status.textContent = `Couldn't start recovery: ${error.message}`;
+  }
+}
+
+async function verifyRecoveryFromShell() {
+  if (!recoveryState.otpId) {
+    const status = $('firstRunRecoverStatus');
+    status.hidden = false;
+    status.textContent = 'No recovery in progress. Send a code first.';
+    return;
+  }
+  const code = $('firstRunRecoverCode').value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    const status = $('firstRunRecoverStatus');
+    status.hidden = false;
+    status.textContent = 'Enter the 6-digit code.';
+    return;
+  }
+  const button = $('firstRunRecoverVerifyButton');
+  button.disabled = true;
+  const status = $('firstRunRecoverStatus');
+  status.hidden = false;
+  status.textContent = 'Verifying…';
+  try {
+    const response = await fetch('/api/recovery/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ otpId: recoveryState.otpId, code })
+    });
+    const data = await response.json();
+    if (!data.ok || data.status !== 'verified') {
+      if (data.status === 'mismatch') {
+        const attempts = data.otp?.attempts ?? 0;
+        const remaining = Math.max(0, 5 - attempts);
+        status.textContent = `Code didn't match. ${remaining} attempt${remaining === 1 ? '' : 's'} left.`;
+      } else if (data.status === 'expired') {
+        status.textContent = 'Code expired. Send a new one.';
+      } else if (data.status === 'too_many_attempts') {
+        status.textContent = 'Too many wrong attempts. Send a new code.';
+        recoveryState.otpId = null;
+      } else {
+        status.textContent = `Verify failed: ${data.status ?? 'unknown'}`;
+      }
+      return;
+    }
+    // Success — bind the recovered identity as device owner.
+    const bundle = data.recoveryBundle;
+    const incoming = bundle?.identity;
+    if (!incoming?.id) throw new Error('Recovery bundle missing identity.');
+    if (!state.identities.some((i) => i.id === incoming.id)) {
+      state.identities.push(incoming);
+    }
+    state.deviceOwnerId = incoming.id;
+    state.householdMemberIds = [];
+    saveDeviceState();
+    // Recovery phrase was returned in the bundle — treat the user as
+    // having backed it up (it's literally on their screen now if they
+    // want to copy it).
+    setBackupBackedUp(true);
+    setActiveProfile(incoming);
+    renderProfileList();
+    refreshFlagReportSubjectOptions();
+    status.textContent = 'Recovered ✓ Your identity has been restored.';
+    setTimeout(() => hideFirstRunSheet(), 1200);
+  } catch (error) {
+    status.textContent = `Recovery failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+const recoveryState = {
+  otpId: null,
+  phoneMasked: null
+};
+
 function setupFirstRun() {
   // Welcome-step choice buttons
   document.querySelectorAll('[data-fr-go]').forEach((button) => {
@@ -2961,7 +3069,16 @@ function setupFirstRun() {
       if (path === 'new') goFirstRunStep('language');
       else if (path === 'migrate') openMigrationPath();
       else if (path === 'demo') openDemoPersonaPicker();
+      else if (path === 'recover') goFirstRunStep('recover');
     });
+  });
+  $('firstRunRecoverSendButton')?.addEventListener('click', startRecoveryFromShell);
+  $('firstRunRecoverVerifyButton')?.addEventListener('click', verifyRecoveryFromShell);
+  $('firstRunRecoverPhone')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') startRecoveryFromShell();
+  });
+  $('firstRunRecoverCode')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') verifyRecoveryFromShell();
   });
   // Back buttons
   document.querySelectorAll('[data-fr-back]').forEach((button) => {
