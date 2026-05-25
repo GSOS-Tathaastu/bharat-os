@@ -277,10 +277,10 @@
 
         <section class="capture-card phone-otp-card" id="phoneOtpSection">
           <div class="capture-header">
-            <span>📱 Phone (recovery)</span>
-            <span id="phoneOtpStatus" class="capture-meta">Not verified</span>
+            <span>📱 <span data-i18n="card.phone.title">Phone (recovery)</span></span>
+            <span id="phoneOtpStatus" class="capture-meta" data-i18n="card.phone.status.notVerified">Not verified</span>
           </div>
-          <p class="capture-note">
+          <p class="capture-note" data-i18n="card.phone.note">
             Optional. If you ever lose your recovery phrase, a verified phone
             number is your fallback path to get back in. Bharat OS sends a
             6-digit code; we never store the code, only its hash.
@@ -296,7 +296,7 @@
               aria-label="Phone number"
             />
             <div class="passkey-actions">
-              <button id="phoneOtpSendButton" class="secondary-button" type="button">Send code</button>
+              <button id="phoneOtpSendButton" class="secondary-button" type="button" data-i18n="card.phone.send">Send code</button>
             </div>
           </div>
           <div id="phoneOtpStepVerify" data-step="verify" hidden>
@@ -311,8 +311,8 @@
               aria-label="One-time code"
             />
             <div class="passkey-actions">
-              <button id="phoneOtpVerifyButton" class="secondary-button" type="button">Verify</button>
-              <button id="phoneOtpCancelButton" class="link-button" type="button">Cancel</button>
+              <button id="phoneOtpVerifyButton" class="secondary-button" type="button" data-i18n="card.phone.verify">Verify</button>
+              <button id="phoneOtpCancelButton" class="link-button" type="button" data-i18n="card.phone.cancel">Cancel</button>
             </div>
           </div>
           <div id="phoneOtpResult" class="capture-result" hidden></div>
@@ -408,10 +408,10 @@
 
         <section class="capture-card dpdp-card" id="dpdpSection">
           <div class="capture-header">
-            <span>📑 Your data rights</span>
+            <span>📑 <span data-i18n="card.dpdp.title">Your data rights</span></span>
             <span class="capture-meta">DPDP Act 2023</span>
           </div>
-          <p class="capture-note">
+          <p class="capture-note" data-i18n="card.dpdp.note">
             Under India's Data Protection Act, you have the right to see
             every record we hold about you, to delete your account
             permanently, and to raise a grievance with our Data Protection
@@ -419,10 +419,10 @@
           </p>
           <div class="dpdp-actions">
             <button id="dpdpExportButton" class="secondary-button" type="button">
-              📥 Download my data
+              📥 <span data-i18n="card.dpdp.export">Download my data</span>
             </button>
             <button id="dpdpDeleteButton" class="secondary-button danger" type="button">
-              🗑️ Delete my account
+              🗑️ <span data-i18n="card.dpdp.delete">Delete my account</span>
             </button>
           </div>
           <div class="dpdp-links">
@@ -430,7 +430,7 @@
             <span>·</span>
             <a href="/legal/terms.html" target="_blank" rel="noopener">Terms of Service</a>
             <span>·</span>
-            <button id="dpdpGrievanceButton" class="link-button" type="button">Contact DPO</button>
+            <button id="dpdpGrievanceButton" class="link-button" type="button" data-i18n="card.dpdp.dpo">Contact DPO</button>
           </div>
           <div id="dpdpResult" class="capture-result" hidden></div>
         </section>
@@ -477,19 +477,19 @@
     <nav class="bottom-nav" aria-label="Primary">
       <button class="bottom-nav-tab active" data-go-tab="home" type="button">
         <span class="bottom-nav-icon" aria-hidden="true">🏠</span>
-        <span class="bottom-nav-label">Home</span>
+        <span class="bottom-nav-label" data-i18n="nav.home">Home</span>
       </button>
       <button class="bottom-nav-tab" data-go-tab="earn" type="button">
         <span class="bottom-nav-icon" aria-hidden="true">💎</span>
-        <span class="bottom-nav-label">Earn</span>
+        <span class="bottom-nav-label" data-i18n="nav.earn">Earn</span>
       </button>
       <button class="bottom-nav-tab" data-go-tab="trust" type="button">
         <span class="bottom-nav-icon" aria-hidden="true">🛡️</span>
-        <span class="bottom-nav-label">Trust</span>
+        <span class="bottom-nav-label" data-i18n="nav.trust">Trust</span>
       </button>
       <button class="bottom-nav-tab" data-go-tab="profile" type="button">
         <span class="bottom-nav-icon" aria-hidden="true">👤</span>
-        <span class="bottom-nav-label">Profile</span>
+        <span class="bottom-nav-label" data-i18n="nav.profile">Profile</span>
       </button>
     </nav>
 
@@ -502,37 +502,34 @@
         <div class="first-run-step" data-fr-step="welcome">
           <div class="first-run-brand">
             <div class="first-run-logo">B</div>
-            <div class="first-run-title">Welcome to Bharat OS</div>
-            <div class="first-run-subtitle">Your phone, your identity, your data.</div>
+            <div class="first-run-title" data-i18n="welcome.title">Welcome to Bharat OS</div>
+            <div class="first-run-subtitle" data-i18n="welcome.subtitle">Your phone, your identity, your data.</div>
           </div>
           <div class="first-run-choices">
             <button class="first-run-choice primary" type="button" data-fr-go="new">
               <span class="first-run-choice-icon" aria-hidden="true">✨</span>
               <span class="first-run-choice-body">
-                <strong>Set up a new identity</strong>
-                <span>Create your Bharat OS profile. Takes 60 seconds.</span>
+                <strong data-i18n="welcome.choice.new.title">Set up a new identity</strong>
+                <span data-i18n="welcome.choice.new.sub">Create your Bharat OS profile. Takes 60 seconds.</span>
               </span>
             </button>
             <button class="first-run-choice" type="button" data-fr-go="migrate">
               <span class="first-run-choice-icon" aria-hidden="true">📲</span>
               <span class="first-run-choice-body">
-                <strong>Move from another phone</strong>
-                <span>Scan a QR or enter a 6-digit code from your old device.</span>
+                <strong data-i18n="welcome.choice.migrate.title">Move from another phone</strong>
+                <span data-i18n="welcome.choice.migrate.sub">Scan a QR or enter a 6-digit code from your old device.</span>
               </span>
             </button>
             <button class="first-run-choice secondary" type="button" data-fr-go="demo">
               <span class="first-run-choice-icon" aria-hidden="true">🎬</span>
               <span class="first-run-choice-body">
-                <strong>Try a demo persona</strong>
-                <span>Walk through Bharat OS as one of the seeded characters (Sita, Priya, Ravi…). Demo only — not for real use.</span>
+                <strong data-i18n="welcome.choice.demo.title">Try a demo persona</strong>
+                <span data-i18n="welcome.choice.demo.sub">Walk through Bharat OS as one of the seeded characters (Sita, Priya, Ravi…). Demo only — not for real use.</span>
               </span>
             </button>
           </div>
-          <p class="first-run-legal-notice">
-            By continuing, you accept our
-            <a href="/legal/terms.html" target="_blank" rel="noopener">Terms of Service</a>
-            and acknowledge our
-            <a href="/legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
+          <p class="first-run-legal-notice" data-i18n="welcome.legal">
+            By continuing, you accept our Terms of Service and acknowledge our Privacy Policy.
           </p>
         </div>
 
@@ -695,7 +692,7 @@
     <!-- the network helper flips `hidden` based on navigator.onLine. -->
     <div id="offlineBanner" class="offline-banner" hidden>
       <span class="offline-banner-icon" aria-hidden="true">⚡</span>
-      <span class="offline-banner-text">
+      <span class="offline-banner-text" data-i18n="error.offline">
         You're offline. Bharat OS will retry when your connection is back.
       </span>
     </div>

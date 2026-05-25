@@ -229,6 +229,9 @@ function setActiveProfile(identity) {
   updateProfileHero(identity);
   applyGreeting(profileLocale(identity));
   renderSuggestions(profileLocale(identity));
+  // Phase 4.5 — translate the static UI shell to the profile's
+  // locale. Persists across reload via i18n's localStorage hook.
+  applyI18nForLocale(profileLocale(identity)).catch(() => {});
   loadVoiceRuntimePlan().catch((error) => console.warn('loadVoiceRuntimePlan', error));
   loadTtsRuntimePlan().catch((error) => console.warn('loadTtsRuntimePlan', error));
   loadOnDeviceRuntimePlan().catch((error) => console.warn('loadOnDeviceRuntimePlan', error));
@@ -3349,6 +3352,42 @@ async function verifyPhoneOtpFromShell() {
   }
 }
 
+// ─── i18n (Phase 4.5) ─────────────────────────────────────────────────────
+//
+// Lazy-loaded so the dictionary blob (~9 KB across 7 locales)
+// only ships when the shell is actually serving a user. Hooked
+// into `setActiveProfile` so a Tamil profile's first paint is in
+// Tamil, not English.
+
+let i18nModulePromise = null;
+async function loadI18n() {
+  if (!i18nModulePromise) {
+    i18nModulePromise = import('/shell/i18n.mjs');
+  }
+  return i18nModulePromise;
+}
+
+async function applyI18nForLocale(locale) {
+  try {
+    const i18n = await loadI18n();
+    if (locale && locale !== i18n.getLocale()) {
+      i18n.setLocale(locale);
+    }
+    i18n.applyI18n(document);
+  } catch (error) {
+    console.warn('i18n apply failed', error);
+  }
+}
+
+function setupI18n() {
+  loadI18n()
+    .then((i18n) => {
+      i18n.applyI18n(document);
+      i18n.onLocaleChange(() => i18n.applyI18n(document));
+    })
+    .catch((error) => console.warn('setupI18n failed', error));
+}
+
 // ─── Network status + PWA install (Phase 4.4) ─────────────────────────────
 //
 // Lazy-load the network helper module so it only ships when the
@@ -3470,6 +3509,7 @@ setupDpdp();
 setupPhoneOtp();
 setupNetworkStatus();
 setupPwaInstall();
+setupI18n();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

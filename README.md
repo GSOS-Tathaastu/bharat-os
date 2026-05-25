@@ -144,6 +144,20 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.5 **i18n framework — localized UI shell** — `public/shell/i18n.mjs`
+  ships seven supported locales (en-IN, hi-IN, hi-Latn-IN, mr-IN, bho-IN,
+  ta-IN, bn-IN). Public surface: `t(key, { fallback })`, `setLocale` /
+  `onLocaleChange` (localStorage-persisted), `applyI18n(root)` sweeps
+  the DOM for `data-i18n="key"` attributes, `getLocaleCoverage(locale)`
+  for honest %-translated reporting. Seed translations cover welcome
+  wizard + bottom nav + DPDP card + phone OTP card + offline banner +
+  error toasts. Coverage: en-IN 100% (reference); hi-IN ~95%;
+  hi-Latn-IN ~75%; mr-IN / ta-IN / bn-IN ~50%; bho-IN ~40% — remaining
+  strings fall through to English as a known §17 honesty gap (native-
+  speaker review required for production). `setActiveProfile` calls
+  `applyI18nForLocale(profileLocale(identity))` so switching to a Tamil
+  profile repaints the UI to Tamil. 372/372 tests (+12 new). SW cache
+  to v28. ADR 0084.
 - Phase 4.4 **network resilience + offline mode + PWA install** — new
   `public/shell/network.mjs` with `fetchWithRetry` (exponential
   backoff 200/600/1800ms; retries 5xx + 429 + 408 + network errors;
