@@ -108,6 +108,12 @@ import {
   COOLDOWN_SCOPES
 } from '../phase1/recovery-cooldown.mjs';
 import { checkAdminAuth } from './admin-auth.mjs';
+import {
+  aggregateByMonth,
+  createEarningsEntry,
+  EARNINGS_CATEGORIES,
+  monthlyStatement
+} from '../phase1/earnings-log.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1083,6 +1089,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/vault-snapshot',
             'GET /api/identities/:identityId/export',
             'GET /api/identities/:identityId/erasure-preview',
+            'POST /api/identities/:identityId/earnings',
+            'GET /api/identities/:identityId/earnings',
+            'GET /api/identities/:identityId/earnings/summary',
+            'DELETE /api/identities/:identityId/earnings/:entryId',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
             'POST /api/phone-otp/send',
@@ -2669,6 +2679,168 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       if (parts[0] === 'api' && parts[1] === 'dpdp' && parts[2] === 'grievance' && parts.length === 3) {
         if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
         jsonResponse(response, 200, { contact: DEFAULT_DPO_CONTACT });
+        return;
+      }
+
+      // Phase 6.0 — earnings log endpoints.
+      //
+      // The single-player worker tool: cross-platform earnings
+      // tracker. All data is USER-TYPED (we never scrape Swiggy /
+      // Zomato / Uber APIs); the worker enters daily totals per
+      // category. Data stays scoped to the identity that owns it
+      // and is included in the DPDP export + erasure cascade.
+      //
+      // §15: amounts in paise (INTEGER) to avoid float rounding;
+      // categories are coarse (delivery/ride/service/cash/other)
+      // so per-platform fingerprinting isn't possible from the
+      // record alone.
+      //
+      //   POST   /api/identities/:id/earnings
+      //   GET    /api/identities/:id/earnings?from=YYYY-MM-DD&to=...&category=
+      //   GET    /api/identities/:id/earnings/summary?month=YYYY-MM
+      //   DELETE /api/identities/:id/earnings/:entryId
+
+      // POST /api/identities/:id/earnings — create entry
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'earnings' &&
+        request.method === 'POST'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const body = await readRequestJson(request).catch(() => ({}));
+        let entry;
+        try {
+          entry = createEarningsEntry({
+            identityId,
+            date: body.date,
+            category: body.category,
+            amountPaise: body.amountPaise,
+            hoursWorked: body.hoursWorked,
+            note: body.note
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_earnings_entry', message: error.message }
+          });
+          return;
+        }
+        if (typeof store.saveEarningsEntry !== 'function') {
+          jsonResponse(response, 503, {
+            error: {
+              code: 'earnings_unsupported',
+              message: 'earnings log requires the SQLite store backend'
+            }
+          });
+          return;
+        }
+        await store.saveEarningsEntry(entry);
+        jsonResponse(response, 201, { ok: true, entry });
+        return;
+      }
+
+      // GET /api/identities/:id/earnings — list entries
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'earnings' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        if (typeof store.listEarningsEntries !== 'function') {
+          jsonResponse(response, 200, { entries: [] });
+          return;
+        }
+        const fromDate = url.searchParams.get('from') ?? undefined;
+        const toDate = url.searchParams.get('to') ?? undefined;
+        const category = url.searchParams.get('category') ?? undefined;
+        if (category && !EARNINGS_CATEGORIES.includes(category)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_category',
+              message: `category must be one of: ${EARNINGS_CATEGORIES.join(', ')}`
+            }
+          });
+          return;
+        }
+        const entries = await store.listEarningsEntries({
+          identityId,
+          fromDate,
+          toDate,
+          category
+        });
+        jsonResponse(response, 200, { entries });
+        return;
+      }
+
+      // GET /api/identities/:id/earnings/summary?month=YYYY-MM
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'earnings' &&
+        parts[4] === 'summary' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const month = url.searchParams.get('month');
+        if (!month) {
+          jsonResponse(response, 400, {
+            error: { code: 'month_required', message: 'Provide ?month=YYYY-MM' }
+          });
+          return;
+        }
+        if (typeof store.listEarningsEntries !== 'function') {
+          jsonResponse(response, 200, {
+            summary: aggregateByMonth([], month),
+            statement: null
+          });
+          return;
+        }
+        const entries = await store.listEarningsEntries({ identityId });
+        let summary;
+        try {
+          summary = aggregateByMonth(entries, month);
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_month', message: error.message }
+          });
+          return;
+        }
+        jsonResponse(response, 200, {
+          summary,
+          statement: monthlyStatement(summary)
+        });
+        return;
+      }
+
+      // DELETE /api/identities/:id/earnings/:entryId
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'earnings' &&
+        request.method === 'DELETE'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const entryId = decodeURIComponent(parts[4]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        if (typeof store.readEarningsEntry !== 'function') {
+          return notFound(response);
+        }
+        const entry = await store.readEarningsEntry(entryId).catch(() => null);
+        if (!entry || entry.identityId !== identityId) return notFound(response);
+        await store.deleteEarningsEntry(entryId);
+        jsonResponse(response, 200, { ok: true, entryId });
         return;
       }
 

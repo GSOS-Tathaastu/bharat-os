@@ -144,6 +144,34 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.0a **cross-platform earnings tracker — single-player wedge
+  that unblocks the two-sided cold start** — Phase 6.0 (ADR 0096)
+  ships the growth-arc opener: three single-player tools that give
+  workers a reason to install Bharat OS BEFORE the two-sided
+  attestation network (Phase 5.9) exists. Phase 6.0a ships Tool 1.
+  New `src/phase1/earnings-log.mjs` pure-function module:
+  `createEarningsEntry` with strict validation (ISO dates not in the
+  future, 5-category enum `delivery/ride/service/cash/other`,
+  **amounts in INTEGER paise** not float rupees to avoid currency
+  rounding bugs, per-day ₹1 crore sanity ceiling),
+  `aggregateByMonth` (sum + per-category + effective hourly rate),
+  `monthlyStatement` (human-readable text for landlord / MFI /
+  accountant). New SqliteStore `earnings_log` table indexed on
+  `identity_id` + `date` + `category`. Four API endpoints: POST/GET/
+  GET-summary/DELETE under `/api/identities/:id/earnings`. DPDP
+  end-to-end: export + erasure cascade automatically include
+  earnings; cross-user delete returns 404 to avoid leaking entry
+  existence. §15: data is user-typed not scraped (sidesteps every
+  aggregator TOS); coarse 5-category enum prevents per-platform
+  fingerprinting; identity-scoped. 522/522 tests (+31 new — 12
+  module unit + 3 store + 2 DPDP integration + 7 live HTTP + 7
+  misc). Also hardened `SqliteStore.verifyIntegrity` to spray
+  corruption across page headers (single-region corruption stopped
+  detecting after the schema grew) and catch PRAGMA-throw cases.
+  ADR 0096 status: Partially Implemented. **A gig worker can now log
+  daily earnings across Swiggy / Zomato / Rapido / cash gigs and
+  get a monthly statement they can show a landlord — no customer
+  participation needed. The two-sided cold start is unblocked.**
 - Phase 5.8 **SMS bulkhead (per-provider concurrency cap) +
   in-flight gauge — closes Phase 5.4 future-work** — Phase 5.4
   shipped timeouts + circuit breakers but a slow-but-not-yet-timing-

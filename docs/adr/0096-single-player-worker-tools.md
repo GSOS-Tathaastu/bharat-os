@@ -2,12 +2,24 @@
 
 ## Status
 
-**Proposed.** Design captured for review; implementation is not yet
-greenlit. Recommended sequencing: **this phase ships first**,
-before Phase 5.9 (ADR 0095, QR signing flow). The two-sided
-attestation flow only works when both worker and customer are on
-the platform for independent reasons. Phase 6.0 gives workers a
-reason to install BEFORE the network exists.
+**Partially implemented.**
+
+- ✅ **Tool 1 (earnings tracker)** — shipped. `src/phase1/earnings-log.mjs`,
+  SqliteStore `earnings_log` table, four API endpoints (`POST` /
+  `GET` / `GET /summary` / `DELETE`), DPDP export + erasure cascade
+  integration. 31 tests. The single-player wedge that gets workers
+  on the platform with zero network participation is now real.
+- 🟡 **Tool 2 (mesh-contribution dashboard)** — pending. Substrate
+  shipped in Phase 3.x; this is UX promotion to a first-class card.
+- 🟡 **Tool 3 (year-end tax helper)** — pending. ITR-3 / ITR-4
+  summary, section 44ADA presumptive-tax logic, local-compute.
+
+Recommended sequencing: ship Phase 6.0 in three commits (one per
+tool), then layer Phase 5.9 (ADR 0095, QR signing flow) on top.
+The two-sided attestation flow only works when both worker and
+customer are on the platform for independent reasons. Tool 1 alone
+gives workers a Notion-equivalent reason to install BEFORE the
+network exists.
 
 ## Context
 

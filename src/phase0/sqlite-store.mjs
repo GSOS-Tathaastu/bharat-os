@@ -226,6 +226,20 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_phone_otps_identity ON phone_otps(identity_id);
   CREATE INDEX IF NOT EXISTS idx_phone_otps_status ON phone_otps(status);
 
+  CREATE TABLE IF NOT EXISTS earnings_log (
+    entry_id TEXT PRIMARY KEY,
+    identity_id TEXT,
+    date TEXT,
+    category TEXT,
+    amount_paise INTEGER,
+    hours_worked REAL,
+    created_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_earnings_log_identity ON earnings_log(identity_id);
+  CREATE INDEX IF NOT EXISTS idx_earnings_log_date ON earnings_log(date);
+  CREATE INDEX IF NOT EXISTS idx_earnings_log_category ON earnings_log(category);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -342,19 +356,38 @@ export class SqliteStore {
     let db = this.db;
     let opened = null;
     if (targetPath) {
-      opened = new DatabaseSync(targetPath, { readOnly: true });
-      db = opened;
+      try {
+        opened = new DatabaseSync(targetPath, { readOnly: true });
+        db = opened;
+      } catch (error) {
+        // File so corrupt SQLite refuses to open it — definitely
+        // a failure, but report it cleanly instead of throwing.
+        return {
+          ok: false,
+          targetPath,
+          messages: [`open failed: ${error?.message ?? String(error)}`]
+        };
+      }
     }
     try {
       const rows = db.prepare('PRAGMA integrity_check').all();
-      // rows is [{ integrity_check: 'ok' }] on healthy; on
-      // corruption rows[].integrity_check enumerates problems.
       const messages = rows.map((row) => row.integrity_check ?? row.integrityCheck ?? String(row));
       const ok = messages.length === 1 && messages[0] === 'ok';
       return {
         ok,
         targetPath: targetPath ?? this.dbPath,
         messages
+      };
+    } catch (error) {
+      // PRAGMA itself can throw on a sufficiently-damaged file
+      // (`database disk image is malformed`). Map to a failure
+      // result so callers don't have to wrap every call in
+      // try/catch — the contract is "returns { ok, messages }",
+      // not "throws on corruption".
+      return {
+        ok: false,
+        targetPath: targetPath ?? this.dbPath,
+        messages: [`integrity_check failed: ${error?.message ?? String(error)}`]
       };
     } finally {
       if (opened) opened.close();
@@ -995,6 +1028,76 @@ export class SqliteStore {
     return this._listAll('phone_otps');
   }
 
+  // ─── Earnings log — Phase 6.0 ─────────────────────────────────────────
+
+  async saveEarningsEntry(entry) {
+    await this.init();
+    if (!entry?.entryId) throw new Error('earnings entry requires entryId.');
+    this._upsert(
+      'earnings_log',
+      [
+        'entry_id',
+        'identity_id',
+        'date',
+        'category',
+        'amount_paise',
+        'hours_worked',
+        'created_at',
+        'json'
+      ],
+      [
+        entry.entryId,
+        entry.identityId ?? null,
+        entry.date ?? null,
+        entry.category ?? null,
+        entry.amountPaise ?? 0,
+        entry.hoursWorked ?? null,
+        entry.createdAt ?? null,
+        JSON.stringify(entry)
+      ]
+    );
+    return entry;
+  }
+
+  async readEarningsEntry(entryId) {
+    await this.init();
+    return this._readOne('earnings_log', 'entry_id', entryId);
+  }
+
+  // Lists entries with optional filters. All filters are AND'd; omit
+  // a filter to skip it. Newest-first by date.
+  async listEarningsEntries({ identityId, fromDate, toDate, category } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (identityId) {
+      clauses.push('identity_id = ?');
+      values.push(identityId);
+    }
+    if (fromDate) {
+      clauses.push('date >= ?');
+      values.push(fromDate);
+    }
+    if (toDate) {
+      clauses.push('date <= ?');
+      values.push(toDate);
+    }
+    if (category) {
+      clauses.push('category = ?');
+      values.push(category);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM earnings_log ${where} ORDER BY date DESC, created_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
+  async deleteEarningsEntry(entryId) {
+    await this.init();
+    const sql = 'DELETE FROM earnings_log WHERE entry_id = ?';
+    const info = this.db.prepare(sql).run(entryId);
+    return Number(info.changes) > 0;
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1246,6 +1349,7 @@ export class SqliteStore {
       sections.federatedUpdates = sweep('federated_updates', ['contributor_id']);
       sections.attestations = sweep('attestations', ['subject_id']);
       sections.phoneOtps = sweep('phone_otps', ['identity_id']);
+      sections.earningsLog = sweep('earnings_log', ['identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

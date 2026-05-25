@@ -61,12 +61,20 @@ test('SqliteStore.verifyIntegrity flags a corrupt snapshot', async () => {
   await store.saveIdentity(createIdentity({ displayName: 'C' }));
   const target = path.join(root, 'corrupt.sqlite');
   await store.snapshotTo(target);
-  // Corrupt the file by overwriting its middle with garbage.
+  // Corrupt several b-tree page boundaries by writing 0xff bursts
+  // at every 4 KiB page header. Single-region corruption can land
+  // in an unused page that PRAGMA integrity_check legitimately
+  // skips; spraying across page headers guarantees we hit pages
+  // SQLite actually validates.
   const stats = await fs.stat(target);
   const fh = await fs.open(target, 'r+');
   try {
-    const buf = Buffer.alloc(256, 0xff);
-    await fh.write(buf, 0, buf.length, Math.floor(stats.size / 2));
+    const burst = Buffer.alloc(64, 0xff);
+    // Skip page 0 (db header) to keep the file recognisable as
+    // SQLite; corrupt every subsequent 4 KiB page header.
+    for (let offset = 4096; offset < stats.size; offset += 4096) {
+      await fh.write(burst, 0, burst.length, offset);
+    }
   } finally {
     await fh.close();
   }

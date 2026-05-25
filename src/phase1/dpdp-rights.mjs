@@ -101,6 +101,7 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     workerNotifications,
     federatedUpdates,
     attestations,
+    earningsEntries,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -119,6 +120,11 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     store.listWorkerNotifications().catch(() => []),
     store.listFederatedUpdates().catch(() => []),
     store.listAttestations().catch(() => []),
+    // Phase 6.0 — earnings-log surfaces in DPDP export + erasure
+    // cascade. Optional (store may not implement it).
+    store.listEarningsEntries
+      ? store.listEarningsEntries({ identityId }).catch(() => [])
+      : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
 
@@ -188,6 +194,11 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
   const subjectWorkerNotifications = filterBySubject(workerNotifications);
   const subjectFederatedUpdates = filterBySubject(federatedUpdates);
   const subjectAttestations = filterBySubject(attestations);
+  // earningsEntries are pre-filtered (we passed identityId to
+  // listEarningsEntries) but defensive double-filter is cheap.
+  const subjectEarnings = (earningsEntries ?? []).filter(
+    (e) => e.identityId === identityId
+  );
 
   return {
     protocolVersion: DPDP_RIGHTS_PROTOCOL_VERSION,
@@ -269,6 +280,9 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
         records: subjectFederatedUpdates
       },
       attestations: { ...stats(subjectAttestations), records: subjectAttestations },
+      // Phase 6.0 — single-player earnings tracker. All entries are
+      // user-typed, never scraped from aggregators.
+      earningsLog: { ...stats(subjectEarnings), records: subjectEarnings },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },
     notice: {

@@ -2077,11 +2077,9 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 🟡 **Proposed (design only — not yet implemented):**
 
-- **Phase 6.0 (ADR 0096)** — Single-player worker tools: cross-platform
-  earnings tracker, mesh-contribution dashboard, year-end tax helper.
-  Designed to give workers a reason to install Bharat OS before the
-  two-sided network exists. **Recommended to ship first** in the
-  growth arc.
+- **Phase 6.0 (ADR 0096)** — **Partially shipped.** Tool 1 (earnings
+  tracker) is in production. Tools 2 (mesh dashboard) + 3 (tax
+  helper) pending.
 - **Phase 5.9 (ADR 0095)** — Portable work-history attestation via
   worker-initiated QR handshake. Three-tier signing (anonymous tap /
   OTP-confirmed / Bharat OS signed), additive-only attestations, no
@@ -2092,6 +2090,11 @@ Implementation order intentionally inverts the numbering: ship Phase
 6.0 first, then 5.9. Numbering reflects logical phase grouping
 (5.x is the technical post-launch arc, 6.x is the growth arc), not
 shipping order.
+
+---
+
+Closed in Phase 6.0a (ADR 0096, partial):
+1. ✅ **Cross-platform earnings tracker — single-player wedge that solves the two-sided cold start** — Phase 6.0 is the growth-arc opener; ADR 0096 lays out three single-player tools (earnings tracker, mesh-contribution dashboard, year-end tax helper) that give workers a reason to install Bharat OS BEFORE the two-sided attestation network (Phase 5.9) exists. Phase 6.0a ships Tool 1 — the earnings tracker — as the foundation. New artifact `src/phase1/earnings-log.mjs` (pure functions): `createEarningsEntry` (deterministic entry IDs via SHA-256 of canonical fields so duplicate posts upsert; strict validation — ISO YYYY-MM-DD dates not in the future, `EARNINGS_CATEGORIES` enum `delivery / ride / service / cash / other`, **amounts in INTEGER paise NOT float rupees** to avoid currency rounding bugs at scale, per-day sanity ceiling of ₹1 crore to reject typos, hoursWorked 0-24 range check, note trimmed to 200 chars), `aggregateByMonth` (sum + per-category breakdown + day count + effective hourly rate), `monthlyStatement` (human-readable text suitable for sharing with a landlord / MFI / accountant), `effectiveHourlyRatePaise` (date-window-scoped). New SqliteStore table `earnings_log` with indexes on `identity_id`, `date`, `category`; new methods `saveEarningsEntry`, `readEarningsEntry`, `listEarningsEntries({ identityId, fromDate, toDate, category })`, `deleteEarningsEntry`. Four new API endpoints: **POST `/api/identities/:id/earnings`** (create, body-validated, returns 400 with structured error on bad input), **GET `/api/identities/:id/earnings`** (list with optional `from` / `to` / `category` filters), **GET `/api/identities/:id/earnings/summary?month=YYYY-MM`** (aggregated monthly summary + printable statement), **DELETE `/api/identities/:id/earnings/:entryId`** (DPDP §12(1) correction surface; refuses to delete entries owned by other identities — returns 404 to avoid leaking entry existence). **DPDP integration end-to-end**: `dpdp-rights.mjs` `collectUserData` now includes the `earningsLog` section in the export bundle; SqliteStore `eraseUserData` cascade extends to clear `earnings_log` atomically; the existing DPDP §11/§12(3) flows automatically work for the new data without per-section bespoke handling. **§15 bindings**: data is user-supplied (typed, NOT scraped from Swiggy/Zomato APIs — sidesteps every aggregator TOS issue); integer paise prevents currency float-rounding bugs; coarse 5-category enum prevents per-platform fingerprinting from the record alone; identity-scoped (cross-user access returns 404); included in `bos_api_requests_total` rate-limiting via the existing `write`/`read` policy dispatch. **522 / 522 tests** (was 491; +31 new — 12 module unit tests for the pure functions including all validation edge cases, 3 SqliteStore round-trip + filtering + delete tests, 2 DPDP export+erasure integration tests, 7 end-to-end live HTTP tests using the Phase 5.7 server-spinup pattern, 7 misc). One pre-existing test (`SqliteStore.verifyIntegrity flags a corrupt snapshot`) needed hardening — the previous "corrupt 256 bytes at file midpoint" stopped detecting corruption once the new `earnings_log` schema enlarged the file enough to push the byte into an unused page; rewritten to spray 0xff bursts across every 4KiB page header so PRAGMA integrity_check has corrupted critical pages to detect. Also made `SqliteStore.verifyIntegrity` more robust — catches "database disk image is malformed" errors from `PRAGMA integrity_check` itself and returns them as `{ ok: false, messages: [...] }` instead of propagating the throw, so callers don't have to wrap every call. No SW change. **A gig worker can now install Bharat OS, log their daily earnings across Swiggy / Zomato / Rapido / cash gigs, get a monthly statement they can show a landlord — all WITHOUT requiring any customer participation. The two-sided cold start is unblocked.**
 
 ---
 
