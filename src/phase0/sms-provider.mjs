@@ -15,6 +15,7 @@
 // the rate-limiter / database integration stays the same.
 
 import { logger } from './logger.mjs';
+import { recordSmsAttempt } from './metrics.mjs';
 
 export const SMS_PROVIDER_PROTOCOL_VERSION = 'bos.phase0.sms-provider.v0';
 
@@ -312,17 +313,138 @@ const karixProvider = {
   }
 };
 
+// Phase 5.3 — telemetry wrapper. Each provider's `send` is wrapped
+// so every attempt increments `bos_sms_send_total{provider, outcome}`
+// in /metrics. Outcome buckets: 'success' / 'rejected' /
+// 'not_configured' / 'error'. The wrapping is module-internal so
+// individual provider implementations stay clean.
+function outcomeFromError(error) {
+  if (error?.code === 'SMS_PROVIDER_NOT_CONFIGURED') return 'not_configured';
+  if (error?.code === 'SMS_PROVIDER_REJECTED') return 'rejected';
+  return 'error';
+}
+
+function instrumentedProvider(provider) {
+  return {
+    name: provider.name,
+    async send(args) {
+      try {
+        const result = await provider.send(args);
+        recordSmsAttempt({ provider: provider.name, outcome: 'success' });
+        return result;
+      } catch (error) {
+        recordSmsAttempt({
+          provider: provider.name,
+          outcome: outcomeFromError(error)
+        });
+        throw error;
+      }
+    }
+  };
+}
+
 const PROVIDERS = {
-  log: logProvider,
-  gupshup: gupshupProvider,
-  msg91: msg91Provider,
-  karix: karixProvider,
-  twilio: twilioProvider
+  log: instrumentedProvider(logProvider),
+  gupshup: instrumentedProvider(gupshupProvider),
+  msg91: instrumentedProvider(msg91Provider),
+  karix: instrumentedProvider(karixProvider),
+  twilio: instrumentedProvider(twilioProvider)
 };
+
+// Phase 5.3 — fallback chain. Wraps an ordered list of providers.
+// On send: walk the list, return the first success. On
+// SMS_PROVIDER_NOT_CONFIGURED or SMS_PROVIDER_REJECTED, fall
+// through to the next provider. If all fail, throw
+// SMS_PROVIDER_FALLBACK_EXHAUSTED with a per-provider attempt
+// report.
+//
+// §15: phone + body are passed identically to each provider; the
+// fallback layer itself does not log or persist them. Per-vendor
+// telemetry (success / rejected / not_configured counts) is
+// already recorded by the instrumented inner providers — operators
+// see which vendor in the chain succeeded via /metrics.
+export function createFallbackProvider(providerList) {
+  if (!Array.isArray(providerList) || providerList.length === 0) {
+    throw new Error('createFallbackProvider requires a non-empty array of providers.');
+  }
+  for (const p of providerList) {
+    if (!p || typeof p.send !== 'function' || typeof p.name !== 'string') {
+      throw new Error('every entry must be a provider with `name` + `send`.');
+    }
+  }
+  return {
+    name: `fallback:${providerList.map((p) => p.name).join('>')}`,
+    isFallback: true,
+    providers: providerList,
+    async send(args) {
+      const attempts = [];
+      for (const provider of providerList) {
+        try {
+          const result = await provider.send(args);
+          return {
+            ...result,
+            fallbackChain: [...attempts.map((a) => a.provider), provider.name],
+            fallbackAttempts: attempts
+          };
+        } catch (error) {
+          // Only fall through on KNOWN provider error codes. An
+          // unexpected error (network blowup, programmer bug)
+          // surfaces immediately so it's not silently swallowed.
+          const isKnown =
+            error?.code === 'SMS_PROVIDER_NOT_CONFIGURED' ||
+            error?.code === 'SMS_PROVIDER_REJECTED';
+          attempts.push({
+            provider: provider.name,
+            code: error?.code ?? 'UNKNOWN',
+            message: error?.message ?? String(error)
+          });
+          if (!isKnown) throw error;
+        }
+      }
+      const error = new Error(
+        `SMS fallback chain exhausted (${providerList.map((p) => p.name).join(' → ')}). ` +
+          `All ${providerList.length} providers failed.`
+      );
+      error.code = 'SMS_PROVIDER_FALLBACK_EXHAUSTED';
+      error.attempts = attempts;
+      throw error;
+    }
+  };
+}
 
 // Public surface: caller asks for a provider by name (default 'log').
 // The selected provider's `send` is the only function call sites use.
+//
+// Phase 5.3: when `BHARAT_OS_SMS_FALLBACK_CHAIN` is set (comma-
+// separated provider names) AND no explicit `name` is passed, the
+// returned provider is a fallback chain wrapping the listed
+// providers in order. Otherwise the legacy single-provider lookup
+// applies via `BHARAT_OS_SMS_PROVIDER`.
 export function getSmsProvider(name) {
+  if (!name) {
+    const chainEnv = process.env.BHARAT_OS_SMS_FALLBACK_CHAIN;
+    if (chainEnv && chainEnv.trim()) {
+      const chainNames = chainEnv
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (chainNames.length === 0) {
+        throw new Error(
+          'BHARAT_OS_SMS_FALLBACK_CHAIN must be a non-empty comma-separated list of provider names.'
+        );
+      }
+      const providers = chainNames.map((n) => {
+        const p = PROVIDERS[n];
+        if (!p) {
+          throw new Error(
+            `unknown SMS provider in fallback chain: '${n}'. Known: ${Object.keys(PROVIDERS).join(', ')}.`
+          );
+        }
+        return p;
+      });
+      return createFallbackProvider(providers);
+    }
+  }
   const requested = name ?? process.env.BHARAT_OS_SMS_PROVIDER ?? 'log';
   const provider = PROVIDERS[requested];
   if (!provider) {

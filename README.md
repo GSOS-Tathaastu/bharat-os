@@ -144,6 +144,31 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.3 **SMS vendor fallback chain + per-vendor delivery
+  telemetry** — Phase 5.1 shipped three real SMS HTTP integrations
+  but only one ran at a time. A 5-minute Gupshup outage was a
+  5-minute OTP-flow outage. Phase 5.3 ships `createFallbackProvider`
+  which walks an ordered provider list, returns the first success,
+  and falls through only on the recoverable error codes
+  `SMS_PROVIDER_NOT_CONFIGURED` and `SMS_PROVIDER_REJECTED` (any
+  other error surfaces immediately so real bugs aren't masked).
+  Success response carries `fallbackChain` + `fallbackAttempts` so
+  callers can log the walk; exhaustion throws
+  `SMS_PROVIDER_FALLBACK_EXHAUSTED` with per-provider attempt
+  details. New env var `BHARAT_OS_SMS_FALLBACK_CHAIN` (comma-
+  separated, e.g. `gupshup,msg91,twilio`) opts in. New Prometheus
+  counter `bos_sms_send_total{provider, outcome}` in `/metrics`
+  records EVERY inner attempt (not just the winner) — a chain
+  silently falling through `gupshup → msg91` is now visible to
+  ops, not hidden. PromQL example:
+  `rate(bos_sms_send_total{provider="gupshup",outcome="rejected"}[5m])`.
+  `.env.example` documents three recommended production chains
+  (India primary, India + intl backup, cost-optimised). §15
+  preserved — fallback layer never touches PII; telemetry labels
+  are provider name + outcome enum only. 429/429 tests (+16 new).
+  ADR 0089. **One vendor outage no longer blocks OTP flows;
+  operators tune chain order from real-world delivery data in
+  `/metrics`.**
 - Phase 5.2 **SIM-swap defense — per-phone rate-limit + post-recovery
   cooldown** — Phase 5.0 audited recovery for detection; Phase 5.2
   adds prevention. New rate-limiter policy `recovery_per_phone`

@@ -14,6 +14,7 @@
 
 const counters = new Map(); // `${method}|${routePattern}|${status}` → count
 const latencyBuckets = new Map(); // `${method}|${routePattern}` → { buckets, sum, count }
+const smsCounters = new Map(); // `${provider}|${outcome}` → count — Phase 5.3
 
 // Histogram buckets in seconds, biased toward request latencies we
 // actually expect (mostly sub-second).
@@ -40,6 +41,27 @@ export function metricPath(pathname) {
     return decoded;
   });
   return '/' + normalised.join('/');
+}
+
+// Phase 5.3 — SMS delivery telemetry. Records one attempt per
+// outcome bucket; the fallback-chain provider records ONE entry
+// per inner attempt so ops can see which vendor in the chain
+// succeeded (or which all failed). Outcomes: 'success' |
+// 'rejected' | 'not_configured' | 'error'.
+const SMS_OUTCOMES = new Set(['success', 'rejected', 'not_configured', 'error']);
+export function recordSmsAttempt({ provider, outcome }) {
+  if (!provider || typeof provider !== 'string') return;
+  if (!SMS_OUTCOMES.has(outcome)) return;
+  const key = `${provider}|${outcome}`;
+  smsCounters.set(key, (smsCounters.get(key) ?? 0) + 1);
+}
+
+export function smsCounterSnapshot() {
+  const out = {};
+  for (const [key, value] of smsCounters) {
+    out[key] = value;
+  }
+  return out;
 }
 
 export function recordRequest({ method, pathname, status, durationSeconds }) {
@@ -102,6 +124,20 @@ export function renderMetrics() {
     lines.push(`bos_api_request_duration_seconds_count{${labelPair}} ${entry.count}`);
   }
 
+  // Phase 5.3 — SMS delivery telemetry per provider + outcome.
+  // Operators correlate fallback-chain decisions against vendor-side
+  // outages via this counter without parsing log lines.
+  lines.push('# HELP bos_sms_send_total SMS send attempts grouped by provider and outcome.');
+  lines.push('# TYPE bos_sms_send_total counter');
+  const smsKeys = [...smsCounters.keys()].sort();
+  for (const key of smsKeys) {
+    const [provider, outcome] = key.split('|');
+    const count = smsCounters.get(key);
+    lines.push(
+      `bos_sms_send_total{provider="${escapeLabel(provider)}",outcome="${escapeLabel(outcome)}"} ${count}`
+    );
+  }
+
   // Process info — minimal, no PII.
   lines.push('# HELP bos_api_process_uptime_seconds Process uptime in seconds.');
   lines.push('# TYPE bos_api_process_uptime_seconds gauge');
@@ -117,4 +153,5 @@ function escapeLabel(value) {
 export function resetMetrics() {
   counters.clear();
   latencyBuckets.clear();
+  smsCounters.clear();
 }
