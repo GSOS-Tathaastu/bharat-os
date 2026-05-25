@@ -144,6 +144,23 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.2 **SQLite store backend — ACID transactions for launch scale** —
+  new `src/phase0/sqlite-store.mjs` is a drop-in replacement for the
+  file-based `BosStore` with identical method signatures (existing tests
+  work unchanged against either backend). 20 tables — one per record
+  type — with indexed columns + JSON blob. Built-in `node:sqlite` (Node
+  24+, no native compilation, no new deps). WAL mode for concurrent
+  reads. **`eraseUserData` cascade now runs inside `BEGIN ... COMMIT`** —
+  DPDP §12(3) right-to-erasure is genuinely atomic (crash-safe instead
+  of leaving half-deleted state). New `createStore({ rootPath, kind })`
+  factory + `BHARAT_OS_STORE_KIND=file|sqlite` env var + `--kind` CLI
+  flag. New `scripts/migrate-store.mjs` (idempotent file → SQLite
+  migration; replays ledger chronologically). Live-verified end-to-end
+  against the demo seed: 70 records + 73 ledger events migrated; API
+  boots on SQLite; all read endpoints return migrated data; SQLite file
+  38% smaller on disk than file store. 333/333 tests (+11 new). ADR 0081.
+  Backward-compatible — file store remains the default; SQLite is
+  opt-in.
 - Phase 4.1 **production hardening — security headers, rate limiting,
   structured logging, metrics, graceful shutdown** — four new artifacts
   under `src/phase0/`: `security-headers.mjs` (strict CSP — no

@@ -2,7 +2,7 @@
 import path from 'node:path';
 import process from 'node:process';
 import { listenPhase0Api } from '../src/phase0/api.mjs';
-import { BosStore } from '../src/phase0/store.mjs';
+import { createStore } from '../src/phase0/sqlite-store.mjs';
 
 function parseArgs(argv) {
   const options = {};
@@ -25,12 +25,15 @@ const options = parseArgs(process.argv.slice(2));
 const host = options.host ?? '127.0.0.1';
 const port = Number(options.port ?? 8787);
 const storePath = path.resolve(options.store ?? '.bharat-os');
+// Phase 4.2: --kind file | sqlite. Falls back to env var
+// BHARAT_OS_STORE_KIND (default: file).
+const storeKind = options.kind ?? process.env.BHARAT_OS_STORE_KIND ?? 'file';
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('--port must be an integer from 1 to 65535.');
 }
 
-const store = new BosStore(storePath);
+const store = await createStore({ rootPath: storePath, kind: storeKind });
 const server = await listenPhase0Api({ store, host, port });
 
 process.stdout.write(
@@ -39,7 +42,8 @@ process.stdout.write(
       ok: true,
       service: 'bharat-os-phase0-api',
       url: `http://${host}:${port}`,
-      store: storePath
+      store: storePath,
+      storeKind
     },
     null,
     2
