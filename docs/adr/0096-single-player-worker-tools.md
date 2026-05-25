@@ -4,13 +4,15 @@
 
 **Partially implemented.**
 
-- ✅ **Tool 1 (earnings tracker)** — shipped. `src/phase1/earnings-log.mjs`,
-  SqliteStore `earnings_log` table, four API endpoints (`POST` /
-  `GET` / `GET /summary` / `DELETE`), DPDP export + erasure cascade
-  integration. 31 tests. The single-player wedge that gets workers
-  on the platform with zero network participation is now real.
-- 🟡 **Tool 2 (mesh-contribution dashboard)** — pending. Substrate
-  shipped in Phase 3.x; this is UX promotion to a first-class card.
+- ✅ **Tool 1 (earnings tracker)** — shipped Phase 6.0a.
+  `src/phase1/earnings-log.mjs`, SqliteStore `earnings_log` table,
+  four API endpoints, DPDP export + erasure cascade integration.
+  31 tests.
+- ✅ **Tool 2 (mesh-contribution dashboard)** — shipped Phase 6.0b.
+  `aggregateMeshByMonth` + `meshMonthlyStatement` added to
+  `src/phase1/mesh-contribution.mjs`; new endpoint
+  `GET /api/identities/:id/mesh/summary?month=YYYY-MM` returning
+  totalPaise + per-workload breakdown + per-day timeline. 16 tests.
 - 🟡 **Tool 3 (year-end tax helper)** — pending. ITR-3 / ITR-4
   summary, section 44ADA presumptive-tax logic, local-compute.
 

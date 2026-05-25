@@ -144,6 +144,28 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.0b **mesh-contribution dashboard — promotes existing Phase
+  3.x substrate to a first-class earn surface** — Phase 3.x ships
+  `createMeshContributionEvent` and the all-time
+  `meshContributionSummary`, but to see "what did I earn each day
+  this month?" required a full event scan in the shell. Phase 6.0b
+  adds the time-windowed aggregation. Extends
+  `src/phase1/mesh-contribution.mjs` with `aggregateMeshByMonth`
+  (filters by operator + month; returns totalPaise + per-workload
+  breakdown + ascending daily timeline + first/last event
+  timestamps; tolerates malformed events) and `meshMonthlyStatement`
+  (human-readable text mirroring the 6.0a earnings-tracker
+  statement shape). New endpoint
+  `GET /api/identities/:id/mesh/summary?month=YYYY-MM`. Cross-user
+  isolation: Bob asking for Alice's summary sees zero events, not
+  404 (consistent with the existing privacy pattern that
+  per-user data simply doesn't surface for the wrong user). §15:
+  identity-scoped; paise integers; no PII in the response. 538/538
+  tests (+16 new — 10 module unit + 6 end-to-end live HTTP).
+  ADR 0096 status: 2/3 tools shipped (earnings + mesh dashboard
+  done; tax helper pending). **A worker can now see month-by-month
+  mesh earnings broken down by day — no aggregator integration
+  needed.**
 - Phase 6.0a **cross-platform earnings tracker — single-player wedge
   that unblocks the two-sided cold start** — Phase 6.0 (ADR 0096)
   ships the growth-arc opener: three single-player tools that give

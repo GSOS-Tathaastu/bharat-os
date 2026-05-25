@@ -59,8 +59,10 @@ import {
   verifyFlagReport
 } from '../phase1/flag-report.mjs';
 import {
+  aggregateMeshByMonth,
   createMeshContributionEvent,
   meshContributionSummary,
+  meshMonthlyStatement,
   MESH_PAYOUT_RATES
 } from '../phase1/mesh-contribution.mjs';
 import {
@@ -1093,6 +1095,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/earnings',
             'GET /api/identities/:identityId/earnings/summary',
             'DELETE /api/identities/:identityId/earnings/:entryId',
+            'GET /api/identities/:identityId/mesh/summary',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
             'POST /api/phone-otp/send',
@@ -2818,6 +2821,50 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         jsonResponse(response, 200, {
           summary,
           statement: monthlyStatement(summary)
+        });
+        return;
+      }
+
+      // Phase 6.0b — mesh-contribution dashboard.
+      //
+      // GET /api/identities/:id/mesh/summary?month=YYYY-MM
+      //
+      // Aggregates the worker's mesh-contribution events for a
+      // single calendar month + returns a per-day timeline so the
+      // shell can render a dashboard card. Substrate (events
+      // themselves) is from Phase 3.x; this is UX promotion of
+      // existing data.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'mesh' &&
+        parts[4] === 'summary' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const month = url.searchParams.get('month');
+        if (!month) {
+          jsonResponse(response, 400, {
+            error: { code: 'month_required', message: 'Provide ?month=YYYY-MM' }
+          });
+          return;
+        }
+        const events = await store.listMeshContributionEvents().catch(() => []);
+        let summary;
+        try {
+          summary = aggregateMeshByMonth(events, month, { operatorId: identityId });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_month', message: error.message }
+          });
+          return;
+        }
+        jsonResponse(response, 200, {
+          summary,
+          statement: meshMonthlyStatement(summary)
         });
         return;
       }

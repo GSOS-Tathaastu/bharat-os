@@ -170,3 +170,130 @@ export const MESH_PAYOUT_RATES = {
   payoutPaisePerGigabyteServed: PAYOUT_PAISE_PER_GIGABYTE_SERVED,
   payoutPaisePerTerabyteStoredMonth: PAYOUT_PAISE_PER_TERABYTE_STORED_MONTH
 };
+
+// ─── Phase 6.0b — mesh dashboard aggregation ─────────────────────────
+//
+// `meshContributionSummary` (above) returns an all-time totals object
+// suitable for the Trust Passport block. The dashboard needs more:
+// monthly aggregation + a per-day timeline so the worker can see
+// "what did I earn each day this month?" without re-fetching events.
+//
+// Both functions are pure — they take the event list and a month
+// scope, return a summary object. The store list does the I/O; this
+// layer does the math.
+
+const MESH_DASHBOARD_MONTH_PATTERN = /^\d{4}-\d{2}$/;
+
+function meshDashboardIsValidMonth(value) {
+  if (typeof value !== 'string') return false;
+  if (!MESH_DASHBOARD_MONTH_PATTERN.test(value)) return false;
+  const [yyyy, mm] = value.split('-').map(Number);
+  return mm >= 1 && mm <= 12 && yyyy >= 1970 && yyyy <= 2100;
+}
+
+// Aggregate one operator's events into a month-scoped summary +
+// per-day timeline. `month` is 'YYYY-MM'.
+//
+// Returns:
+//   {
+//     operatorId, month,
+//     totalPaise,
+//     totalRupees,             // convenience, totalPaise / 100
+//     eventCount,
+//     byWorkload: {
+//       inference: paise,
+//       storage_serve: paise,
+//       storage_store: paise,
+//       federated_round: paise
+//     },
+//     dailyTimeline: [
+//       { date: 'YYYY-MM-DD', paise, eventCount },
+//       …
+//     ],                       // sorted ascending by date
+//     firstEventAt, lastEventAt
+//   }
+export function aggregateMeshByMonth(events, month, { operatorId } = {}) {
+  if (!meshDashboardIsValidMonth(month)) {
+    throw new Error('month must be YYYY-MM.');
+  }
+  const scoped = (events ?? []).filter((event) => {
+    if (operatorId && event.operatorId !== operatorId) return false;
+    if (!event.at || typeof event.at !== 'string') return false;
+    return event.at.slice(0, 7) === month;
+  });
+
+  const byWorkload = {
+    inference: 0,
+    storage_serve: 0,
+    storage_store: 0,
+    federated_round: 0
+  };
+  const dailyMap = new Map(); // date → { paise, eventCount }
+  let totalPaise = 0;
+  let firstEventAt = null;
+  let lastEventAt = null;
+
+  for (const event of scoped) {
+    const paise = Number(event.payoutPaise ?? 0);
+    totalPaise += paise;
+    if (event.workloadType in byWorkload) {
+      byWorkload[event.workloadType] += paise;
+    }
+    const date = event.at.slice(0, 10);
+    const day = dailyMap.get(date) ?? { paise: 0, eventCount: 0 };
+    day.paise += paise;
+    day.eventCount += 1;
+    dailyMap.set(date, day);
+    if (!firstEventAt || event.at < firstEventAt) firstEventAt = event.at;
+    if (!lastEventAt || event.at > lastEventAt) lastEventAt = event.at;
+  }
+
+  const dailyTimeline = [...dailyMap.entries()]
+    .map(([date, v]) => ({ date, paise: v.paise, eventCount: v.eventCount }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return {
+    protocolVersion: MESH_CONTRIBUTION_PROTOCOL_VERSION,
+    objectType: 'mesh-monthly-summary',
+    operatorId: operatorId ?? null,
+    month,
+    totalPaise,
+    totalRupees: Number((totalPaise / 100).toFixed(2)),
+    eventCount: scoped.length,
+    byWorkload,
+    dailyTimeline,
+    firstEventAt,
+    lastEventAt
+  };
+}
+
+// Compose a printable statement for the operator. Mirrors the
+// earnings-log `monthlyStatement` shape so shell rendering can
+// treat the two outputs uniformly.
+export function meshMonthlyStatement(summary, { rupeeFormatter } = {}) {
+  if (!summary || summary.objectType !== 'mesh-monthly-summary') {
+    throw new Error('summary must be a mesh-monthly-summary.');
+  }
+  const fmt =
+    rupeeFormatter ??
+    ((paise) =>
+      `Rs. ${(paise / 100).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })}`);
+  const lines = [
+    `Bharat OS mesh-contribution statement — ${summary.month}`,
+    ``,
+    `Total payout:    ${fmt(summary.totalPaise)}`,
+    `Working days:    ${summary.dailyTimeline.length}`,
+    `Events recorded: ${summary.eventCount}`
+  ];
+  const wlEntries = Object.entries(summary.byWorkload).filter(([, p]) => p > 0);
+  if (wlEntries.length > 0) {
+    lines.push(``, `Breakdown by workload:`);
+    for (const [type, paise] of wlEntries) {
+      lines.push(`  ${type.padEnd(18)} ${fmt(paise)}`);
+    }
+  }
+  return lines.join('\n');
+}
