@@ -56,8 +56,60 @@ import {
   createPrivateKey,
   createCipheriv
 } from 'node:crypto';
+import { recordPushAttempt } from './metrics.mjs';
 
 export const WEB_PUSH_PROTOCOL_VERSION = 'bos.phase0.web-push.v0';
+
+// Phase 7.3 — single-retry policy for transient failures. Push
+// services (FCM, Autopush) respond 429 + Retry-After under load
+// and 5xx during outages. We retry exactly once after honouring
+// Retry-After (capped) or a fixed 1s baseline for 5xx.
+const RETRY_MAX_BACKOFF_MS = 60_000; // hard cap on Retry-After honouring
+const RETRY_5XX_DELAY_MS = 1_000;
+
+// Phase 7.3 — vendor extraction. The push service host determines
+// the vendor family for telemetry purposes. Bharat OS doesn't
+// route between vendors (subscription owns that choice) but the
+// per-vendor success rate is what ops needs to know about.
+const VENDOR_HOST_MAP = [
+  { match: /(^|\.)googleapis\.com$/, vendor: 'fcm' },
+  { match: /(^|\.)mozilla\.com$/, vendor: 'autopush' },
+  { match: /(^|\.)windows\.com$/, vendor: 'wns' },
+  { match: /(^|\.)mock$/, vendor: 'mock' } // test fixture
+];
+
+export function pushVendor(endpoint) {
+  if (!endpoint || typeof endpoint !== 'string') return 'other';
+  let host;
+  try {
+    host = new URL(endpoint).host.toLowerCase();
+  } catch {
+    return 'other';
+  }
+  for (const { match, vendor } of VENDOR_HOST_MAP) {
+    if (match.test(host)) return vendor;
+  }
+  return 'other';
+}
+
+// Parse the push-service `Retry-After` header. Per RFC 7231 §7.1.3
+// it's either a positive delta-seconds integer or an HTTP-date.
+// We accept both. Returns milliseconds capped at
+// RETRY_MAX_BACKOFF_MS (60s) — never block the request loop on a
+// rogue header that says "retry in 24 hours."
+export function parseRetryAfterMs(headerValue, { now = Date.now() } = {}) {
+  if (!headerValue) return 0;
+  const trimmed = String(headerValue).trim();
+  const asInt = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(asInt) && String(asInt) === trimmed) {
+    return Math.max(0, Math.min(asInt * 1000, RETRY_MAX_BACKOFF_MS));
+  }
+  const asDate = Date.parse(trimmed);
+  if (Number.isFinite(asDate)) {
+    return Math.max(0, Math.min(asDate - now, RETRY_MAX_BACKOFF_MS));
+  }
+  return 0;
+}
 
 const VAPID_JWT_TTL_SECONDS = 12 * 60 * 60; // 12h — well under the 24h spec cap
 
@@ -281,12 +333,21 @@ export function maskEndpoint(endpoint) {
 
 // Send one push. Returns { ok, status, ... } on success / failure.
 // Caller decides what to do with `expired` (HTTP 410 = unsubscribe).
+//
+// Phase 7.3: single retry on 429 (Retry-After honoured + capped at
+// 60s) and on 5xx (fixed 1s delay). Per-vendor telemetry recorded
+// via `bos_push_send_total{vendor, outcome}` so ops can detect
+// FCM degradation, Autopush outages, etc. Set `retry: false` to
+// disable retries (used for recursive calls + tests).
 export async function sendWebPush({
   subscription,
   payload,
   vapid,
   ttlSeconds = 60 * 60, // push-service TTL for queued messages
-  urgency = 'normal' // 'very-low' | 'low' | 'normal' | 'high'
+  urgency = 'normal', // 'very-low' | 'low' | 'normal' | 'high'
+  retry = true,
+  // Test seam: injected sleep so retry tests don't actually sleep.
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 }) {
   if (!subscription?.endpoint) throw new Error('subscription.endpoint is required.');
   if (!subscription?.keys?.p256dh || !subscription?.keys?.auth) {
@@ -295,6 +356,8 @@ export async function sendWebPush({
   if (!vapid?.publicKey || !vapid?.privateKey || !vapid?.subject) {
     throw new Error('vapid.publicKey + privateKey + subject are required.');
   }
+
+  const vendor = pushVendor(subscription.endpoint);
 
   const encrypted = encryptPushPayload({
     payload,
@@ -317,13 +380,44 @@ export async function sendWebPush({
     authorization: `vapid t=${jwt}, k=${vapid.publicKey}`
   };
 
-  const response = await fetch(subscription.endpoint, {
-    method: 'POST',
-    headers,
-    body: encrypted.body
-  });
+  let response;
+  try {
+    response = await fetch(subscription.endpoint, {
+      method: 'POST',
+      headers,
+      body: encrypted.body
+    });
+  } catch (error) {
+    // Network-level error (DNS, TCP reset, etc.). Telemetry +
+    // single retry if eligible.
+    recordPushAttempt({ vendor, outcome: 'network_error' });
+    if (retry) {
+      await sleep(RETRY_5XX_DELAY_MS);
+      const result = await sendWebPush({
+        subscription,
+        payload,
+        vapid,
+        ttlSeconds,
+        urgency,
+        retry: false,
+        sleep
+      });
+      if (result.ok) {
+        recordPushAttempt({ vendor, outcome: 'retried_success' });
+      }
+      return { ...result, retried: true };
+    }
+    return {
+      ok: false,
+      status: 0,
+      reason: 'network_error',
+      endpointMasked: maskEndpoint(subscription.endpoint),
+      providerResponse: error?.message ?? String(error)
+    };
+  }
 
   if (response.status === 201 || response.status === 200) {
+    recordPushAttempt({ vendor, outcome: 'success' });
     return {
       ok: true,
       status: response.status,
@@ -331,6 +425,7 @@ export async function sendWebPush({
     };
   }
   if (response.status === 404 || response.status === 410) {
+    recordPushAttempt({ vendor, outcome: 'gone' });
     return {
       ok: false,
       status: response.status,
@@ -339,7 +434,46 @@ export async function sendWebPush({
       shouldUnsubscribe: true
     };
   }
+  if (response.status === 429 && retry) {
+    // Rate-limited — honour Retry-After (capped at 60s).
+    recordPushAttempt({ vendor, outcome: 'rate_limited' });
+    const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+    await sleep(retryAfterMs || RETRY_5XX_DELAY_MS);
+    const result = await sendWebPush({
+      subscription,
+      payload,
+      vapid,
+      ttlSeconds,
+      urgency,
+      retry: false,
+      sleep
+    });
+    if (result.ok) {
+      recordPushAttempt({ vendor, outcome: 'retried_success' });
+    }
+    return { ...result, retried: true, retryAfterMs };
+  }
+  if (response.status >= 500 && response.status < 600 && retry) {
+    // Transient server error — single retry with fixed baseline.
+    recordPushAttempt({ vendor, outcome: 'rejected' });
+    await sleep(RETRY_5XX_DELAY_MS);
+    const result = await sendWebPush({
+      subscription,
+      payload,
+      vapid,
+      ttlSeconds,
+      urgency,
+      retry: false,
+      sleep
+    });
+    if (result.ok) {
+      recordPushAttempt({ vendor, outcome: 'retried_success' });
+    }
+    return { ...result, retried: true };
+  }
+
   const text = await response.text().catch(() => '');
+  recordPushAttempt({ vendor, outcome: 'rejected' });
   return {
     ok: false,
     status: response.status,

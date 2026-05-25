@@ -17,6 +17,7 @@ const latencyBuckets = new Map(); // `${method}|${routePattern}` → { buckets, 
 const smsCounters = new Map(); // `${provider}|${outcome}` → count — Phase 5.3
 const smsCircuitStates = new Map(); // `${provider}` → 0|1|2 — Phase 5.4
 const smsInflight = new Map(); // `${provider}` → integer count — Phase 5.8
+const pushCounters = new Map(); // `${vendor}|${outcome}` → count — Phase 7.3
 // Phase 5.6 — backup age. `recordBackupAge({ ageSeconds, … })` is
 // called by the /api/admin/backup-status handler so the freshness
 // data feeds both the JSON endpoint AND /metrics from a single
@@ -111,6 +112,33 @@ export function smsInflightSnapshot() {
   for (const [provider, value] of smsInflight) {
     out[provider] = value;
   }
+  return out;
+}
+
+// Phase 7.3 — Web Push delivery telemetry. Vendor is the push
+// service host family ('fcm' / 'autopush' / 'wns' / 'other') —
+// extracted by web-push.mjs `pushVendor()`. Outcome enum mirrors
+// SMS: 'success' / 'gone' (HTTP 410, subscription invalidated) /
+// 'rate_limited' (HTTP 429) / 'rejected' (4xx/5xx) /
+// 'network_error' / 'retried_success' (succeeded on retry).
+const PUSH_OUTCOMES = new Set([
+  'success',
+  'gone',
+  'rate_limited',
+  'rejected',
+  'network_error',
+  'retried_success'
+]);
+export function recordPushAttempt({ vendor, outcome }) {
+  if (!vendor || typeof vendor !== 'string') return;
+  if (!PUSH_OUTCOMES.has(outcome)) return;
+  const key = `${vendor}|${outcome}`;
+  pushCounters.set(key, (pushCounters.get(key) ?? 0) + 1);
+}
+
+export function pushCounterSnapshot() {
+  const out = {};
+  for (const [key, value] of pushCounters) out[key] = value;
   return out;
 }
 
@@ -241,6 +269,23 @@ export function renderMetrics() {
     lines.push(`bos_sms_inflight{provider="${escapeLabel(provider)}"} ${value}`);
   }
 
+  // Phase 7.3 — Web Push delivery telemetry per vendor + outcome.
+  // PromQL ratio example:
+  //   rate(bos_push_send_total{vendor="fcm",outcome="success"}[5m])
+  //     / rate(bos_push_send_total{vendor="fcm"}[5m])
+  lines.push(
+    '# HELP bos_push_send_total Web Push send attempts grouped by vendor (push-service family) and outcome.'
+  );
+  lines.push('# TYPE bos_push_send_total counter');
+  const pushKeys = [...pushCounters.keys()].sort();
+  for (const key of pushKeys) {
+    const [vendor, outcome] = key.split('|');
+    const count = pushCounters.get(key);
+    lines.push(
+      `bos_push_send_total{vendor="${escapeLabel(vendor)}",outcome="${escapeLabel(outcome)}"} ${count}`
+    );
+  }
+
   // Phase 5.6 — backup freshness gauges. Emitted unconditionally:
   // when no snapshot exists yet, age is rendered as NaN (Prometheus
   // accepts NaN; Grafana renders it as a gap) so ops alerts trigger.
@@ -278,6 +323,7 @@ export function resetMetrics() {
   smsCounters.clear();
   smsCircuitStates.clear();
   smsInflight.clear();
+  pushCounters.clear();
   latestBackupAt = null;
   latestBackupBytes = null;
   latestBackupKind = null;

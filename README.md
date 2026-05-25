@@ -144,6 +144,37 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 7.3 **Web Push adaptive retry + per-vendor telemetry —
+  closes Phase 7's observability+reliability story** — Phases
+  7.0/7.1/7.2 shipped real Web Push delivery + reusable helper +
+  §9A wiring. ADR 0101 future-work flagged two missing layers:
+  adaptive retry on transient errors + per-vendor health
+  telemetry mirroring SMS's Phase 5.3 observability. Phase 7.3
+  ships both as additive layers (all 35 prior Phase 7 tests still
+  pass). **Per-vendor telemetry**: new metric `bos_push_send_total
+  {vendor, outcome}` (mirrors `bos_sms_send_total`); `pushVendor`
+  helper maps endpoint host to vendor family (`fcm` / `autopush`
+  / `wns` / `mock` / `other`); 6-value outcome enum (`success`,
+  `gone`, `rate_limited`, `rejected`, `network_error`,
+  `retried_success`). **Adaptive single-retry** in `sendWebPush`:
+  honors `Retry-After` per RFC 7231 (delta-seconds OR HTTP-date)
+  with 60s cap to prevent rogue-header denial-of-service; fixed
+  1s baseline for 5xx + network errors; **maximum 2 attempts per
+  invocation** (recursive call passes `retry: false`); test seam
+  via injectable `sleep`. New `parseRetryAfterMs` helper handles
+  all edge cases (delta-seconds, HTTP-date, missing, past-date,
+  rogue >60s). `retry: false` opt-out for single-attempt callers.
+  §15: no PII in metric labels (vendor + outcome are bounded
+  enums; endpoint URL never appears); retry re-runs same
+  E2E-encrypted POST; `retried_success` separate from `success`
+  so ops can distinguish flapping from nominal. 747/747 tests
+  (+16 new — including the **persistent-429 test** that proves
+  retry hard-caps at 2 attempts AND the **retry-with-injected-
+  sleep test** that proves Retry-After is honored). ADR 0104.
+  **Three-axis Web Push observability now matches the SMS
+  stack**: delivery (Phase 7.0), per-event audit ledger (Phase
+  7.1), per-vendor success-rate counter (Phase 7.3). FCM
+  429-bursts heal automatically.
 - Phase 7.2 **§9A worker-notification VAPID delivery — closes ADR
   0053's `vapidIntegrated: false` gap** — Phase 2a.4 (August 2025)
   scaffolded the §9A worker-notification envelope but stopped at
