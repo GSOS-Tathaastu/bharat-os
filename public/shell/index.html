@@ -331,6 +331,83 @@
           </div>
           <div id="trustPassportShare" class="trust-share" hidden></div>
         </section>
+
+        <!-- Phase 8.2 — MFI income-verification consent issuance (Phase 6.1 wire). -->
+        <section class="capture-card mfi-consent-card" id="mfiConsentSection">
+          <div class="capture-header">
+            <span>🏦 Share income with a lender</span>
+            <span id="mfiConsentStatus" class="capture-meta">—</span>
+          </div>
+          <p class="diagnostics-note">
+            Bharat OS can hand a named MFI / NBFC a signed summary of your
+            earnings + portable attestations + verified memberships. You
+            issue the consent; they read it ONCE; it burns. The MFI
+            never sees raw entries — only the aggregated bundle.
+          </p>
+          <div class="mfi-consent-form">
+            <div class="earnings-row">
+              <label for="mfiName">Lender name</label>
+              <input id="mfiName" type="text" maxlength="80"
+                placeholder="e.g. Bajaj Finserv" />
+            </div>
+            <div class="earnings-row">
+              <label for="mfiPurpose">Purpose</label>
+              <input id="mfiPurpose" type="text" maxlength="200"
+                placeholder="e.g. Personal loan application" />
+            </div>
+            <div class="earnings-row">
+              <label for="mfiFinancialYear">Financial year</label>
+              <select id="mfiFinancialYear"></select>
+            </div>
+            <div class="earnings-row">
+              <label for="mfiTtlDays">Valid for</label>
+              <select id="mfiTtlDays">
+                <option value="7">7 days</option>
+                <option value="30" selected>30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </div>
+            <div class="earnings-row">
+              <label for="mfiMaxReads">Max reads</label>
+              <select id="mfiMaxReads">
+                <option value="1" selected>1 (single-use bearer)</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+              </select>
+            </div>
+            <div class="passkey-actions">
+              <button id="mfiConsentIssue" class="secondary-button" type="button">
+                Issue consent
+              </button>
+            </div>
+          </div>
+          <div id="mfiConsentIssued" class="mfi-consent-issued" hidden>
+            <div class="mfi-consent-share">
+              <div class="mfi-share-label">Hand this URL to the lender (single-use):</div>
+              <input id="mfiConsentShareUrl" type="text" readonly />
+              <button id="mfiConsentCopy" class="link-button" type="button">
+                Copy
+              </button>
+            </div>
+          </div>
+          <div class="mfi-consent-list-heading">Your issued consents</div>
+          <div id="mfiConsentList" class="mfi-consent-list"></div>
+          <details class="why-details">
+            <summary>How an MFI uses this</summary>
+            <p class="diagnostics-note">
+              The lender presents the consent URL once. Bharat OS verifies
+              the consent is fresh + not revoked + has reads remaining,
+              then builds a signed bundle aggregating your earnings (Phase
+              6.0a), mesh contributions (Phase 6.0b), portable attestations
+              (Phase 5.9), and verified memberships (Phase 6.2 + 6.3) — and
+              returns it. The bundle carries an honest disclaimer: "data is
+              user-typed, not scraped; weight attestation tiers in your
+              underwriting." You can revoke any consent before expiry.
+            </p>
+          </details>
+        </section>
       </section>
 
       <!-- ─── PROFILE TAB ────────────────────────────────────────── -->

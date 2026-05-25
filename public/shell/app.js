@@ -3888,6 +3888,202 @@ function setupMeshDashboard() {
   refresh();
 }
 
+// Phase 8.2 — MFI income-verification consent UI (Phase 6.1 API wire).
+function setupMfiConsent() {
+  const $el = (id) => document.getElementById(id);
+  const issueBtn = $el('mfiConsentIssue');
+  const copyBtn = $el('mfiConsentCopy');
+  const fyEl = $el('mfiFinancialYear');
+  const statusEl = $el('mfiConsentStatus');
+  const issuedEl = $el('mfiConsentIssued');
+  const shareUrlEl = $el('mfiConsentShareUrl');
+  const listEl = $el('mfiConsentList');
+  if (!issueBtn || !fyEl) return;
+
+  // Populate the financial-year dropdown with the current FY + previous FY.
+  // Indian FY = April-March. Today (2026-05-25) → FY 2025-26 just ended,
+  // FY 2026-27 in progress. Default to the just-ended FY (most relevant
+  // for an MFI assessing your most recent annual income).
+  const now = new Date();
+  const month = now.getUTCMonth() + 1; // 1-12
+  const year = now.getUTCFullYear();
+  const currentFyStartYear = month >= 4 ? year : year - 1;
+  for (let offset = 0; offset >= -2; offset -= 1) {
+    const fyStart = currentFyStartYear + offset;
+    const fyEnd = String((fyStart + 1) % 100).padStart(2, '0');
+    const value = `${fyStart}-${fyEnd}`;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = `FY ${value}`;
+    if (offset === -1) option.selected = true; // default to just-ended FY
+    fyEl.appendChild(option);
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function classifyStatus(consent) {
+    if (consent.revokedAt) return 'revoked';
+    if (
+      consent.expiresAt &&
+      new Date(consent.expiresAt).getTime() <= Date.now()
+    )
+      return 'expired';
+    if ((consent.readCount ?? 0) >= (consent.maxReads ?? 1)) return 'exhausted';
+    return 'active';
+  }
+
+  async function refreshList() {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/income-verification/consents`
+      );
+      if (!response.ok) {
+        statusEl.textContent = 'Could not load consents';
+        return;
+      }
+      const body = await response.json();
+      const consents = body.consents ?? [];
+      if (consents.length === 0) {
+        listEl.innerHTML =
+          '<div class="mfi-consent-list-empty">No consents issued yet.</div>';
+        statusEl.textContent = 'No active consents';
+        return;
+      }
+      listEl.innerHTML = consents
+        .map((consent) => {
+          const status = classifyStatus(consent);
+          const consentIdShort = consent.consentId.slice(-8);
+          const expiresLabel = consent.expiresAt
+            ? new Date(consent.expiresAt).toLocaleDateString('en-IN')
+            : '—';
+          const reads = `${consent.readCount ?? 0}/${consent.maxReads ?? 1}`;
+          const canRevoke = status === 'active';
+          return `
+            <div class="mfi-consent-list-entry" data-consent-id="${escapeHtml(consent.consentId)}">
+              <div>
+                <strong>${escapeHtml(consent.mfiName)}</strong>
+                <span class="mfi-consent-status-badge ${status}">${status}</span>
+                <div class="mfi-consent-list-entry-meta">
+                  FY ${escapeHtml(consent.financialYear)} · expires ${escapeHtml(expiresLabel)} · reads ${reads} · …${escapeHtml(consentIdShort)}
+                </div>
+              </div>
+              ${canRevoke ? '<button class="mfi-revoke" type="button">Revoke</button>' : ''}
+            </div>`;
+        })
+        .join('');
+      const activeCount = consents.filter(
+        (c) => classifyStatus(c) === 'active'
+      ).length;
+      statusEl.textContent = `${activeCount} active`;
+      // Wire revoke buttons.
+      listEl.querySelectorAll('.mfi-revoke').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const entryEl = btn.closest('.mfi-consent-list-entry');
+          const consentId = entryEl?.dataset.consentId;
+          if (!consentId) return;
+          if (
+            !window.confirm(
+              'Revoke this consent? The lender will no longer be able to read your bundle.'
+            )
+          )
+            return;
+          const reason = window.prompt(
+            'Reason (optional — for your records):',
+            'no longer needed'
+          );
+          if (reason === null) return;
+          await fetch(
+            `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/income-verification/consents/${encodeURIComponent(consentId)}/revoke`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: '{}'
+            }
+          );
+          refreshList();
+        });
+      });
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  }
+
+  issueBtn.addEventListener('click', async () => {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    const mfiName = $el('mfiName').value.trim();
+    const purpose = $el('mfiPurpose').value.trim();
+    const financialYear = fyEl.value;
+    const ttlDays = Number($el('mfiTtlDays').value);
+    const maxReads = Number($el('mfiMaxReads').value);
+    if (!mfiName) {
+      statusEl.textContent = 'Lender name required';
+      return;
+    }
+    if (!purpose || purpose.length < 4) {
+      statusEl.textContent = 'Purpose required';
+      return;
+    }
+    statusEl.textContent = 'Issuing…';
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/income-verification/consents`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            mfiName,
+            purpose,
+            financialYear,
+            ttlSeconds: ttlDays * 24 * 60 * 60,
+            maxReads
+          })
+        }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        statusEl.textContent = err.error?.message ?? `Failed (${response.status})`;
+        return;
+      }
+      const body = await response.json();
+      const shareUrl = `${window.location.origin}${body.mfiFetchUrl}`;
+      shareUrlEl.value = shareUrl;
+      issuedEl.hidden = false;
+      $el('mfiName').value = '';
+      $el('mfiPurpose').value = '';
+      statusEl.textContent = 'Consent issued ✓';
+      refreshList();
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  });
+
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrlEl.value);
+      copyBtn.textContent = 'Copied ✓';
+      setTimeout(() => (copyBtn.textContent = 'Copy'), 2000);
+    } catch (_error) {
+      shareUrlEl.select();
+    }
+  });
+
+  refreshList();
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
@@ -3899,6 +4095,7 @@ setupPwaInstall();
 setupI18n();
 setupEarningsLog();
 setupMeshDashboard();
+setupMfiConsent();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

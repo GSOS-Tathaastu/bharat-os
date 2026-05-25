@@ -144,6 +144,36 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 8.2 **shell UI for MFI income-verification consent issuance**
+  — Phase 6.1 shipped the MFI consent endpoints but had no
+  worker-facing UI. Phase 8.2 ships the card on the Trust tab (same
+  "share data with verifiers" family as the Trust Passport). New
+  `#mfiConsentSection` with form (lender name / purpose / FY /
+  validity / max-reads), [Issue consent] button → POST creates
+  signed envelope, orange post-issuance block shows the
+  `mfiFetchUrl` share URL + [Copy] button using
+  `navigator.clipboard.writeText`. List below shows each issued
+  consent with a status badge (active green / revoked red /
+  expired grey / exhausted amber — derived client-side from the
+  consent's mutable fields, mirroring Phase 6.1's
+  `verifyIncomeVerificationConsent` enum). Per-row [Revoke]
+  button on active consents only, gated by window.confirm +
+  prompt(reason). FY dropdown populates dynamically from current
+  date with offsets covering current + 2 prior FYs; defaults to
+  just-ended FY since that's what an MFI assesses for annual
+  income. New `setupMfiConsent()` in app.js (~170 lines, follows
+  Phase 8.0/8.1 pattern). New CSS for issued-block + share-URL
+  monospace input + per-row status badges. SW cache v31→v32. §15:
+  worker controls consent (no auto-issuance); status badge is
+  client-side advisory (server still enforces on read); HTML
+  escaping; share URL is worker's responsibility (bearer-token
+  per Phase 6.1). No automated browser tests (same pattern as
+  Phase 8.0/8.1). Live smoke verified end-to-end: POST returns
+  201 + mfiFetchUrl, GET lists the new consent. 747/747 Node
+  tests still pass. ADR 0108. **MFI flow now demoable
+  end-to-end**: worker logs earnings → Trust tab → issues
+  consent → copies share URL → MFI fetches signed bundle. Trust
+  tab now hosts two complementary flows.
 - Phase 8.1 **shell UI for the mesh-contribution dashboard —
   monthly retrospective surface** — Phase 6.0b shipped the
   `aggregateMeshByMonth` + `/mesh/summary?month=` substrate but had
