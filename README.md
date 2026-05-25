@@ -144,6 +144,21 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.4 **network resilience + offline mode + PWA install** — new
+  `public/shell/network.mjs` with `fetchWithRetry` (exponential
+  backoff 200/600/1800ms; retries 5xx + 429 + 408 + network errors;
+  never retries 4xx validation errors), `onNetworkStatusChange`
+  (wraps `navigator.onLine`), `categoriseError` (6 discriminated
+  categories: offline / auth / rate_limited / validation /
+  server_error / network_error — each with recommended action).
+  Sticky red **offline banner** at top of viewport when network
+  drops (auto-hides on reconnect; mesh ticker auto-stops while
+  offline). **PWA install card** on Profile captured from
+  `beforeinstallprompt` — one tap to pin Bharat OS to home screen;
+  dismiss flag persisted; `appinstalled` event hides card
+  permanently. `showToast` upgraded: `(msg, { tone, retry })`
+  — when `retry` is a function, toast becomes interactive with a
+  Retry button. 360/360 tests (+13 new). SW cache to v27. ADR 0083.
 - Phase 4.3 **phone OTP authentication scaffold — recovery path beyond
   the 12-word phrase** — population-scale users will lose their phrase;
   phone OTP is the fallback. New `src/phase0/sms-provider.mjs` (`log`

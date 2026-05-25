@@ -297,14 +297,46 @@ function renderSuggestions(locale) {
     .join('');
 }
 
-function showToast(message) {
+function showToast(message, { tone, retry, durationMs = 3200 } = {}) {
   const toast = $('toast');
+  toast.dataset.tone = tone ?? '';
+  if (typeof retry === 'function') {
+    // Toast becomes interactive: text + Retry button + dismiss.
+    toast.innerHTML = `
+      <span class="toast-text"></span>
+      <button class="toast-action" type="button">Retry</button>
+      <button class="toast-dismiss" type="button" aria-label="Dismiss">×</button>
+    `;
+    toast.querySelector('.toast-text').textContent = message;
+    const action = toast.querySelector('.toast-action');
+    const dismiss = toast.querySelector('.toast-dismiss');
+    const close = () => {
+      toast.hidden = true;
+      toast.innerHTML = '';
+    };
+    action.addEventListener('click', () => {
+      close();
+      try {
+        retry();
+      } catch (error) {
+        console.warn('toast retry threw', error);
+      }
+    });
+    dismiss.addEventListener('click', close);
+    toast.hidden = false;
+    clearTimeout(showToast._timer);
+    // Interactive toast persists ~8 s — long enough for the user to
+    // notice and act.
+    showToast._timer = setTimeout(close, Math.max(durationMs, 8000));
+    return;
+  }
   toast.textContent = message;
   toast.hidden = false;
   clearTimeout(showToast._timer);
   showToast._timer = setTimeout(() => {
     toast.hidden = true;
-  }, 3200);
+    toast.innerHTML = '';
+  }, durationMs);
 }
 
 function escapeHtml(value) {
@@ -3317,6 +3349,98 @@ async function verifyPhoneOtpFromShell() {
   }
 }
 
+// ─── Network status + PWA install (Phase 4.4) ─────────────────────────────
+//
+// Lazy-load the network helper module so it only ships when the
+// shell actually boots.
+
+let networkModulePromise = null;
+async function loadNetworkModule() {
+  if (!networkModulePromise) {
+    networkModulePromise = import('/shell/network.mjs');
+  }
+  return networkModulePromise;
+}
+
+function setupNetworkStatus() {
+  loadNetworkModule()
+    .then(({ onNetworkStatusChange }) => {
+      onNetworkStatusChange(({ online }) => {
+        const banner = $('offlineBanner');
+        if (!banner) return;
+        banner.hidden = online;
+        if (!online) {
+          // Disable mesh ticker — pointless to fire ticks while
+          // offline; the contribution endpoint will fail.
+          if (typeof stopMeshNode === 'function') stopMeshNode();
+        }
+      });
+    })
+    .catch((error) => console.warn('setupNetworkStatus failed', error));
+}
+
+// Phase 4.4 — PWA install prompt.
+//
+// Browsers fire `beforeinstallprompt` when the app meets the PWA
+// install criteria (HTTPS, service worker, manifest). We stash the
+// event so the user can trigger install at a convenient moment
+// (Profile tab → Install button) instead of being interrupted on
+// first load. After the user installs (or declines), we hide the
+// button — there's no second chance per browser policy.
+
+let deferredInstallPrompt = null;
+
+function setupPwaInstall() {
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    const section = $('pwaInstallSection');
+    if (section) section.hidden = false;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    const section = $('pwaInstallSection');
+    if (section) section.hidden = true;
+    showToast('Bharat OS installed. You can launch it from your home screen.');
+  });
+
+  $('pwaInstallButton')?.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) {
+      showToast('Install not available — this device may already have Bharat OS, or the browser does not support PWA install.');
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    if (outcome === 'accepted') {
+      showToast('Installing…');
+    } else {
+      showToast('Maybe later. The button stays on Profile if you change your mind.');
+    }
+    deferredInstallPrompt = null;
+  });
+
+  $('pwaInstallDismiss')?.addEventListener('click', () => {
+    const section = $('pwaInstallSection');
+    if (section) section.hidden = true;
+    try {
+      localStorage.setItem('bharat-os.shell.pwaInstallDismissed.v1', '1');
+    } catch (_error) {
+      /* fine */
+    }
+  });
+
+  // Honour the dismissed flag across sessions.
+  try {
+    if (localStorage.getItem('bharat-os.shell.pwaInstallDismissed.v1') === '1') {
+      const section = $('pwaInstallSection');
+      if (section) section.hidden = true;
+    }
+  } catch (_error) {
+    /* fine */
+  }
+}
+
 function setupPhoneOtp() {
   $('phoneOtpSendButton')?.addEventListener('click', sendPhoneOtp);
   $('phoneOtpVerifyButton')?.addEventListener('click', verifyPhoneOtpFromShell);
@@ -3344,6 +3468,8 @@ setupTabs();
 setupFirstRun();
 setupDpdp();
 setupPhoneOtp();
+setupNetworkStatus();
+setupPwaInstall();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

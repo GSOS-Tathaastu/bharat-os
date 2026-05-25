@@ -435,6 +435,21 @@
           <div id="dpdpResult" class="capture-result" hidden></div>
         </section>
 
+        <section class="capture-card pwa-install-card" id="pwaInstallSection" hidden>
+          <div class="capture-header">
+            <span>📥 Install Bharat OS</span>
+            <span class="capture-meta">Adds to your home screen</span>
+          </div>
+          <p class="capture-note">
+            Pin Bharat OS to your phone's home screen so it opens like a real
+            app — no browser bar, no tab switching, works offline.
+          </p>
+          <div class="passkey-actions">
+            <button id="pwaInstallButton" class="secondary-button" type="button">Install</button>
+            <button id="pwaInstallDismiss" class="link-button" type="button">Not now</button>
+          </div>
+        </section>
+
         <section class="profile-misc">
           <button id="replayTour" class="link-button" type="button">▶ Replay welcome tour</button>
           <button id="resetDeviceButton" class="link-button danger" type="button">↻ Reset this device</button>
@@ -675,6 +690,15 @@
     </div>
 
     <div class="toast" id="toast" hidden></div>
+
+    <!-- Phase 4.4 — sticky offline banner. Hidden by default;     -->
+    <!-- the network helper flips `hidden` based on navigator.onLine. -->
+    <div id="offlineBanner" class="offline-banner" hidden>
+      <span class="offline-banner-icon" aria-hidden="true">⚡</span>
+      <span class="offline-banner-text">
+        You're offline. Bharat OS will retry when your connection is back.
+      </span>
+    </div>
 
     <script src="/shell/app.js" type="module"></script>
     <script src="/shell/sw-bootstrap.js"></script>
