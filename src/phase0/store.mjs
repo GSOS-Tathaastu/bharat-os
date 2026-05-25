@@ -191,6 +191,44 @@ export class BosStore {
     await fs.appendFile(this.ledgerPath, `${JSON.stringify(event)}\n`, 'utf8');
   }
 
+  // Phase 5.6 — integrity verification. The file backend has no
+  // schema-level integrity check (there's no global b-tree); we
+  // perform a structural check instead — verify the directory
+  // exists and contains the per-record-type subdirectories the
+  // backend writes to. This is the minimum needed to know a
+  // snapshot is restore-able; deeper checks (per-file JSON
+  // validity) would scan O(records) and aren't justified for the
+  // file backend's dev/migration role.
+  async verifyIntegrity(targetPath) {
+    const root = targetPath ?? this.rootPath;
+    const messages = [];
+    try {
+      const stats = await fs.stat(root);
+      if (!stats.isDirectory()) {
+        messages.push(`root is not a directory: ${root}`);
+      }
+    } catch (error) {
+      messages.push(`root not readable: ${error.message}`);
+      return { ok: false, targetPath: root, messages };
+    }
+    // Verify at least the identities/ subdir exists — every
+    // working BosStore creates it on init().
+    const identitiesPath = path.join(root, 'identities');
+    try {
+      const stats = await fs.stat(identitiesPath);
+      if (!stats.isDirectory()) {
+        messages.push(`identities/ is not a directory under ${root}`);
+      }
+    } catch (_error) {
+      messages.push(`identities/ subdir missing under ${root}`);
+    }
+    return {
+      ok: messages.length === 0,
+      targetPath: root,
+      messages: messages.length === 0 ? ['ok'] : messages
+    };
+  }
+
   // Phase 5.5 — file-store snapshot. Recursively copies the entire
   // root directory tree to the target path. There is no atomic
   // equivalent of SQLite's `VACUUM INTO` for a directory layout —

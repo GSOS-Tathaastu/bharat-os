@@ -327,6 +327,40 @@ export class SqliteStore {
     }
   }
 
+  // Phase 5.6 — integrity verification. SQLite's `PRAGMA
+  // integrity_check` performs a comprehensive scan of the b-tree
+  // structure, page allocations, and constraints. Runs in O(db
+  // size) — typically <1s for a launch-scale db. Returns "ok"
+  // when healthy; a list of error strings otherwise.
+  //
+  // If `targetPath` is provided, opens that file as a read-only
+  // SQLite handle and checks it (used after `snapshotTo` to verify
+  // the snapshot is salvageable before counting it as successful).
+  // With no argument, checks the live database.
+  async verifyIntegrity(targetPath) {
+    await this.init();
+    let db = this.db;
+    let opened = null;
+    if (targetPath) {
+      opened = new DatabaseSync(targetPath, { readOnly: true });
+      db = opened;
+    }
+    try {
+      const rows = db.prepare('PRAGMA integrity_check').all();
+      // rows is [{ integrity_check: 'ok' }] on healthy; on
+      // corruption rows[].integrity_check enumerates problems.
+      const messages = rows.map((row) => row.integrity_check ?? row.integrityCheck ?? String(row));
+      const ok = messages.length === 1 && messages[0] === 'ok';
+      return {
+        ok,
+        targetPath: targetPath ?? this.dbPath,
+        messages
+      };
+    } finally {
+      if (opened) opened.close();
+    }
+  }
+
   // Phase 5.5 — online snapshot. SQLite's `VACUUM INTO` produces a
   // point-in-time consistent copy of the entire database to a
   // target path. The source db remains fully writable during the

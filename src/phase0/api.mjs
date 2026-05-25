@@ -86,7 +86,7 @@ import {
   policyFor
 } from './rate-limiter.mjs';
 import { generateRequestId, logger, safePath } from './logger.mjs';
-import { recordRequest, renderMetrics } from './metrics.mjs';
+import { recordBackupFreshness, recordRequest, renderMetrics } from './metrics.mjs';
 import { listSnapshots } from './backup.mjs';
 import { normalisePhone, sendSms } from './sms-provider.mjs';
 import {
@@ -629,6 +629,24 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
       if (request.method === 'GET' && url.pathname === '/metrics') {
+        // Phase 5.6 — refresh the backup-freshness gauges on every
+        // scrape so Grafana sees current values without depending
+        // on /api/admin/backup-status traffic. One readdir + stat
+        // per scrape is fine (typical scrape interval ≥ 15s).
+        if (store.rootPath) {
+          try {
+            const backupDir = path.join(store.rootPath, 'backups');
+            const snapshots = await listSnapshots(backupDir);
+            const latest = snapshots[0];
+            recordBackupFreshness(
+              latest
+                ? { createdAt: latest.createdAt, bytes: latest.bytes, kind: latest.kind }
+                : { createdAt: null }
+            );
+          } catch (_error) {
+            // Best-effort. Gauge stays at last-known.
+          }
+        }
         const body = renderMetrics();
         response.writeHead(200, {
           'content-type': 'text/plain; version=0.0.4; charset=utf-8',
@@ -664,6 +682,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const latestAgeSeconds = latest
           ? Math.max(0, Math.floor((nowMs - Date.parse(latest.createdAt)) / 1000))
           : null;
+        // Phase 5.6 — refresh the /metrics gauges so a scrape that
+        // hits /metrics shortly after this endpoint reflects the
+        // latest known snapshot.
+        recordBackupFreshness(
+          latest
+            ? { createdAt: latest.createdAt, bytes: latest.bytes, kind: latest.kind }
+            : { createdAt: null }
+        );
         jsonResponse(response, 200, {
           ok: true,
           backupDir,

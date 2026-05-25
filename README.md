@@ -144,6 +144,37 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.6 **snapshot integrity verification + restore CLI +
+  backup-age Prometheus gauge — closes Phase 5.5's future-work** —
+  Phase 5.5 shipped snapshots but left three gaps. (1) Without
+  integrity verification a corrupt write produces a corrupt snapshot
+  that silently destroys recovery. (2) Without a restore CLI,
+  operators do raw `cp` and skip steps. (3) Without a `/metrics`
+  age gauge, Grafana-only deployments can't alert on backup
+  freshness. Phase 5.6 ships all three. New `store.verifyIntegrity
+  (targetPath?)` on both backends (SqliteStore uses
+  `PRAGMA integrity_check`; BosStore checks dir + identities/
+  subdir). `scripts/snapshot-store.mjs` runs integrity check inline
+  AFTER snapshotTo — on failure removes the bad snapshot, skips
+  retention (preserves prior good snapshots), exits 1 so cron trips.
+  New `scripts/restore-store.mjs` — symmetric inverse: validates →
+  sidelines live db to `bos.db.pre-restore-<ts>` → copies snapshot
+  → re-verifies integrity. Sideline preserved for rollback. Three
+  new Prometheus gauges in `/metrics`:
+  `bos_backup_latest_timestamp_seconds` (unix epoch),
+  `bos_backup_latest_age_seconds` (NaN when no snapshot — Grafana
+  "no data" idiom), `bos_backup_latest_bytes`. Refresh on every
+  scrape so Prometheus-only deployments work without
+  `/api/admin/backup-status` traffic. Alert rule:
+  `bos_backup_latest_age_seconds > 90000`. §15 binding extension —
+  integrity check never reads row content; pre-restore sideline IS
+  user data and operators must treat it under DPDP §12(3) retention.
+  Zero new runtime deps. 467/467 tests (+11 new — including
+  middle-of-file byte-corruption detection that proves
+  `PRAGMA integrity_check` actually catches a damaged snapshot).
+  Live restore CLI smoke confirmed end-to-end. ADR 0092. **Silent
+  backup corruption is no longer possible; restore is scripted with
+  rollback; Grafana sees backup freshness from one endpoint.**
 - Phase 5.5 **online backup snapshots + Litestream sidecar — durability
   for launch** — Phase 4.6's launch runbook flagged backup as future
   polish; without it a single disk failure on the launch host was

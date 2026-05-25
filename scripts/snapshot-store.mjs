@@ -85,6 +85,27 @@ async function main() {
   const durationMs = Date.now() - started;
   log(`✓ Snapshot complete: ${report.bytes} bytes in ${durationMs}ms`);
 
+  // Phase 5.6 — integrity check on the snapshot before counting
+  // it as successful. Catches a corrupt write at the source
+  // BEFORE retention deletes the previously-good snapshot.
+  const integrity = await store.verifyIntegrity(target);
+  if (!integrity.ok) {
+    log(`✗ Integrity check failed for ${target}:`);
+    for (const msg of integrity.messages) {
+      log(`    - ${msg}`);
+    }
+    log('  Removing corrupt snapshot. Retention will NOT delete prior snapshots.');
+    try {
+      const fsModule = await import('node:fs/promises');
+      await fsModule.rm(target, { recursive: true, force: true });
+    } catch (_error) {
+      // best-effort
+    }
+    if (typeof store.close === 'function') store.close();
+    process.exit(1);
+  }
+  log('✓ Integrity check passed.');
+
   const removed = await applyRetention(backupDir, { keep });
   for (const r of removed) {
     log(`  trimmed: ${r.name} (${r.bytes} bytes, ${r.createdAt})`);

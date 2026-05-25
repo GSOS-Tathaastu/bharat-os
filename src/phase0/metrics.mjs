@@ -16,6 +16,15 @@ const counters = new Map(); // `${method}|${routePattern}|${status}` → count
 const latencyBuckets = new Map(); // `${method}|${routePattern}` → { buckets, sum, count }
 const smsCounters = new Map(); // `${provider}|${outcome}` → count — Phase 5.3
 const smsCircuitStates = new Map(); // `${provider}` → 0|1|2 — Phase 5.4
+// Phase 5.6 — backup age. `recordBackupAge({ ageSeconds, … })` is
+// called by the /api/admin/backup-status handler so the freshness
+// data feeds both the JSON endpoint AND /metrics from a single
+// readdir+stat. The latest snapshot's `createdAt` is also recorded
+// so we can render it as a *Unix-timestamp* gauge (the Prometheus
+// idiom for "when did X last happen").
+let latestBackupAt = null; // ms-since-epoch, or null when no snapshots
+let latestBackupBytes = null;
+let latestBackupKind = null;
 
 // Histogram buckets in seconds, biased toward request latencies we
 // actually expect (mostly sub-second).
@@ -83,6 +92,36 @@ export function circuitStateSnapshot() {
     out[provider] = value;
   }
   return out;
+}
+
+// Phase 5.6 — backup freshness. Records the most recent snapshot's
+// timestamp so /metrics can expose:
+//   • bos_backup_latest_timestamp_seconds (gauge, unix epoch)
+//   • bos_backup_latest_age_seconds (gauge, derived at render time)
+//   • bos_backup_latest_bytes (gauge)
+// Pass `null`/missing values to clear (e.g. after a backup-dir
+// purge in a test). The values persist between scrapes — the
+// admin endpoint refreshes them on every call.
+export function recordBackupFreshness({ createdAt, bytes, kind } = {}) {
+  if (createdAt === null || createdAt === undefined) {
+    latestBackupAt = null;
+    latestBackupBytes = null;
+    latestBackupKind = null;
+    return;
+  }
+  const ms = typeof createdAt === 'number' ? createdAt : Date.parse(createdAt);
+  if (!Number.isFinite(ms)) return;
+  latestBackupAt = ms;
+  latestBackupBytes = Number.isFinite(bytes) ? bytes : null;
+  latestBackupKind = typeof kind === 'string' ? kind : null;
+}
+
+export function backupFreshnessSnapshot() {
+  return {
+    latestBackupAt,
+    latestBackupBytes,
+    latestBackupKind
+  };
 }
 
 export function recordRequest({ method, pathname, status, durationSeconds }) {
@@ -171,6 +210,25 @@ export function renderMetrics() {
     lines.push(`bos_sms_circuit_state{provider="${escapeLabel(provider)}"} ${value}`);
   }
 
+  // Phase 5.6 — backup freshness gauges. Emitted unconditionally:
+  // when no snapshot exists yet, age is rendered as NaN (Prometheus
+  // accepts NaN; Grafana renders it as a gap) so ops alerts trigger.
+  lines.push('# HELP bos_backup_latest_timestamp_seconds Unix epoch (seconds) of the most recent successful snapshot. 0 when no snapshot has been observed.');
+  lines.push('# TYPE bos_backup_latest_timestamp_seconds gauge');
+  const tsSec = latestBackupAt === null ? 0 : Math.floor(latestBackupAt / 1000);
+  lines.push(`bos_backup_latest_timestamp_seconds ${tsSec}`);
+
+  lines.push('# HELP bos_backup_latest_age_seconds Seconds since the most recent snapshot was created. NaN when no snapshot has been observed.');
+  lines.push('# TYPE bos_backup_latest_age_seconds gauge');
+  const ageSec = latestBackupAt === null
+    ? 'NaN'
+    : Math.max(0, Math.floor((Date.now() - latestBackupAt) / 1000));
+  lines.push(`bos_backup_latest_age_seconds ${ageSec}`);
+
+  lines.push('# HELP bos_backup_latest_bytes Size in bytes of the most recent snapshot. 0 when no snapshot has been observed.');
+  lines.push('# TYPE bos_backup_latest_bytes gauge');
+  lines.push(`bos_backup_latest_bytes ${latestBackupBytes ?? 0}`);
+
   // Process info — minimal, no PII.
   lines.push('# HELP bos_api_process_uptime_seconds Process uptime in seconds.');
   lines.push('# TYPE bos_api_process_uptime_seconds gauge');
@@ -188,4 +246,7 @@ export function resetMetrics() {
   latencyBuckets.clear();
   smsCounters.clear();
   smsCircuitStates.clear();
+  latestBackupAt = null;
+  latestBackupBytes = null;
+  latestBackupKind = null;
 }
