@@ -144,6 +144,39 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 6.0c **year-end tax helper — Indian income-tax math + 44AD
+  presumptive + GST threshold flag — completes ADR 0096** —
+  Phase 6.0c ships the third and final single-player worker tool,
+  closing out ADR 0096. New `src/phase1/tax-summary.mjs` ships
+  **FY 2025-26 / AY 2026-27** rate tables: `computeTaxNewRegime`
+  (default since FY 2023-24; slabs ₹0-3L 0% / 3-7L 5% /
+  7-10L 10% / 10-12L 15% / 12-15L 20% / >15L 30%; ₹75K std
+  deduction; 87A rebate up to ₹25K wipes tax for taxable ≤ ₹7L —
+  the rebate cliff is pinned in tests; 4% cess),
+  `computeTaxOldRegime` (opt-in for comparison),
+  `computePresumptive44AD` (Section 44AD — **6% profit when ≥95%
+  digital receipts**, 8% otherwise; turnover ceiling raised to ₹3
+  crore in FY 2025-26 for digital businesses — the right framing
+  for delivery riders / drivers / service trades),
+  `computePresumptive44ADA` (specified-profession 50%),
+  `gstThresholdCheck` (services ₹20 lakh / goods ₹40 lakh),
+  `taxSummary` (end-to-end: filters earnings to FY window
+  April-March; computes new + old + 44AD comparison; surfaces
+  cheapest-option recommendation; ALWAYS includes a mandatory
+  `disclaimer` field). New endpoint
+  `GET /api/identities/:id/tax/summary?financialYear=YYYY-YY`.
+  §15: tax math is LOCAL (could run in browser too); PAN is NEVER
+  stored; we NEVER auto-file; every output urges "CONSULT A
+  CHARTERED ACCOUNTANT BEFORE FILING." 564/564 tests (+26 new
+  including canonical slab-walk-through verifications + the
+  ₹7L 87A rebate cliff at gross ₹7,75,001 + 44AD presumptive
+  ceiling boundaries + 6 live HTTP integration tests). **ADR 0096
+  is now fully Accepted — all three single-player worker tools
+  (earnings + mesh dashboard + tax helper) shipped across Phases
+  6.0a / 6.0b / 6.0c.** ADR 0096. **A gig worker can install
+  Bharat OS, log earnings throughout the year, and at FY-end see
+  exactly which regime/option is cheapest — all without external
+  integration, no PAN stored, no auto-filing.**
 - Phase 6.0b **mesh-contribution dashboard — promotes existing Phase
   3.x substrate to a first-class earn surface** — Phase 3.x ships
   `createMeshContributionEvent` and the all-time

@@ -116,6 +116,7 @@ import {
   EARNINGS_CATEGORIES,
   monthlyStatement
 } from '../phase1/earnings-log.mjs';
+import { taxSummary } from '../phase1/tax-summary.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -1096,6 +1097,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/earnings/summary',
             'DELETE /api/identities/:identityId/earnings/:entryId',
             'GET /api/identities/:identityId/mesh/summary',
+            'GET /api/identities/:identityId/tax/summary',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
             'POST /api/phone-otp/send',
@@ -2822,6 +2824,82 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           summary,
           statement: monthlyStatement(summary)
         });
+        return;
+      }
+
+      // Phase 6.0c — year-end tax helper.
+      //
+      // GET /api/identities/:id/tax/summary?financialYear=YYYY-YY
+      //   &digitalShare=0.95          (optional; default 0.95)
+      //   &isGoodsSupplier=false      (optional; default false)
+      //
+      // Computes new-regime + old-regime + 44AD presumptive
+      // comparison from the worker's logged earnings (Phase 6.0a).
+      // ALWAYS returns a `disclaimer` field — every consumer surface
+      // MUST display it ("consult a CA before filing").
+      //
+      // §15: tax math is local-compute over already-on-device
+      // earnings data. We never store PAN. We never auto-file.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'tax' &&
+        parts[4] === 'summary' &&
+        request.method === 'GET'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const financialYear = url.searchParams.get('financialYear');
+        if (!financialYear) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'financial_year_required',
+              message: 'Provide ?financialYear=YYYY-YY (e.g., 2025-26)'
+            }
+          });
+          return;
+        }
+        const digitalShareRaw = url.searchParams.get('digitalShare');
+        const digitalReceiptShare =
+          digitalShareRaw !== null && digitalShareRaw !== ''
+            ? Number(digitalShareRaw)
+            : 0.95;
+        if (
+          !Number.isFinite(digitalReceiptShare) ||
+          digitalReceiptShare < 0 ||
+          digitalReceiptShare > 1
+        ) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_digital_share',
+              message: 'digitalShare must be a number between 0 and 1'
+            }
+          });
+          return;
+        }
+        const isGoodsSupplier =
+          url.searchParams.get('isGoodsSupplier') === 'true';
+        const entries =
+          typeof store.listEarningsEntries === 'function'
+            ? await store.listEarningsEntries({ identityId })
+            : [];
+        let summary;
+        try {
+          summary = taxSummary({
+            entries,
+            financialYear,
+            digitalReceiptShare,
+            isGoodsSupplier
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_tax_input', message: error.message }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { summary });
         return;
       }
 

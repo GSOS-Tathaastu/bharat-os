@@ -2,7 +2,7 @@
 
 ## Status
 
-**Partially implemented.**
+**Accepted — fully implemented across Phases 6.0a, 6.0b, 6.0c.**
 
 - ✅ **Tool 1 (earnings tracker)** — shipped Phase 6.0a.
   `src/phase1/earnings-log.mjs`, SqliteStore `earnings_log` table,
@@ -13,8 +13,15 @@
   `src/phase1/mesh-contribution.mjs`; new endpoint
   `GET /api/identities/:id/mesh/summary?month=YYYY-MM` returning
   totalPaise + per-workload breakdown + per-day timeline. 16 tests.
-- 🟡 **Tool 3 (year-end tax helper)** — pending. ITR-3 / ITR-4
-  summary, section 44ADA presumptive-tax logic, local-compute.
+- ✅ **Tool 3 (year-end tax helper)** — shipped Phase 6.0c.
+  `src/phase1/tax-summary.mjs` with new-regime + old-regime slab
+  math (FY 2025-26 / AY 2026-27 rates), Section 44AD presumptive
+  (6% digital / 8% cash), Section 44ADA presumptive (50% for
+  specified professions), GST threshold check, cheapest-option
+  recommendation surface, mandatory `disclaimer` field. New endpoint
+  `GET /api/identities/:id/tax/summary?financialYear=YYYY-YY`. 26
+  tests including canonical slab-boundary + 87A-rebate-cliff
+  verifications.
 
 Recommended sequencing: ship Phase 6.0 in three commits (one per
 tool), then layer Phase 5.9 (ADR 0095, QR signing flow) on top.
