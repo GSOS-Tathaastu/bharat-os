@@ -90,7 +90,7 @@ import {
 import { generateRequestId, logger, safePath } from './logger.mjs';
 import { recordBackupFreshness, recordRequest, renderMetrics } from './metrics.mjs';
 import { listSnapshots } from './backup.mjs';
-import { maskEndpoint, readVapidConfig, sendWebPush } from './web-push.mjs';
+import { readVapidConfig, sendPushToIdentity } from './web-push.mjs';
 import { normalisePhone, sendSms } from './sms-provider.mjs';
 import {
   createPhoneOtp,
@@ -854,6 +854,28 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           priorCooldownUntil: state.until,
           at: new Date().toISOString()
         });
+        // Phase 7.1 — push a "your cooldown was lifted by ops"
+        // alert to paired devices. If the recovery wasn't the
+        // legitimate user, this is their second chance to escalate.
+        // §15: payload body contains no PII (operator label is in
+        // the ledger, NOT the push body).
+        await sendPushToIdentity(
+          store,
+          identityId,
+          {
+            type: 'cooldown_override_alert',
+            title: 'Your recovery cooldown was lifted by Bharat OS support',
+            body:
+              'If you contacted support, no action needed. If not, tap to ' +
+              'report this — your account may be under attack.'
+          },
+          {
+            urgency: 'high',
+            ledgerType: 'cooldown_override.pushed',
+            requestId,
+            logger
+          }
+        );
         logger.info('admin_cooldown_cleared', {
           requestId,
           operator: auth.operator,
@@ -3550,6 +3572,30 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           maxReads: consumed.maxReads,
           at: new Date().toISOString()
         });
+        // Phase 7.1 — push to the worker that an MFI just read
+        // their bundle. Lets the user catch a stolen consentId
+        // (someone else presenting it) in near-real-time. §15:
+        // mfiName is the consent's own label — already known to
+        // the worker (they signed it).
+        await sendPushToIdentity(
+          store,
+          worker.id,
+          {
+            type: 'income_verification_read',
+            title: `${consent.mfiName} just read your income summary`,
+            body:
+              `If you shared the consent link with them, no action needed. ` +
+              `If you didn't, tap to revoke any remaining consents.`,
+            mfiName: consent.mfiName,
+            consentId
+          },
+          {
+            urgency: 'normal',
+            ledgerType: 'income_verification.pushed',
+            requestId,
+            logger
+          }
+        );
         jsonResponse(response, 200, { bundle });
         return;
       }
@@ -4423,6 +4469,55 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           withdrawalId,
           status: updated.status
         });
+        // Phase 7.1 — push when the withdrawal reaches `paid` or
+        // `failed`. The worker hears about their cash-out (or its
+        // failure) without needing to refresh the app. §15: the
+        // push body uses the masked UPI ID, never the raw one;
+        // the rupee amount is the worker's own self-asserted
+        // figure (not PII in the §15 sense).
+        if (updated.status === 'paid') {
+          await sendPushToIdentity(
+            store,
+            updated.workerId,
+            {
+              type: 'mesh_withdrawal_paid',
+              title: `₹${(updated.amountPaise / 100).toFixed(2)} sent to your UPI`,
+              body:
+                `Your mesh-contribution payout to ${updated.upiIdMasked} is ` +
+                `complete. Reference: ${updated.providerReference ?? 'n/a'}.`,
+              amountPaise: updated.amountPaise,
+              upiIdMasked: updated.upiIdMasked
+            },
+            {
+              urgency: 'normal',
+              ledgerType: 'mesh_withdrawal.pushed',
+              requestId,
+              logger
+            }
+          );
+        } else if (updated.status === 'failed') {
+          await sendPushToIdentity(
+            store,
+            updated.workerId,
+            {
+              type: 'mesh_withdrawal_failed',
+              title: 'Your mesh-contribution payout failed',
+              body:
+                `The ₹${(updated.amountPaise / 100).toFixed(2)} payout to ` +
+                `${updated.upiIdMasked} couldn't complete: ${updated.failureReason ?? 'unknown'}. ` +
+                `The amount has been returned to your available balance.`,
+              amountPaise: updated.amountPaise,
+              upiIdMasked: updated.upiIdMasked,
+              failureReason: updated.failureReason
+            },
+            {
+              urgency: 'high',
+              ledgerType: 'mesh_withdrawal.pushed',
+              requestId,
+              logger
+            }
+          );
+        }
         jsonResponse(response, 200, { ok: true, withdrawal: updated });
         return;
       }
@@ -4776,59 +4871,25 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         // Best-effort: failures don't block the response. The
         // 24h cooldown (Phase 5.2) is the actual defensive
         // protection; this push is the detection signal.
-        const vapidForRecovery = readVapidConfig();
-        if (vapidForRecovery && typeof store.listPushSubscriptions === 'function') {
-          const allSubs = await store.listPushSubscriptions().catch(() => []);
-          const ownSubs = allSubs.filter(
-            (s) =>
-              s.identityId === identity.id &&
-              s.rawEndpointStored === true &&
-              s.endpoint &&
-              s.keys?.p256dh &&
-              s.keys?.auth
-          );
-          for (const sub of ownSubs) {
-            try {
-              const result = await sendWebPush({
-                subscription: { endpoint: sub.endpoint, keys: sub.keys },
-                payload: {
-                  type: 'account_recovery_alert',
-                  title: 'Your Bharat OS account was just recovered',
-                  body:
-                    `If this was you, no action needed. If it was NOT, ` +
-                    `tap to contact support — your cooldown window ends at ` +
-                    `${cooledIdentity.recoveryCooldown?.until}.`,
-                  cooldownUntil: cooledIdentity.recoveryCooldown?.until
-                },
-                vapid: vapidForRecovery,
-                urgency: 'high'
-              });
-              await store.appendLedger({
-                type: result.ok
-                  ? 'recovery_alert.pushed'
-                  : 'recovery_alert.failed',
-                identityId: identity.id,
-                subscriptionId: sub.subscriptionId,
-                endpointMasked: maskEndpoint(sub.endpoint),
-                pushStatus: result.status,
-                reason: result.reason ?? null,
-                at: new Date().toISOString()
-              });
-              // 410 Gone → unsubscribe automatically.
-              if (result.shouldUnsubscribe && typeof store.deletePushSubscription === 'function') {
-                await store.deletePushSubscription(sub.subscriptionId).catch(() => {});
-              }
-            } catch (error) {
-              // Single push failure must not break the recovery response.
-              logger.warn('recovery_push_error', {
-                requestId,
-                identityId: identity.id,
-                endpointMasked: maskEndpoint(sub.endpoint),
-                reason: error?.message
-              });
-            }
+        await sendPushToIdentity(
+          store,
+          identity.id,
+          {
+            type: 'account_recovery_alert',
+            title: 'Your Bharat OS account was just recovered',
+            body:
+              `If this was you, no action needed. If it was NOT, ` +
+              `tap to contact support — your cooldown window ends at ` +
+              `${cooledIdentity.recoveryCooldown?.until}.`,
+            cooldownUntil: cooledIdentity.recoveryCooldown?.until
+          },
+          {
+            urgency: 'high',
+            ledgerType: 'recovery_alert.pushed',
+            requestId,
+            logger
           }
-        }
+        );
 
         jsonResponse(response, 200, {
           ok: true,

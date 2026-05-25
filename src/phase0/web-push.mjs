@@ -361,3 +361,125 @@ export function readVapidConfig() {
   if (!publicKey || !privateKey || !subject) return null;
   return { publicKey, privateKey, subject };
 }
+
+// ─── Phase 7.1 — sendPushToIdentity helper ──────────────────────────
+//
+// Encapsulates the recovery-flow push pattern so adding a new
+// audit-significant push event is a one-liner from any handler:
+//
+//   await sendPushToIdentity(store, identity.id, {
+//     type: 'mesh_withdrawal.paid',
+//     title: '₹500 sent to your UPI',
+//     body: 'Mesh-contribution payout completed.'
+//   }, { urgency: 'normal', ledgerType: 'mesh_withdrawal.pushed' });
+//
+// Behaviour:
+//
+//   • If VAPID isn't configured → silently returns `{ skipped: true }`.
+//     The caller's primary action (recovery, withdrawal, etc.)
+//     proceeds normally; push is a detection signal, not a
+//     defensive control.
+//
+//   • Loads `store.listPushSubscriptions()` once + filters to
+//     subscriptions for the target identity that have
+//     `rawEndpointStored: true` (Phase 7.0 storage gate).
+//
+//   • For each: calls `sendWebPush`, emits a `<ledgerType>` (or
+//     `<ledgerType>.failed`) ledger event with the masked endpoint
+//     + push status, and on 410 Gone deletes the subscription
+//     automatically.
+//
+//   • Returns `{ sent, failed, unsubscribed }` for caller-side
+//     logging.
+//
+// §15: the push payload travels E2E-encrypted; the LEDGER event
+// records only masked endpoint + status + reason. The push body
+// itself MUST NOT contain identity refs (recovery_alert.body
+// pattern: behavioural cue + cooldown timestamp; no displayName,
+// no phone).
+export async function sendPushToIdentity(
+  store,
+  identityId,
+  payload,
+  {
+    urgency = 'normal',
+    ledgerType,
+    requestId = null,
+    logger = null,
+    at = new Date().toISOString()
+  } = {}
+) {
+  if (!identityId || typeof identityId !== 'string') {
+    throw new Error('identityId is required.');
+  }
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('payload is required.');
+  }
+  if (!ledgerType || typeof ledgerType !== 'string') {
+    throw new Error('ledgerType is required for audit attribution.');
+  }
+  const vapid = readVapidConfig();
+  if (!vapid) {
+    return { skipped: true, reason: 'vapid_unconfigured', sent: 0, failed: 0, unsubscribed: 0 };
+  }
+  if (typeof store?.listPushSubscriptions !== 'function') {
+    return { skipped: true, reason: 'store_unsupported', sent: 0, failed: 0, unsubscribed: 0 };
+  }
+  const allSubs = await store.listPushSubscriptions().catch(() => []);
+  const targetSubs = allSubs.filter(
+    (s) =>
+      s.identityId === identityId &&
+      s.rawEndpointStored === true &&
+      s.endpoint &&
+      s.keys?.p256dh &&
+      s.keys?.auth
+  );
+  let sent = 0;
+  let failed = 0;
+  let unsubscribed = 0;
+  for (const sub of targetSubs) {
+    try {
+      const result = await sendWebPush({
+        subscription: { endpoint: sub.endpoint, keys: sub.keys },
+        payload,
+        vapid,
+        urgency
+      });
+      // Audit every attempt.
+      if (typeof store.appendLedger === 'function') {
+        await store.appendLedger({
+          type: result.ok ? ledgerType : `${ledgerType}.failed`,
+          identityId,
+          subscriptionId: sub.subscriptionId,
+          endpointMasked: maskEndpoint(sub.endpoint),
+          pushStatus: result.status,
+          payloadType: payload?.type ?? null,
+          reason: result.reason ?? null,
+          at
+        });
+      }
+      if (result.ok) {
+        sent += 1;
+      } else {
+        failed += 1;
+        if (result.shouldUnsubscribe && typeof store.deletePushSubscription === 'function') {
+          await store.deletePushSubscription(sub.subscriptionId).catch(() => {});
+          unsubscribed += 1;
+        }
+      }
+    } catch (error) {
+      // Single push failure must never break the caller's primary
+      // action. Log + record + continue.
+      failed += 1;
+      if (logger?.warn) {
+        logger.warn('push_send_error', {
+          requestId,
+          identityId,
+          endpointMasked: maskEndpoint(sub.endpoint),
+          reason: error?.message ?? String(error)
+        });
+      }
+    }
+  }
+  return { skipped: false, sent, failed, unsubscribed, attempted: targetSubs.length };
+}

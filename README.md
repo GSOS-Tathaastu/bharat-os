@@ -144,6 +144,39 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 7.1 **push alerts for audit-significant events — three new
+  wire-points + reusable `sendPushToIdentity` helper** — Phase 7.0
+  shipped the SIM-swap detection push as ~60 lines of inline
+  boilerplate; adding a new push event meant copying it. Phase 7.1
+  extracts the pattern + wires three new high-signal moments.
+  New `sendPushToIdentity(store, identityId, payload, opts)` in
+  `src/phase0/web-push.mjs`: encapsulates VAPID config check →
+  subscription load → per-subscription `sendWebPush` → typed
+  ledger event → 410-Gone auto-unsubscribe → error swallowed
+  per-subscription. Returns `{ skipped, sent, failed, unsubscribed,
+  attempted }`. **Safe-default**: VAPID unset → silent skip (no
+  exception, no error log); caller's primary action never breaks.
+  **Audit-by-default**: every attempt emits a `<ledgerType>` or
+  `<ledgerType>.failed` ledger event with masked endpoint +
+  pushStatus + payloadType. **Phase 7.0 recovery push refactored**
+  to use the helper — ~60 lines → 5 lines; all 22 Phase 7.0 tests
+  still pass. **Three new push wire-points**: (1) `cooldown_override
+  .applied` → push "Your cooldown was lifted by Bharat OS support
+  — was this you?" (catches corrupt-admin-token scenarios on top
+  of the original recovery push); (2) `mesh_withdrawal.paid` →
+  push "₹500.00 sent to your UPI r***h@hdfcbank, Reference:
+  razorpay-12345"; mesh_withdrawal.failed → high-urgency push
+  with refund notice; (3) `income_verification_bundle.read` → push
+  "Bajaj Finserv just read your income summary" (catches stolen
+  consentId bearers in near-real-time). §15: push body NEVER
+  contains PII (only masked identifiers + behavioural cues);
+  full audit trail; graceful degradation when VAPID unset. 726/726
+  tests (+8 new — including the graceful-degradation test that
+  proves the full MFI-fetch flow works with ZERO pushes when
+  VAPID unset). ADR 0102. **Three-layer SIM-swap detection
+  compounds**: (1) Phase 5.2 cooldown, (2) Phase 7.0 recovery
+  push, (3) Phase 7.1 cooldown-override push. Adding a new
+  push event is now a 5-line patch.
 - Phase 7.0 **Web Push (VAPID) notifications — SIM-swap defense loop
   fully closed** — Phase 5.2 gated destructive actions for 24h after
   recovery, but the legitimate user only knew their account was
