@@ -3054,10 +3054,131 @@ function maybeShowFirstRun() {
   updateBackupWarningBanner();
 }
 
+// ─── DPDP data-subject rights (Phase 4.0) ─────────────────────────────────
+//
+// Profile tab → "Your data rights" card. Three actions:
+//   • Download my data — GET /api/identities/:id/export, triggers
+//     browser save dialog via the Content-Disposition header on
+//     the response.
+//   • Delete my account — two-step: GET preview, then user types
+//     "DELETE" to confirm, then DELETE with the YES_DELETE flag.
+//   • Contact DPO — GET /api/dpdp/grievance, shows DPO contact + SLA.
+
+async function downloadDataExport() {
+  if (!state.activeIdentity) {
+    showToast('No active profile.');
+    return;
+  }
+  const box = $('dpdpResult');
+  box.hidden = false;
+  box.textContent = 'Preparing export…';
+  try {
+    const url = `/api/identities/${encodeURIComponent(state.activeIdentity.id)}/export`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const filename = `bharat-os-export-${shortId(state.activeIdentity.id)}-${Date.now()}.json`;
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+    box.textContent =
+      `Downloaded as ${filename}. The export does NOT include your private key — that's protected by your recovery phrase.`;
+  } catch (error) {
+    box.textContent = `Export failed: ${error.message}`;
+  }
+}
+
+async function deleteMyAccount() {
+  if (!state.activeIdentity) {
+    showToast('No active profile.');
+    return;
+  }
+  const box = $('dpdpResult');
+  box.hidden = false;
+  box.textContent = 'Loading what would be deleted…';
+  try {
+    const preview = await fetchJson(
+      `/api/identities/${encodeURIComponent(state.activeIdentity.id)}/erasure-preview`
+    );
+    const manifest = preview.manifest;
+    const summary = Object.entries(manifest.plannedDeletions)
+      .filter(([, count]) => count > 0)
+      .map(([section, count]) => `  • ${section}: ${count}`)
+      .join('\n');
+    const confirm1 = window.confirm(
+      `Delete your Bharat OS account?\n\n` +
+        `This will permanently erase:\n${summary}\n\n` +
+        `Plus redact ${manifest.ledgerEntryRedactions} audit-ledger entries (replaces your ID with "<erased>" so the chain stays intact).\n\n` +
+        `Your recovery phrase will NOT bring this account back. This is irreversible.\n\n` +
+        `Continue?`
+    );
+    if (!confirm1) {
+      box.textContent = 'Deletion cancelled.';
+      return;
+    }
+    const confirm2 = window.prompt(
+      'Final check. Type DELETE in capitals to confirm — anything else cancels:'
+    );
+    if (confirm2 !== 'DELETE') {
+      box.textContent = 'Deletion cancelled (confirmation did not match).';
+      return;
+    }
+    box.textContent = 'Erasing…';
+    const result = await fetchJson(
+      `/api/identities/${encodeURIComponent(state.activeIdentity.id)}?confirm=YES_DELETE`,
+      { method: 'DELETE' }
+    );
+    box.textContent = `Account erased. ${result.report.ledgerRedactions} ledger entries anonymised. Resetting in 3 seconds…`;
+    // Clear localStorage so the next page load lands at the wizard.
+    try {
+      localStorage.removeItem('bharat-os.shell.deviceOwnerId');
+      localStorage.removeItem('bharat-os.shell.householdIds');
+      localStorage.removeItem(LS_KEY_PHRASE_BACKED_UP);
+    } catch (_error) {
+      /* fine */
+    }
+    setTimeout(() => window.location.reload(), 3000);
+  } catch (error) {
+    box.textContent = `Deletion failed: ${error.message}`;
+  }
+}
+
+async function showGrievanceContact() {
+  const box = $('dpdpResult');
+  box.hidden = false;
+  box.textContent = 'Loading DPO contact…';
+  try {
+    const data = await fetchJson('/api/dpdp/grievance');
+    const c = data.contact;
+    box.innerHTML = `
+      <strong>Data Protection Officer</strong><br/>
+      ${escapeHtml(c.name)}<br/>
+      <span class="mono">${escapeHtml(c.email)}</span><br/>
+      ${escapeHtml(c.postal)}<br/><br/>
+      We respond to all DPDP requests within <strong>${c.responseSlaDays} days</strong>.
+      If unresolved, escalate to <a href="${escapeHtml(c.grievanceEscalation)}" target="_blank" rel="noopener">the Data Protection Board of India</a>.
+    `;
+  } catch (error) {
+    box.textContent = `Could not load DPO contact: ${error.message}`;
+  }
+}
+
+function setupDpdp() {
+  $('dpdpExportButton')?.addEventListener('click', downloadDataExport);
+  $('dpdpDeleteButton')?.addEventListener('click', deleteMyAccount);
+  $('dpdpGrievanceButton')?.addEventListener('click', showGrievanceContact);
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
 setupFirstRun();
+setupDpdp();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();

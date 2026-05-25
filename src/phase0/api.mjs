@@ -74,6 +74,12 @@ import {
 import { generateRecoveryPhrase } from '../phase1/device-pairing.mjs';
 import { gatherDailyBriefSignals } from '../phase1/daily-brief.mjs';
 import {
+  collectUserData,
+  DEFAULT_DPO_CONTACT,
+  erasureManifest,
+  redactLedgerEntry
+} from '../phase1/dpdp-rights.mjs';
+import {
   signTrustAttestation,
   verifyTrustAttestation
 } from '../phase1/trust-attestation.mjs';
@@ -115,6 +121,7 @@ const repoRoot = path.resolve(moduleDir, '../..');
 const consoleRoot = path.join(repoRoot, 'public/operator-console');
 const shellRoot = path.join(repoRoot, 'public/shell');
 const verifyRoot = path.join(repoRoot, 'public/verify');
+const legalRoot = path.join(repoRoot, 'public/legal');
 
 function jsonResponse(response, statusCode, value) {
   const body = JSON.stringify(value, null, 2);
@@ -516,6 +523,23 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      if (request.method === 'GET' && (url.pathname === '/legal' || url.pathname === '/legal/')) {
+        // No legal/ index page yet; default to privacy.
+        response.writeHead(302, { location: '/legal/privacy.html' });
+        response.end();
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/legal/')) {
+        const relativePath = decodeURIComponent(url.pathname.slice('/legal/'.length));
+        const requestedPath = path.resolve(legalRoot, relativePath);
+        if (!requestedPath.startsWith(legalRoot)) {
+          return notFound(response, url.pathname);
+        }
+        await staticResponse(response, requestedPath);
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname.startsWith('/verify/')) {
         const relativePath =
           url.pathname === '/verify/'
@@ -557,6 +581,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /shell/',
             'GET /console/',
             'GET /verify/',
+            'GET /legal/privacy.html',
+            'GET /legal/terms.html',
             'GET /api/dashboard',
             'GET /api/policies',
             'GET /api/skills',
@@ -617,6 +643,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/contribution',
             'GET /api/identities/:identityId/recovery-phrase',
             'GET /api/identities/:identityId/vault-snapshot',
+            'GET /api/identities/:identityId/export',
+            'GET /api/identities/:identityId/erasure-preview',
+            'DELETE /api/identities/:identityId?confirm=YES_DELETE',
+            'GET /api/dpdp/grievance',
             'GET /api/attestations',
             'GET /api/attestations/:attestationId',
             'GET /api/attestations/:attestationId/verify',
@@ -2143,6 +2173,92 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           memoryRecordRefs,
           warning:
             'Demo endpoint. Production Bharat OS keeps privateKeyPem in the device hardware keystore (Phase 2b AOSP shell). See ADR 0066.'
+        });
+        return;
+      }
+
+      // DPDP §11 right-to-access — Phase 4.0 ADR 0079.
+      // Returns the complete user-data export bundle for the identity.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'export'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const exportBundle = await collectUserData(store, identityId).catch(
+          (error) => ({ error: error.message })
+        );
+        if (exportBundle.error) return notFound(response);
+        // Set Content-Disposition so the browser offers a download
+        // rather than rendering inline.
+        const filename = `bharat-os-export-${identityId.slice(0, 24)}-${Date.now()}.json`;
+        const body = JSON.stringify(exportBundle, null, 2);
+        response.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'content-disposition': `attachment; filename="${filename}"`,
+          'cache-control': 'no-store'
+        });
+        response.end(`${body}\n`);
+        return;
+      }
+
+      // DPDP §12(3) right-to-erasure preview. Returns the deletion
+      // plan WITHOUT touching the filesystem. The shell shows this
+      // to the user before they confirm the destructive action.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 4 &&
+        parts[3] === 'erasure-preview'
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const manifest = await erasureManifest(store, identityId).catch(
+          (error) => ({ error: error.message })
+        );
+        if (manifest.error) return notFound(response);
+        jsonResponse(response, 200, { manifest });
+        return;
+      }
+
+      // DPDP §13 grievance contact — DPO details, response SLA.
+      if (parts[0] === 'api' && parts[1] === 'dpdp' && parts[2] === 'grievance' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        jsonResponse(response, 200, { contact: DEFAULT_DPO_CONTACT });
+        return;
+      }
+
+      // DPDP §12(3) right-to-erasure (execute). Destroys every per-
+      // user record + redacts ledger entries. Requires
+      // `?confirm=YES_DELETE` in the query string AND a matching
+      // body acknowledging the irreversibility — belt-and-braces
+      // against accidental hits.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 3 &&
+        request.method === 'DELETE'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const confirm = url.searchParams.get('confirm');
+        if (confirm !== 'YES_DELETE') {
+          jsonResponse(response, 400, {
+            error: 'erasure requires ?confirm=YES_DELETE in the query string',
+            preview_endpoint: `/api/identities/${encodeURIComponent(identityId)}/erasure-preview`
+          });
+          return;
+        }
+        const report = await store.eraseUserData(identityId, { redactLedgerEntry });
+        jsonResponse(response, 200, {
+          ok: true,
+          identityId,
+          report,
+          message:
+            'Erasure complete. Your identity has been removed; ledger entries that mentioned you are now anonymous. You cannot recover this account.'
         });
         return;
       }

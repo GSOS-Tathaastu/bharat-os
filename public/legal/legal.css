@@ -1,0 +1,131 @@
+:root {
+  --bg: #0c1018;
+  --bg-elevated: #131923;
+  --surface: #1a212e;
+  --border: #2a3346;
+  --text: #e6edf3;
+  --text-muted: #8b94a7;
+  --accent: #ff7a1a;
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+.legal {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 22px calc(48px + env(safe-area-inset-bottom));
+}
+
+.legal-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+  margin-bottom: 28px;
+}
+
+.legal-back {
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: none;
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
+.legal-back:hover { text-decoration: underline; }
+
+.legal-header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.legal-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.legal section {
+  margin-bottom: 28px;
+}
+
+.legal h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.legal h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+  color: var(--text);
+}
+
+.legal p {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 14.5px;
+}
+
+.legal ul {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.legal li {
+  margin-bottom: 6px;
+  font-size: 14.5px;
+}
+
+.legal strong {
+  color: var(--text);
+}
+
+.legal em {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.legal a {
+  color: var(--accent);
+}
+
+.legal pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.legal-footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.legal-footer a {
+  color: var(--accent);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.legal-footer a:hover { text-decoration: underline; }

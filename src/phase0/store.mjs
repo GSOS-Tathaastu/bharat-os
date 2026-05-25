@@ -231,6 +231,151 @@ export class BosStore {
     return listJson(this.identitiesPath);
   }
 
+  // DPDP §12(3) right-to-erasure (Phase 4.0 / ADR 0079).
+  //
+  // Removes the identity file + every per-section file whose record
+  // mentions this user. Returns a structured report of what was
+  // erased + how many ledger entries were redacted. The actual
+  // ledger redaction is done in-place by rewriting ledger.jsonl
+  // through `redactLedgerEntry` from `src/phase1/dpdp-rights.mjs`.
+  //
+  // This is a destructive operation — the API handler must verify
+  // the request came from the identity owner (or a nominee per
+  // DPDP §14) before calling it.
+  async eraseUserData(identityId, { redactLedgerEntry } = {}) {
+    if (!identityId) throw new Error('identityId is required.');
+    await this.init();
+
+    const sections = {};
+    const matchesUser = (r) =>
+      r.subjectId === identityId ||
+      r.ownerId === identityId ||
+      r.actorId === identityId ||
+      r.operatorId === identityId ||
+      r.contributorId === identityId ||
+      r.workerId === identityId ||
+      r.identityId === identityId ||
+      r.reporterId === identityId ||
+      r.issuerIdentityId === identityId ||
+      r.decision?.request?.actorId === identityId ||
+      r.action?.actorId === identityId;
+
+    const sweep = async (label, listFn, fileFn, idKey) => {
+      const records = await listFn().catch(() => []);
+      const targets = records.filter(matchesUser);
+      let removed = 0;
+      for (const record of targets) {
+        const id = record[idKey];
+        if (!id) continue;
+        try {
+          await fs.unlink(fileFn.call(this, id));
+          removed += 1;
+        } catch (_error) {
+          // file might already be gone; tolerate
+        }
+      }
+      sections[label] = removed;
+    };
+
+    // Sweep every per-user record type. Order matters only insofar
+    // as we want errors in one section not to abort the cascade.
+    await sweep('consents', () => this.listConsents(), this.consentFile, 'consentId');
+    await sweep('decisions', () => this.listDecisions(), this.decisionFile, 'decisionId');
+    await sweep('orchestrations', () => this.listOrchestrations(), this.orchestrationFile, 'orchestrationId');
+    await sweep('skillPreflights', () => this.listSkillPreflights(), this.skillPreflightFile, 'preflightId');
+    await sweep('toolExecutions', () => this.listToolExecutions(), this.toolExecutionFile, 'executionId');
+    await sweep('memoryRecords', () => this.listMemoryRecords(), this.memoryRecordFile, 'recordId');
+    await sweep(
+      'workerAuthorizations',
+      () => this.listWorkerAuthorizations(),
+      this.workerAuthorizationFile,
+      'authorizationId'
+    );
+    await sweep('flagReports', () => this.listFlagReports(), this.flagReportFile, 'flagId');
+    await sweep(
+      'meshContributions',
+      () => this.listMeshContributionEvents(),
+      this.meshContributionFile,
+      'contributionEventId'
+    );
+    await sweep('pairingSessions', () => this.listPairingSessions(), this.pairingSessionFile, 'sessionId');
+    await sweep(
+      'healthDocuments',
+      () => this.listHealthDocumentCaptures(),
+      this.healthDocumentFile,
+      'captureId'
+    );
+    await sweep(
+      'profileCredentials',
+      () => this.listProfileCredentials(),
+      this.profileCredentialFile,
+      'profileCredentialId'
+    );
+    await sweep(
+      'pushSubscriptions',
+      () => this.listPushSubscriptions(),
+      this.pushSubscriptionFile,
+      'subscriptionId'
+    );
+    await sweep(
+      'workerNotifications',
+      () => this.listWorkerNotifications(),
+      this.workerNotificationFile,
+      'notificationId'
+    );
+    await sweep('federatedUpdates', () => this.listFederatedUpdates(), this.federatedUpdateFile, 'updateId');
+    await sweep('attestations', () => this.listAttestations(), this.attestationFile, 'attestationId');
+
+    // Identity itself goes last so a partial failure mid-cascade
+    // leaves the identity reachable for retry.
+    try {
+      await fs.unlink(this.identityFile(identityId));
+      sections.identity = 1;
+    } catch (_error) {
+      sections.identity = 0;
+    }
+
+    // Redact ledger entries that mention this user. We rewrite
+    // ledger.jsonl in place (read all → redact → atomic replace).
+    let ledgerRedactions = 0;
+    if (typeof redactLedgerEntry === 'function') {
+      try {
+        const ledgerContent = await fs.readFile(this.ledgerPath, 'utf8').catch(() => '');
+        const lines = ledgerContent.split('\n').filter(Boolean);
+        const rewritten = [];
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line);
+            const redacted = redactLedgerEntry(event, identityId);
+            const changed = JSON.stringify(redacted) !== JSON.stringify(event);
+            if (changed) ledgerRedactions += 1;
+            rewritten.push(JSON.stringify(redacted));
+          } catch (_error) {
+            rewritten.push(line);
+          }
+        }
+        const tempPath = `${this.ledgerPath}.tmp`;
+        await fs.writeFile(tempPath, rewritten.join('\n') + (rewritten.length > 0 ? '\n' : ''), 'utf8');
+        await fs.rename(tempPath, this.ledgerPath);
+      } catch (_error) {
+        // Ledger redaction is best-effort; do not abort the cascade.
+      }
+    }
+
+    // Final tombstone ledger entry — the erasure itself is auditable
+    // (with the identityId now <erased> so the record is forever
+    // anonymous).
+    await this.appendLedger({
+      type: 'account.erased',
+      at: new Date().toISOString(),
+      identityId: '<erased>',
+      sections,
+      ledgerRedactions
+    });
+
+    return { sections, ledgerRedactions };
+  }
+
   async saveNode(node) {
     await this.init();
     await writeJson(this.nodeFile(node.nodeId), node);

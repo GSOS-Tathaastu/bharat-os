@@ -363,6 +363,35 @@
           <div id="flagReportResult" class="capture-result" hidden></div>
         </section>
 
+        <section class="capture-card dpdp-card" id="dpdpSection">
+          <div class="capture-header">
+            <span>📑 Your data rights</span>
+            <span class="capture-meta">DPDP Act 2023</span>
+          </div>
+          <p class="capture-note">
+            Under India's Data Protection Act, you have the right to see
+            every record we hold about you, to delete your account
+            permanently, and to raise a grievance with our Data Protection
+            Officer.
+          </p>
+          <div class="dpdp-actions">
+            <button id="dpdpExportButton" class="secondary-button" type="button">
+              📥 Download my data
+            </button>
+            <button id="dpdpDeleteButton" class="secondary-button danger" type="button">
+              🗑️ Delete my account
+            </button>
+          </div>
+          <div class="dpdp-links">
+            <a href="/legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+            <span>·</span>
+            <a href="/legal/terms.html" target="_blank" rel="noopener">Terms of Service</a>
+            <span>·</span>
+            <button id="dpdpGrievanceButton" class="link-button" type="button">Contact DPO</button>
+          </div>
+          <div id="dpdpResult" class="capture-result" hidden></div>
+        </section>
+
         <section class="profile-misc">
           <button id="replayTour" class="link-button" type="button">▶ Replay welcome tour</button>
           <button id="resetDeviceButton" class="link-button danger" type="button">↻ Reset this device</button>
@@ -441,6 +470,12 @@
               </span>
             </button>
           </div>
+          <p class="first-run-legal-notice">
+            By continuing, you accept our
+            <a href="/legal/terms.html" target="_blank" rel="noopener">Terms of Service</a>
+            and acknowledge our
+            <a href="/legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
+          </p>
         </div>
 
         <!-- Step: pick language (new-identity flow) -->

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c1018" />
+    <title>Bharat OS · Privacy Policy</title>
+    <link rel="stylesheet" href="/legal/legal.css" />
+    <link rel="icon" type="image/svg+xml" href="/shell/icon.svg" />
+  </head>
+  <body>
+    <main class="legal">
+      <header class="legal-header">
+        <a href="/shell/" class="legal-back">← Back to Bharat OS</a>
+        <h1>Privacy Policy</h1>
+        <p class="legal-meta">DPDP Act 2023 — §11 Notice of Processing</p>
+        <p class="legal-meta">Last updated: 2026-05-24 · Version 1.0</p>
+      </header>
+
+      <section>
+        <h2>1. Who we are</h2>
+        <p>
+          Bharat OS is operated by <strong>[Operating entity, to be inserted at registration]</strong>,
+          a data fiduciary registered under India's Digital Personal Data Protection
+          Act 2023 ("DPDP Act"). Our role under the Act is that of a
+          <strong>Data Fiduciary</strong> — we determine why and how your data is
+          processed within the Bharat OS platform.
+        </p>
+      </section>
+
+      <section>
+        <h2>2. What data we collect</h2>
+        <p>
+          Bharat OS deliberately collects the minimum data needed to deliver the
+          features you ask for. Specifically:
+        </p>
+        <ul>
+          <li>
+            <strong>Display name + language.</strong> Captured when you create your
+            identity. No last name, no Aadhaar number, no phone number are
+            required.
+          </li>
+          <li>
+            <strong>Your Ed25519 public key.</strong> Generated on identity creation.
+            Used to verify that an action came from your device. Public — not
+            secret.
+          </li>
+          <li>
+            <strong>Your private key + vault key.</strong> Generated on identity
+            creation. <em>Held on the server during the Phase 2a demo period
+            only</em>; Phase 2b moves these to your device's hardware keystore.
+            Even today, they are never exposed via export endpoints (see §6).
+          </li>
+          <li>
+            <strong>Action records.</strong> Each time you ask Bharat OS to do
+            something (book a cab, look up a record, mint an attestation), we
+            store a structured receipt: the intent text, the action type, the
+            decision the policy engine made, and the receipt the tool adapter
+            returned. These are visible to you and only you.
+          </li>
+          <li>
+            <strong>Consent records.</strong> Every time a tool reads or writes
+            data on your behalf, a signed consent receipt is recorded in the
+            ledger. You can revoke any consent at any time.
+          </li>
+          <li>
+            <strong>Mesh participation events.</strong> If you opt in to share
+            compute or storage, each contribution event is logged with the
+            payout amount.
+          </li>
+          <li>
+            <strong>Health document captures, when you opt in.</strong> OCR text
+            runs on-device; only the structured fields you confirm go to ABHA.
+          </li>
+        </ul>
+        <p>
+          We do <strong>not</strong> collect: your contact list, your location
+          history, your messages, your browsing history, your raw transaction
+          data, your Aadhaar number, your biometric templates, the contents
+          of other apps on your phone. Bharat OS is not a tracking platform.
+        </p>
+      </section>
+
+      <section>
+        <h2>3. Why we collect it (Purpose)</h2>
+        <p>
+          We process your data <strong>only</strong> for the following purposes,
+          each tied to an explicit consent you gave us:
+        </p>
+        <ul>
+          <li>
+            <strong>To deliver the action you requested.</strong> Booking a cab
+            needs to know who is booking; pulling your health record needs to
+            know whose record to pull.
+          </li>
+          <li>
+            <strong>To prove your action happened.</strong> Signed receipts let
+            you (or a verifier with your consent) confirm that an action ran.
+          </li>
+          <li>
+            <strong>To pay you, when you participate in mesh / federated
+            rounds.</strong> UPI payouts need a record of what you contributed.
+          </li>
+          <li>
+            <strong>To honour government compliance requirements</strong> we are
+            subject to (tax, anti-money-laundering on UPI escrow, RBI rules on
+            financial workflows).
+          </li>
+        </ul>
+        <p>
+          We do <strong>not</strong> use your data for advertising. We do
+          <strong>not</strong> sell your data. We do <strong>not</strong> train
+          models on your data without your explicit per-round
+          <em>federated_donation</em> consent.
+        </p>
+      </section>
+
+      <section>
+        <h2>4. Who we share it with</h2>
+        <p>
+          When you ask Bharat OS to do something that involves a third party
+          (book a cab through ONDC, verify an Aadhaar attestation, file a
+          claim with DigiLocker), we share only the data the third party
+          strictly needs, and only after your explicit consent. The audit
+          trail records exactly what was shared and with whom.
+        </p>
+        <p>
+          When you create a <em>Trust Passport attestation</em> and share it
+          with a landlord / employer / bank, the verifier sees only the
+          band-or-boolean claims you chose to disclose — never the underlying
+          raw values.
+        </p>
+        <p>
+          We never share your data with advertisers, data brokers, foreign
+          governments outside of Indian legal process, or any party without a
+          legitimate purpose that you have consented to.
+        </p>
+      </section>
+
+      <section>
+        <h2>5. How long we keep it</h2>
+        <p>
+          Bharat OS keeps your records for as long as you maintain an account.
+          When you exercise your <strong>Right to Erasure</strong>, every
+          record is destroyed and all references in our audit ledger are
+          anonymised.
+        </p>
+        <p>
+          Some categories — UPI escrow receipts, tax-relevant transaction
+          records — may be retained for the period required by Indian law
+          (typically 7 years), but only in anonymised form once you've
+          exercised your erasure right. No personally identifying information
+          remains.
+        </p>
+      </section>
+
+      <section>
+        <h2>6. Your rights under the DPDP Act</h2>
+        <ul>
+          <li>
+            <strong>Right to access</strong> (§11): you can download a complete
+            export of every record we hold about you. Profile → Settings →
+            <em>Download my data</em>.
+          </li>
+          <li>
+            <strong>Right to correction</strong> (§12(1)): you can revoke any
+            consent and re-issue with corrected fields.
+          </li>
+          <li>
+            <strong>Right to erasure</strong> (§12(3)): you can request complete
+            deletion. Profile → Settings → <em>Delete my account</em>. We
+            cascade through every section of our store and anonymise ledger
+            entries; the action is permanent.
+          </li>
+          <li>
+            <strong>Right to nominate</strong> (§14): you can designate a person
+            to exercise your rights on your behalf, e.g. in the event of death
+            or incapacity. Contact our DPO to register a nomination.
+          </li>
+          <li>
+            <strong>Right to grievance redressal</strong> (§13): if you are
+            dissatisfied with how we handle your data, escalate to our Data
+            Protection Officer (contact in §7) within 30 days.
+          </li>
+        </ul>
+        <p>
+          We respond to all DPDP requests within <strong>30 days</strong>
+          (the statutory ceiling). If we cannot complete a request in that
+          window we will write to you with the reason and the expected
+          completion date.
+        </p>
+      </section>
+
+      <section>
+        <h2>7. Grievance Officer</h2>
+        <p>
+          As required by DPDP §13, we name a Data Protection Officer whose
+          contact details are:
+        </p>
+        <pre id="dpoContact">[Loading current DPO contact from /api/dpdp/grievance …]</pre>
+        <p>
+          If your grievance is not resolved within 30 days you may escalate to
+          the Data Protection Board of India at
+          <a href="https://www.dpdpb.gov.in">www.dpdpb.gov.in</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>8. Cryptographic key material</h2>
+        <p>
+          Your Ed25519 private key and vault encryption key are
+          <strong>protected by your 12-word recovery phrase</strong>. The
+          phrase is deterministically derived from your public key — we cannot
+          recreate it for you if you lose it. <strong>Bharat OS cannot recover
+          your account if you lose your recovery phrase.</strong>
+        </p>
+        <p>
+          Phase 2b will move private key custody from the server to your
+          device's hardware-backed keystore (Android Keystore). Until then,
+          your private key is held server-side for the demo period only and
+          is excluded from data exports to prevent attack surface (a stolen
+          export file would otherwise be a fully usable identity).
+        </p>
+      </section>
+
+      <section>
+        <h2>9. Children</h2>
+        <p>
+          Bharat OS is not intended for users under 18. DPDP §9 requires
+          verifiable parental consent for the processing of children's data;
+          we do not offer that workflow today. If you are a parent or
+          guardian and believe a child has created an account, contact our
+          DPO and we will erase the account.
+        </p>
+      </section>
+
+      <section>
+        <h2>10. Changes to this policy</h2>
+        <p>
+          We will notify you of material changes via the Bharat OS app and
+          (when implemented) via your registered contact method. The version
+          number and "last updated" date at the top of this page change with
+          every revision; an audit trail of prior versions is available on
+          request.
+        </p>
+      </section>
+
+      <footer class="legal-footer">
+        <a href="/legal/terms.html">Terms of Service →</a>
+      </footer>
+    </main>
+    <script>
+      // Populate the DPO contact block from the live endpoint so a
+      // single source of truth (DEFAULT_DPO_CONTACT) drives both the
+      // app and this static page.
+      fetch('/api/dpdp/grievance').then((r) => r.json()).then((data) => {
+        const block = document.getElementById('dpoContact');
+        if (!block || !data?.contact) return;
+        const c = data.contact;
+        block.textContent =
+          `${c.name}\n` +
+          `Email: ${c.email}\n` +
+          `Post:  ${c.postal}\n` +
+          `Response SLA: ${c.responseSlaDays} days`;
+      }).catch(() => {});
+    </script>
+  </body>
+</html>

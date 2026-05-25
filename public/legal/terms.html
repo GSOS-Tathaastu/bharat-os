@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c1018" />
+    <title>Bharat OS · Terms of Service</title>
+    <link rel="stylesheet" href="/legal/legal.css" />
+    <link rel="icon" type="image/svg+xml" href="/shell/icon.svg" />
+  </head>
+  <body>
+    <main class="legal">
+      <header class="legal-header">
+        <a href="/shell/" class="legal-back">← Back to Bharat OS</a>
+        <h1>Terms of Service</h1>
+        <p class="legal-meta">Last updated: 2026-05-24 · Version 1.0</p>
+      </header>
+
+      <section>
+        <h2>1. What Bharat OS is</h2>
+        <p>
+          Bharat OS is an AI-native operating layer for India. It accepts
+          intents in any of the 22 official Indian languages, routes them
+          through a policy-checked planning engine, and either completes
+          regulated actions through India Stack APIs or hands you off to the
+          appropriate app. It is operated by
+          <strong>[Operating entity, to be inserted at registration]</strong>
+          ("we", "us").
+        </p>
+      </section>
+
+      <section>
+        <h2>2. You must be 18+</h2>
+        <p>
+          You must be at least 18 years old to use Bharat OS. We do not
+          knowingly accept users under 18; if we discover you are under 18,
+          your account will be erased.
+        </p>
+      </section>
+
+      <section>
+        <h2>3. Your identity is yours</h2>
+        <p>
+          Bharat OS does not own your identity. The Ed25519 key pair we
+          generate is yours, controlled by your 12-word recovery phrase.
+          Your identity persists across devices via §7c device pairing — the
+          phone is replaceable; you are not.
+        </p>
+        <p>
+          If you lose your recovery phrase, we cannot recover your account.
+          That's not a limitation we apologise for — it's how a sovereign
+          identity has to work.
+        </p>
+      </section>
+
+      <section>
+        <h2>4. What you can and can't do</h2>
+        <h3>You can:</h3>
+        <ul>
+          <li>Use Bharat OS in any supported Indian language.</li>
+          <li>Mint Trust Passport attestations and share them with verifiers.</li>
+          <li>Earn UPI credits by sharing spare compute / storage with the mesh.</li>
+          <li>Participate (opt-in, per round) in federated training rounds.</li>
+          <li>Move your identity to a new phone any time.</li>
+          <li>Delete your account permanently any time.</li>
+          <li>Download a complete export of your data any time.</li>
+        </ul>
+        <h3>You can't:</h3>
+        <ul>
+          <li>Use Bharat OS for any unlawful purpose under Indian law.</li>
+          <li>Create attestations that are false or that you do not have the right to make.</li>
+          <li>
+            File §9A reports in bad faith. Bharat OS reserves the right to
+            review reports and to sanction users who abuse the report system.
+          </li>
+          <li>
+            Probe, reverse-engineer, or attempt to break the cryptographic
+            protocols. Security research with prior written consent is welcome
+            (security@bharat-os.in).
+          </li>
+          <li>
+            Resell, scrape, or commercialise Bharat OS data without our written
+            agreement. The §15 binding "monetize businesses, never the citizen"
+            cuts both ways — businesses do not get to monetize us either.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>5. The §15 bindings</h2>
+        <p>
+          These are commitments Bharat OS makes to you, in plain language:
+        </p>
+        <ul>
+          <li><strong>You never pay to access work, services, or Bharat OS itself.</strong></li>
+          <li><strong>We do not sell your data.</strong> Ever.</li>
+          <li><strong>We do not train models on your data without your explicit per-round consent.</strong></li>
+          <li><strong>Aadhaar is optional, never mandatory.</strong></li>
+          <li><strong>Identity is the person, not the device.</strong></li>
+          <li><strong>Servers see pointers, not payloads.</strong> Your raw data stays on your device.</li>
+          <li>
+            <strong>Our revenue comes from businesses, developers, and
+            infrastructure spread.</strong> Never from you.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>6. Mesh participation</h2>
+        <p>
+          If you enable mesh contribution, your phone shares spare compute
+          and storage with other Bharat OS users while it is charging on
+          WiFi. You earn UPI credits per contribution. You can stop earning
+          any time. Earnings paid as <strong>real fiat UPI credits</strong>
+          settled to a bank account you control — never as tokens or
+          cryptocurrency.
+        </p>
+        <p>
+          You are responsible for the tax treatment of mesh earnings under
+          Indian law. We provide an annual statement; you are responsible
+          for filing.
+        </p>
+      </section>
+
+      <section>
+        <h2>7. Federated training rounds</h2>
+        <p>
+          You may choose, per round, to contribute a noisy gradient summary
+          to improve a global model. The raw data your phone trained on
+          <strong>never leaves the device</strong>. Each round records the
+          differential privacy budget consumed. We refuse contributions that
+          would exceed your monthly privacy budget (default ε ≤ 8 across
+          30 days).
+        </p>
+      </section>
+
+      <section>
+        <h2>8. Service availability</h2>
+        <p>
+          Bharat OS is provided "as is" while it is in early production. We
+          run a best-effort SLA but we do not guarantee continuous
+          availability. We will publish maintenance windows in advance.
+        </p>
+      </section>
+
+      <section>
+        <h2>9. Limitation of liability</h2>
+        <p>
+          Bharat OS plans and routes actions on your behalf, but every
+          regulated action requires your explicit consent before execution.
+          We are liable for failures inside our planning + audit layer, but
+          we are not liable for the underlying third-party services (UPI,
+          DigiLocker, ABHA, Account Aggregator) when they reject or
+          mis-handle a request you authorised. Your remedy in that case is
+          against the third party.
+        </p>
+        <p>
+          Our total liability in any given matter is capped at the lower of
+          ₹50,000 or the revenue we earned from your activity in the prior
+          12 months. (Citizens / workers pay us nothing, so for end users
+          this cap is effectively ₹0 — which is also the right number; the
+          right outcome for a citizen-facing platform that wrongs you is
+          erasure of the harm, not money.)
+        </p>
+      </section>
+
+      <section>
+        <h2>10. Governing law and disputes</h2>
+        <p>
+          These Terms are governed by the laws of India. Any dispute is
+          subject to the exclusive jurisdiction of the courts of
+          <strong>[City, to be inserted at registration]</strong>. Before
+          filing a court case you must first attempt grievance redressal via
+          our Data Protection Officer (see Privacy Policy §7).
+        </p>
+      </section>
+
+      <section>
+        <h2>11. Changes to these Terms</h2>
+        <p>
+          We may amend these Terms. Material amendments will be notified to
+          you in-app. Continued use of Bharat OS after a notified change
+          constitutes acceptance of the amended Terms. If you do not accept,
+          you may exercise your Right to Erasure at any time.
+        </p>
+      </section>
+
+      <footer class="legal-footer">
+        <a href="/legal/privacy.html">Privacy Policy →</a>
+      </footer>
+    </main>
+  </body>
+</html>

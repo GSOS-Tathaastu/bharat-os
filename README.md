@@ -144,6 +144,25 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 4.0 **DPDP data-subject rights — launch readiness arc starts** —
+  pivot from investor-demo-ready to launch-ready. New
+  `src/phase1/dpdp-rights.mjs` artifact: `collectUserData` (18-section
+  export, excludes private key + vault key per §15), `erasureManifest`
+  (pure deletion plan), `redactLedgerEntry` (preserves chain integrity).
+  New `BosStore.eraseUserData` cascades through 16 per-user record types
+  + rewrites `ledger.jsonl` atomically with identity refs redacted. Four
+  new API routes:
+    GET    /api/identities/:id/export           (Content-Disposition: attachment)
+    GET    /api/identities/:id/erasure-preview
+    DELETE /api/identities/:id?confirm=YES_DELETE  (refuses without flag)
+    GET    /api/dpdp/grievance                  (DPO contact + 30-day SLA)
+  Two static legal pages: `/legal/privacy.html` (10-section DPDP §11
+  notice, fetches live DPO contact from API) + `/legal/terms.html`
+  (11-section ToS). Shell adds *"Your data rights"* card on Profile tab
+  with Download / Delete (two-step: preview + type DELETE) / Contact DPO.
+  First-run wizard footer carries the legal-acceptance notice. 289/289
+  tests (+9 new). SW cache to v24. Bharat OS is now DPDP-compliant at
+  the protocol layer. ADR 0079.
 - Phase 2a.26 **first-run wizard — sign-up / migrate / demo** — Bharat OS
   has a front door. Three paths from a full-screen welcome sheet that
   fires when `deviceOwnerId` is absent: ✨ *Set up new identity*
