@@ -2446,3 +2446,104 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ─── Phase 8.1 — mesh-contribution dashboard card ──────────────────── */
+
+.mesh-dashboard-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.mesh-dashboard-controls label {
+  font-size: 13px;
+  color: #555;
+}
+
+.mesh-dashboard-controls input[type="month"] {
+  padding: 6px 8px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.mesh-dashboard-headline {
+  margin: 12px 0;
+  padding: 12px;
+  background: linear-gradient(135deg, #f0fdf9 0%, #e6f9f3 100%);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.mesh-dashboard-total {
+  font-size: 32px;
+  font-weight: 700;
+  color: #0a7;
+  font-variant-numeric: tabular-nums;
+}
+
+.mesh-dashboard-meta {
+  font-size: 12px;
+  color: #555;
+  margin-top: 4px;
+}
+
+.mesh-dashboard-breakdown {
+  margin: 10px 0;
+  display: grid;
+  gap: 4px;
+}
+
+.mesh-dashboard-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.mesh-dashboard-breakdown-label {
+  color: #555;
+}
+
+.mesh-dashboard-breakdown-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.mesh-dashboard-timeline {
+  margin: 10px 0;
+  border-top: 1px solid #eee;
+  padding-top: 10px;
+}
+
+.mesh-dashboard-timeline-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.mesh-dashboard-timeline-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mesh-dashboard-timeline-bar {
+  height: 6px;
+  background: #0a7;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.mesh-dashboard-timeline-row .mesh-dashboard-timeline-value {
+  text-align: right;
+}

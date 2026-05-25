@@ -144,6 +144,32 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 8.1 **shell UI for the mesh-contribution dashboard —
+  monthly retrospective surface** — Phase 6.0b shipped the
+  `aggregateMeshByMonth` + `/mesh/summary?month=` substrate but had
+  no worker-facing UI. Phase 8.1 ships the monthly retrospective
+  card. New `#meshDashboardSection` on the Earn tab between the
+  real-time mesh ticker and the Phase 8.0 manual earnings log.
+  Card has: month picker (defaults to current, no future months) +
+  Refresh button; headline block with large `₹X,XXX.XX` total in
+  accent green + "N working days · M events" meta line; per-workload
+  breakdown (only nonzero categories — 🧠 Inference, 💾 Storage
+  serve, 🗄️ Storage store, 🧪 Federated rounds); daily timeline
+  as a mini bar chart (date / scaled bar / rupees right-aligned).
+  New `setupMeshDashboard()` in `app.js` (~120 lines, follows the
+  Phase 8.0 pattern; `state.deviceOwnerId` scoping; Indian-numbering
+  output via `toLocaleString('en-IN')`; HTML-escapes workload
+  labels as defence-in-depth). New CSS for the headline gradient
+  + breakdown rows + 3-column timeline grid with inline-styled bar
+  widths. SW cache v30→v31. §15: identity-scoped; aggregates only
+  (no raw events in UI); HTML escaping; no new PII surface. No
+  automated browser tests (same pattern as Phase 8.0). Live smoke
+  confirmed with 5 seeded inference events → API returns 8000
+  paise + 5 daily timeline rows. 747/747 Node tests still pass.
+  ADR 0106. **Earn tab now flows: real-time ticker → monthly
+  retrospective → manual log → federated rounds. The
+  compounding-earnings narrative the substrate was always
+  designed to surface is now visible to investors.**
 - Phase 8.0 **shell UI for the earnings tracker — first user-visible
   surface of the Phase 5.9+ growth arc** — Phases 5.9 through 7.3
   shipped ~10 API substrates but ZERO worker-facing shell UI. An

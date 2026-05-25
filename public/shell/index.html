@@ -157,6 +157,37 @@
           </details>
         </section>
 
+        <!-- Phase 8.1 — mesh-contribution dashboard (Phase 6.0b wire). -->
+        <section class="capture-card mesh-dashboard-card" id="meshDashboardSection">
+          <div class="capture-header">
+            <span>📊 Your mesh earnings this month</span>
+            <span id="meshDashboardStatus" class="capture-meta">—</span>
+          </div>
+          <div class="mesh-dashboard-controls">
+            <label for="meshDashboardMonth">Month</label>
+            <input id="meshDashboardMonth" type="month" />
+            <button id="meshDashboardRefresh" class="link-button" type="button">
+              Refresh
+            </button>
+          </div>
+          <div class="mesh-dashboard-headline" id="meshDashboardHeadline">
+            <div class="mesh-dashboard-total">₹0.00</div>
+            <div class="mesh-dashboard-meta" id="meshDashboardMeta">No events yet</div>
+          </div>
+          <div class="mesh-dashboard-breakdown" id="meshDashboardBreakdown" hidden></div>
+          <div class="mesh-dashboard-timeline" id="meshDashboardTimeline" hidden></div>
+          <details class="why-details">
+            <summary>What is mesh contribution?</summary>
+            <p class="diagnostics-note">
+              When your phone is plugged in and on WiFi, Bharat OS uses spare
+              compute + storage for inference, storage-serve, storage-store,
+              and federated training rounds (§7f). Each tick pays out in
+              paise (₹). This card aggregates the events from Phase 3.x for
+              one month at a time. Switch months to see prior earnings.
+            </p>
+          </details>
+        </section>
+
         <!-- Phase 8.0 — earnings tracker card (Phase 6.0a wire). -->
         <section class="capture-card earnings-log-card" id="earningsLogSection">
           <div class="capture-header">

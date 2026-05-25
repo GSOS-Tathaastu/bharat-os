@@ -3767,6 +3767,127 @@ function setupEarningsLog() {
   refreshList();
 }
 
+// Phase 8.1 — mesh-contribution dashboard UI (Phase 6.0b API wire).
+function setupMeshDashboard() {
+  const $el = (id) => document.getElementById(id);
+  const monthInput = $el('meshDashboardMonth');
+  const refreshBtn = $el('meshDashboardRefresh');
+  const statusEl = $el('meshDashboardStatus');
+  const totalEl = $el('meshDashboardHeadline')?.querySelector(
+    '.mesh-dashboard-total'
+  );
+  const metaEl = $el('meshDashboardMeta');
+  const breakdownEl = $el('meshDashboardBreakdown');
+  const timelineEl = $el('meshDashboardTimeline');
+  if (!monthInput || !refreshBtn) return;
+
+  // Default to current month.
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  monthInput.value = currentMonth;
+  monthInput.max = currentMonth;
+
+  const WORKLOAD_LABELS = {
+    inference: '🧠 Inference',
+    storage_serve: '💾 Storage serve',
+    storage_store: '🗄️ Storage store',
+    federated_round: '🧪 Federated rounds'
+  };
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatRupees(paise) {
+    const rupees = (paise ?? 0) / 100;
+    return `₹${rupees.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }
+
+  async function refresh() {
+    if (!state.deviceOwnerId) {
+      statusEl.textContent = 'Set up identity first';
+      return;
+    }
+    const month = monthInput.value;
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      statusEl.textContent = 'Pick a month';
+      return;
+    }
+    statusEl.textContent = 'Loading…';
+    try {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(state.deviceOwnerId)}/mesh/summary?month=${month}`
+      );
+      if (!response.ok) {
+        statusEl.textContent = `Error (${response.status})`;
+        return;
+      }
+      const body = await response.json();
+      const summary = body.summary ?? {};
+      totalEl.textContent = formatRupees(summary.totalPaise ?? 0);
+      const dayCount = summary.dailyTimeline?.length ?? 0;
+      const eventCount = summary.eventCount ?? 0;
+      metaEl.textContent =
+        eventCount > 0
+          ? `${dayCount} working day${dayCount === 1 ? '' : 's'} · ${eventCount} event${eventCount === 1 ? '' : 's'}`
+          : 'No events yet';
+      // Per-workload breakdown — only show categories with nonzero payouts.
+      const byWorkload = summary.byWorkload ?? {};
+      const nonZero = Object.entries(byWorkload).filter(([, p]) => p > 0);
+      if (nonZero.length > 0) {
+        breakdownEl.innerHTML = nonZero
+          .map(
+            ([type, paise]) => `
+              <div class="mesh-dashboard-breakdown-row">
+                <span class="mesh-dashboard-breakdown-label">
+                  ${escapeHtml(WORKLOAD_LABELS[type] ?? type)}
+                </span>
+                <span class="mesh-dashboard-breakdown-value">${formatRupees(paise)}</span>
+              </div>`
+          )
+          .join('');
+        breakdownEl.hidden = false;
+      } else {
+        breakdownEl.hidden = true;
+      }
+      // Daily timeline — show up to 31 days as a mini bar chart.
+      const timeline = summary.dailyTimeline ?? [];
+      if (timeline.length > 0) {
+        const maxPaise = Math.max(...timeline.map((d) => d.paise));
+        const rows = timeline.map((d) => {
+          const pct = maxPaise > 0 ? Math.max(2, Math.round((d.paise / maxPaise) * 100)) : 2;
+          return `
+            <div class="mesh-dashboard-timeline-row">
+              <span>${escapeHtml(d.date.slice(5))}</span>
+              <span class="mesh-dashboard-timeline-bar" style="width: ${pct}%"></span>
+              <span class="mesh-dashboard-timeline-value">${formatRupees(d.paise)}</span>
+            </div>`;
+        });
+        timelineEl.innerHTML =
+          `<div class="mesh-dashboard-timeline-heading">Daily breakdown</div>` +
+          rows.join('');
+        timelineEl.hidden = false;
+      } else {
+        timelineEl.hidden = true;
+      }
+      statusEl.textContent = `${month}`;
+    } catch (_error) {
+      statusEl.textContent = 'Network error';
+    }
+  }
+
+  monthInput.addEventListener('change', refresh);
+  refreshBtn.addEventListener('click', refresh);
+  refresh();
+}
+
 setupVoice();
 setupOnboarding();
 setupTabs();
@@ -3777,6 +3898,7 @@ setupNetworkStatus();
 setupPwaInstall();
 setupI18n();
 setupEarningsLog();
+setupMeshDashboard();
 loadIdentities()
   .then(() => {
     maybeShowFirstRun();
