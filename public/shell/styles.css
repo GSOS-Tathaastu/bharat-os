@@ -266,6 +266,475 @@ body {
   padding-bottom: 4px;
 }
 
+/* ─── First-run wizard (Phase 2a.26) ────────────────────────────────── */
+
+.first-run-sheet {
+  /* Full-screen modal — wizard owns the whole viewport on first run. */
+  place-items: stretch;
+  background: var(--bg);
+}
+
+.first-run-content {
+  max-width: 480px;
+  margin: auto;
+  max-height: none;
+  border-radius: 0;
+  background: var(--bg);
+  border: 0;
+  padding: calc(24px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom));
+  gap: 0;
+}
+
+.first-run-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: tab-fade-in 200ms ease-out;
+}
+
+.first-run-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 16px 0 24px;
+}
+
+.first-run-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 38px;
+  box-shadow: 0 12px 32px rgba(255, 122, 26, 0.25);
+}
+
+.first-run-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.first-run-subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.first-run-section-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.first-run-section-sub {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.first-run-back {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: left;
+  padding: 4px 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.first-run-back:hover {
+  color: var(--text);
+}
+
+.first-run-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.first-run-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  font-family: inherit;
+}
+
+.first-run-choice:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.first-run-choice.primary {
+  background: linear-gradient(135deg, var(--accent-soft), transparent 80%);
+  border-color: var(--accent);
+}
+
+.first-run-choice.secondary {
+  opacity: 0.85;
+}
+
+.first-run-choice-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.first-run-choice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.first-run-choice-body strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.first-run-choice-body span {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.first-run-language-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.first-run-language-grid button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+}
+
+.first-run-language-grid button:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.first-run-language-grid button span {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.first-run-language-grid button em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.first-run-input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 16px;
+  padding: 14px 16px;
+  font-family: inherit;
+}
+
+.first-run-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.first-run-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.first-run-actions.vertical {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.first-run-primary {
+  flex: 1;
+  background: var(--accent);
+  border: 0;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 120ms ease;
+}
+
+.first-run-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.first-run-secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.first-run-secondary:hover {
+  border-color: var(--accent);
+}
+
+.first-run-link {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 6px 8px;
+}
+
+.first-run-link:hover {
+  color: var(--accent);
+}
+
+.first-run-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  padding: 24px;
+  justify-content: center;
+}
+
+.first-run-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: verify-spin 1s linear infinite;
+}
+
+.first-run-phrase-grid {
+  list-style: none;
+  margin: 0;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  counter-reset: phrase;
+}
+
+.first-run-phrase-grid li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.first-run-phrase-grid li:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+
+.first-run-phrase-num {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 18px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.first-run-phrase-word {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.first-run-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.first-run-checkbox input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.first-run-status {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.first-run-persona-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.first-run-persona-list button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.first-run-persona-list button:hover {
+  border-color: var(--accent);
+}
+
+.first-run-persona-list .avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.first-run-persona-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.first-run-persona-meta strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.first-run-persona-meta em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.first-run-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 20px;
+  text-align: center;
+}
+
+/* ─── Backup warning banner (Home tab) ───────────────────────────────── */
+
+.backup-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(229, 83, 75, 0.12);
+  border: 1px solid rgba(229, 83, 75, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.backup-warning-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.backup-warning-text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.backup-warning-text strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.backup-warning-action {
+  background: var(--bad);
+  border: 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+/* ─── Reset-device button (Profile tab, danger styling) ──────────────── */
+
+.link-button.danger {
+  color: var(--bad);
+  margin-left: 12px;
+}
+
+.link-button.danger:hover {
+  color: var(--bad);
+  text-decoration: underline;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;

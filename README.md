@@ -144,6 +144,20 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 2a.26 **first-run wizard — sign-up / migrate / demo** — Bharat OS
+  has a front door. Three paths from a full-screen welcome sheet that
+  fires when `deviceOwnerId` is absent: ✨ *Set up new identity*
+  (language → display name → `POST /api/identities` + fetch deterministic
+  12-word recovery phrase → Trust-Wallet/MetaMask-style numbered grid
+  with mandatory "I've written these down" ack, or an *I'll save it later*
+  escape hatch that sets a persistent warning banner on Home), 📲 *Move
+  from another phone* (routes to §7c WebRTC pairing — QR scan or 6-digit
+  code + phrase), 🎬 *Try a demo persona* (clearly labelled, reuses
+  `reinitializeDeviceAs`). `loadIdentities` no longer auto-binds — the
+  wizard owns first-run. New Reset device button on Profile (clears
+  localStorage with honest copy explaining the identity stays on the
+  server). Backup warning banner re-opens the phrase grid via re-fetch.
+  280/280 tests unchanged. SW cache to v23. ADR 0078.
 - Phase 2a.25 **shell UX overhaul — bottom-tab navigation + plain-language
   copy** — restructures `/shell/` from a single-scroll 10-card stack into
   4 focused tabs: 🏠 Home (intent + result + recent), 💎 Earn (₹ hero +

@@ -33,6 +33,14 @@
 
       <!-- ─── HOME TAB ────────────────────────────────────────────── -->
       <section class="tab-panel" id="tab-home" data-tab="home">
+        <div id="backupWarningBanner" class="backup-warning-banner" hidden>
+          <span class="backup-warning-icon" aria-hidden="true">⚠️</span>
+          <span class="backup-warning-text">
+            <strong>Back up your recovery phrase.</strong>
+            Without it you'll lose access if your phone is lost or wiped.
+          </span>
+          <button id="backupWarningAction" class="backup-warning-action" type="button">Back up now</button>
+        </div>
         <section class="prompt-card" id="promptCard">
           <div class="prompt-greeting" id="promptGreeting">
             What do you want to do today?
@@ -357,6 +365,7 @@
 
         <section class="profile-misc">
           <button id="replayTour" class="link-button" type="button">▶ Replay welcome tour</button>
+          <button id="resetDeviceButton" class="link-button danger" type="button">↻ Reset this device</button>
         </section>
 
         <section class="diagnostics" id="diagnosticsSection">
@@ -396,6 +405,142 @@
         <span class="bottom-nav-label">Profile</span>
       </button>
     </nav>
+
+    <!-- ─── First-run wizard (Phase 2a.26) ─────────────────────────── -->
+    <!-- Shows on first launch when no deviceOwnerId is stored. Three  -->
+    <!-- paths: new identity / migrate from old phone / try demo.      -->
+    <div class="sheet first-run-sheet" id="firstRunSheet" hidden>
+      <div class="sheet-content first-run-content">
+        <!-- Step: welcome (three paths) -->
+        <div class="first-run-step" data-fr-step="welcome">
+          <div class="first-run-brand">
+            <div class="first-run-logo">B</div>
+            <div class="first-run-title">Welcome to Bharat OS</div>
+            <div class="first-run-subtitle">Your phone, your identity, your data.</div>
+          </div>
+          <div class="first-run-choices">
+            <button class="first-run-choice primary" type="button" data-fr-go="new">
+              <span class="first-run-choice-icon" aria-hidden="true">✨</span>
+              <span class="first-run-choice-body">
+                <strong>Set up a new identity</strong>
+                <span>Create your Bharat OS profile. Takes 60 seconds.</span>
+              </span>
+            </button>
+            <button class="first-run-choice" type="button" data-fr-go="migrate">
+              <span class="first-run-choice-icon" aria-hidden="true">📲</span>
+              <span class="first-run-choice-body">
+                <strong>Move from another phone</strong>
+                <span>Scan a QR or enter a 6-digit code from your old device.</span>
+              </span>
+            </button>
+            <button class="first-run-choice secondary" type="button" data-fr-go="demo">
+              <span class="first-run-choice-icon" aria-hidden="true">🎬</span>
+              <span class="first-run-choice-body">
+                <strong>Try a demo persona</strong>
+                <span>Walk through Bharat OS as one of the seeded characters (Sita, Priya, Ravi…). Demo only — not for real use.</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Step: pick language (new-identity flow) -->
+        <div class="first-run-step" data-fr-step="language" hidden>
+          <button class="first-run-back" type="button" data-fr-back="welcome">← Back</button>
+          <div class="first-run-section-title">Choose your language</div>
+          <div class="first-run-section-sub">You can change this any time.</div>
+          <div class="first-run-language-grid" id="firstRunLanguageGrid">
+            <button type="button" data-fr-locale="hi-IN"><span>हिन्दी</span><em>Hindi</em></button>
+            <button type="button" data-fr-locale="mr-IN"><span>मराठी</span><em>Marathi</em></button>
+            <button type="button" data-fr-locale="bho-IN"><span>भोजपुरी</span><em>Bhojpuri</em></button>
+            <button type="button" data-fr-locale="ta-IN"><span>தமிழ்</span><em>Tamil</em></button>
+            <button type="button" data-fr-locale="bn-IN"><span>বাংলা</span><em>Bengali</em></button>
+            <button type="button" data-fr-locale="en-IN"><span>English</span><em>English</em></button>
+          </div>
+        </div>
+
+        <!-- Step: enter display name -->
+        <div class="first-run-step" data-fr-step="name" hidden>
+          <button class="first-run-back" type="button" data-fr-back="language">← Back</button>
+          <div class="first-run-section-title">What should we call you?</div>
+          <div class="first-run-section-sub">Just a display name — no last name, no Aadhaar needed.</div>
+          <input type="text" id="firstRunNameInput" class="first-run-input" placeholder="e.g. Priya, राकेश, தினேஷ்" maxlength="60" autocomplete="off" />
+          <div class="first-run-actions">
+            <button class="first-run-primary" type="button" id="firstRunNameNext">Continue</button>
+          </div>
+        </div>
+
+        <!-- Step: creating identity (loading) -->
+        <div class="first-run-step" data-fr-step="creating" hidden>
+          <div class="first-run-section-title">Setting up your profile…</div>
+          <div class="first-run-loading" aria-live="polite">
+            <div class="first-run-spinner" aria-hidden="true"></div>
+            <span id="firstRunCreatingStatus">Generating identity key…</span>
+          </div>
+        </div>
+
+        <!-- Step: recovery phrase backup (MetaMask-style) -->
+        <div class="first-run-step" data-fr-step="phrase" hidden>
+          <div class="first-run-section-title">📝 Save your recovery phrase</div>
+          <div class="first-run-section-sub">
+            These 12 words are the <strong>only</strong> way to recover your
+            Bharat OS account if you lose this phone. Write them down on
+            paper. Don't screenshot, don't email, don't share.
+          </div>
+          <ol class="first-run-phrase-grid" id="firstRunPhraseGrid"></ol>
+          <button class="first-run-secondary" type="button" id="firstRunCopyPhrase">📋 Copy to clipboard</button>
+          <label class="first-run-checkbox">
+            <input type="checkbox" id="firstRunPhraseAck" />
+            <span>I've written these 12 words down on paper. I understand Bharat OS cannot recover them for me if I lose them.</span>
+          </label>
+          <div class="first-run-actions">
+            <button class="first-run-link" type="button" id="firstRunPhraseLater">I'll save it later</button>
+            <button class="first-run-primary" type="button" id="firstRunPhraseDone" disabled>Done</button>
+          </div>
+        </div>
+
+        <!-- Step: migration (renders the existing pairing-receiver controls) -->
+        <div class="first-run-step" data-fr-step="migrate" hidden>
+          <button class="first-run-back" type="button" data-fr-back="welcome">← Back</button>
+          <div class="first-run-section-title">Move from another phone</div>
+          <div class="first-run-section-sub">
+            On your <strong>old</strong> phone, open Bharat OS → Profile →
+            <em>Move to a new phone</em> → Start pairing. You'll see a QR
+            code and a 6-digit number. Scan or enter them here.
+          </div>
+          <input id="firstRunMigrateCode" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" class="first-run-input" />
+          <div class="first-run-actions">
+            <button class="first-run-secondary" type="button" id="firstRunMigrateScan">📷 Scan QR</button>
+            <button class="first-run-primary" type="button" id="firstRunMigrateClaim">Receive identity</button>
+          </div>
+          <div id="firstRunMigrateStatus" class="first-run-status" hidden></div>
+        </div>
+
+        <!-- Step: demo persona picker -->
+        <div class="first-run-step" data-fr-step="demo" hidden>
+          <button class="first-run-back" type="button" data-fr-back="welcome">← Back</button>
+          <div class="first-run-section-title">Pick a demo persona</div>
+          <div class="first-run-section-sub">
+            Walk through Bharat OS as one of the seeded characters. This is
+            a demo-only path — you're <strong>not creating your own
+            identity</strong>, you're trying on someone else's.
+          </div>
+          <ul class="first-run-persona-list" id="firstRunPersonaList"></ul>
+        </div>
+
+        <!-- Step: done -->
+        <div class="first-run-step" data-fr-step="done" hidden>
+          <div class="first-run-brand">
+            <div class="first-run-logo">✓</div>
+            <div class="first-run-title">You're in.</div>
+            <div class="first-run-subtitle" id="firstRunDoneSub">Tap below to start using Bharat OS.</div>
+          </div>
+          <div class="first-run-actions vertical">
+            <button class="first-run-primary" type="button" id="firstRunDoneEnter">Open Bharat OS</button>
+            <button class="first-run-link" type="button" id="firstRunDonePasskey">+ Set up a passkey now (recommended)</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="sheet onboarding-sheet" id="onboardingSheet" hidden>
       <div class="sheet-content">
