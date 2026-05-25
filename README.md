@@ -144,6 +144,42 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+- Phase 5.9 **portable work-history attestation via worker-initiated
+  QR handshake — the two-sided network turns on** — Phase 6.0 gave
+  workers single-player reasons to install Bharat OS; Phase 5.9
+  layers the two-sided attestation flow on top. New
+  `src/phase1/portable-attestation.mjs`: `createPortableAttestationToken`
+  (deterministic token ID, 1h TTL, GPS truncated to ~1.1km
+  precision), three signing tiers — `signTier0` (anonymous tap, IP
+  hashed never stored raw), `signTier1` (OTP-confirmed via Phase
+  4.3, phone hashed never stored raw), `signTier2` + `verifyTier2`
+  (customer signs canonical payload locally with their Ed25519
+  private key — server only verifies). **All tiers refuse double-
+  signing (409) and expired tokens (410). Self-signing refused.**
+  `aggregateAttestationsForWorker` returns tier breakdown +
+  fraud signals (repeatedPhoneShare, repeatedIpShare,
+  tier0DominanceShare). **ADDITIVE-ONLY** — no negative attestation
+  path; absence of signatures is not a negative signal (avoids
+  entrenching class bias). New SqliteStore `portable_attestations`
+  table with DPDP cascade integration. **Seven new API endpoints**:
+  `POST /api/portable-attestation/init` (worker generates token +
+  QR), `POST sign-tier0` (anonymous tap), `POST sign-tier1/send` +
+  `verify` (OTP flow), `GET sign-tier2/payload` + `POST sign-tier2`
+  (customer signs locally, server verifies),
+  `GET /api/identities/:id/portable-attestation/summary` (what
+  consuming aggregators read). **Static signing page** at
+  `/sign/<tokenId>` (`public/signs/`) — no Bharat OS install
+  required for the customer; deep-links into the app for Tier 2.
+  Cross-user isolation: alice asking for bob's summary sees zero
+  events. §15: customer phone never on worker's record (hashed),
+  customer private key never on the server (Tier 2 client-side
+  signing), additive-only constraint hard-coded, mandatory
+  disclaimer in init response surfaces "we do NOT verify identity
+  or guarantee performance." 595/595 tests (+31 new — including
+  full Tier-2 round-trip via real Ed25519 signing). ADR 0095
+  Accepted. **The two-sided attestation network is live; a rider
+  switching from Swiggy to Zomato now walks in with verifiable
+  history instead of starting at zero.**
 - Phase 6.0c **year-end tax helper — Indian income-tax math + 44AD
   presumptive + GST threshold flag — completes ADR 0096** —
   Phase 6.0c ships the third and final single-player worker tool,

@@ -102,6 +102,7 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     federatedUpdates,
     attestations,
     earningsEntries,
+    portableAttestations,
     ledger
   ] = await Promise.all([
     store.listConsents().catch(() => []),
@@ -124,6 +125,10 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
     // cascade. Optional (store may not implement it).
     store.listEarningsEntries
       ? store.listEarningsEntries({ identityId }).catch(() => [])
+      : Promise.resolve([]),
+    // Phase 5.9 — portable attestations on the worker side.
+    store.listPortableAttestations
+      ? store.listPortableAttestations({ workerId: identityId }).catch(() => [])
       : Promise.resolve([]),
     store.listLedger({ limit: undefined, newestFirst: false }).catch(() => [])
   ]);
@@ -198,6 +203,11 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
   // listEarningsEntries) but defensive double-filter is cheap.
   const subjectEarnings = (earningsEntries ?? []).filter(
     (e) => e.identityId === identityId
+  );
+  // Portable attestations — pre-filtered by workerId; defensive
+  // re-filter is cheap.
+  const subjectPortableAttestations = (portableAttestations ?? []).filter(
+    (a) => a.workerId === identityId
   );
 
   return {
@@ -283,6 +293,12 @@ export async function collectUserData(store, identityId, { at = new Date().toISO
       // Phase 6.0 — single-player earnings tracker. All entries are
       // user-typed, never scraped from aggregators.
       earningsLog: { ...stats(subjectEarnings), records: subjectEarnings },
+      // Phase 5.9 — portable work-history attestations the worker
+      // has accumulated.
+      portableAttestations: {
+        ...stats(subjectPortableAttestations),
+        records: subjectPortableAttestations
+      },
       ledger: { ...stats(ledgerEntries), records: ledgerEntries }
     },
     notice: {

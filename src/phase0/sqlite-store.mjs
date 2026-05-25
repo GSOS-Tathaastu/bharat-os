@@ -240,6 +240,21 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_earnings_log_date ON earnings_log(date);
   CREATE INDEX IF NOT EXISTS idx_earnings_log_category ON earnings_log(category);
 
+  CREATE TABLE IF NOT EXISTS portable_attestations (
+    token_id TEXT PRIMARY KEY,
+    worker_id TEXT,
+    category TEXT,
+    status TEXT,
+    tier INTEGER,
+    issued_at TEXT,
+    expires_at TEXT,
+    signed_at TEXT,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_portable_attestations_worker ON portable_attestations(worker_id);
+  CREATE INDEX IF NOT EXISTS idx_portable_attestations_status ON portable_attestations(status);
+  CREATE INDEX IF NOT EXISTS idx_portable_attestations_category ON portable_attestations(category);
+
   CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT,
@@ -1098,6 +1113,65 @@ export class SqliteStore {
     return Number(info.changes) > 0;
   }
 
+  // ─── Portable attestations — Phase 5.9 ────────────────────────────────
+
+  async savePortableAttestation(token) {
+    await this.init();
+    if (!token?.tokenId) throw new Error('portable attestation requires tokenId.');
+    this._upsert(
+      'portable_attestations',
+      [
+        'token_id',
+        'worker_id',
+        'category',
+        'status',
+        'tier',
+        'issued_at',
+        'expires_at',
+        'signed_at',
+        'json'
+      ],
+      [
+        token.tokenId,
+        token.workerId ?? null,
+        token.category ?? null,
+        token.status ?? 'pending',
+        token.tier ?? null,
+        token.issuedAt ?? null,
+        token.expiresAt ?? null,
+        token.signedAt ?? null,
+        JSON.stringify(token)
+      ]
+    );
+    return token;
+  }
+
+  async readPortableAttestation(tokenId) {
+    await this.init();
+    return this._readOne('portable_attestations', 'token_id', tokenId);
+  }
+
+  async listPortableAttestations({ workerId, category, status } = {}) {
+    await this.init();
+    const clauses = [];
+    const values = [];
+    if (workerId) {
+      clauses.push('worker_id = ?');
+      values.push(workerId);
+    }
+    if (category) {
+      clauses.push('category = ?');
+      values.push(category);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      values.push(status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `SELECT json FROM portable_attestations ${where} ORDER BY issued_at DESC`;
+    return all(this.db.prepare(sql).all(...values));
+  }
+
   // ─── Control planes / simulation reports / manifests / chunks ─────────
   //
   // Less-used surfaces; we mirror BosStore's methods for compatibility
@@ -1350,6 +1424,7 @@ export class SqliteStore {
       sections.attestations = sweep('attestations', ['subject_id']);
       sections.phoneOtps = sweep('phone_otps', ['identity_id']);
       sections.earningsLog = sweep('earnings_log', ['identity_id']);
+      sections.portableAttestations = sweep('portable_attestations', ['worker_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

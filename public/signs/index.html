@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Sign a Bharat OS delivery receipt</title>
+<link rel="stylesheet" href="/signs/signs.css" />
+</head>
+<body>
+<main id="root">
+<header>
+  <h1>Sign a delivery receipt</h1>
+  <p class="muted">Bharat OS records what others sign about this delivery. We do not verify identity (Aadhaar does that) and do not guarantee performance (the platform that dispatched the job does that).</p>
+</header>
+
+<section id="loading">Loading receipt…</section>
+
+<section id="ready" hidden>
+  <p>Your delivery from <strong id="worker-name">someone</strong>. Sign a portable receipt so this delivery counts toward their work history across platforms?</p>
+
+  <div class="tier-buttons">
+    <button data-tier="0" class="tier tier-0">
+      <span class="tier-tag">Quick tap</span>
+      Sign anonymously
+      <span class="weight-note">Counts toward volume only.</span>
+    </button>
+    <button data-tier="1" class="tier tier-1">
+      <span class="tier-tag">+30 seconds</span>
+      Verify via OTP
+      <span class="weight-note">Proves you have a real phone.</span>
+    </button>
+    <button data-tier="2" class="tier tier-2">
+      <span class="tier-tag">Bharat OS users</span>
+      Sign with my Bharat OS identity
+      <span class="weight-note">Strongest. Your record is on the line.</span>
+    </button>
+  </div>
+</section>
+
+<section id="tier1-phone" hidden>
+  <h2>Verify your phone</h2>
+  <p>Enter your number; we'll text a 6-digit code.</p>
+  <input id="tier1-phone-input" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit number or +91…" />
+  <button id="tier1-send">Send code</button>
+</section>
+
+<section id="tier1-code" hidden>
+  <h2>Enter the code</h2>
+  <p>Sent to <span id="tier1-phone-masked"></span>. Valid for 5 minutes.</p>
+  <input id="tier1-code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+  <button id="tier1-verify">Verify &amp; sign</button>
+</section>
+
+<section id="done" hidden>
+  <h2>Signed ✓</h2>
+  <p>Thanks. This delivery now counts toward the worker's portable history.</p>
+</section>
+
+<section id="error" hidden>
+  <h2>Couldn't sign</h2>
+  <p id="error-message">Please try again later.</p>
+</section>
+
+</main>
+<script src="/signs/signs.js"></script>
+</body>
+</html>

@@ -2,11 +2,12 @@
 
 ## Status
 
-**Proposed.** Design captured for review; implementation is not yet
-greenlit. Recommended sequencing: Phase 6.0 (ADR 0096, single-player
-worker tools) should ship BEFORE this phase so workers are on the
-platform with single-player value before the two-sided attestation
-flow turns on.
+**Accepted — shipped.** Phase 6.0 (ADR 0096) shipped first across
+Phases 6.0a / 6.0b / 6.0c, giving workers single-player reasons to
+install Bharat OS. Phase 5.9 then layered the two-sided attestation
+flow on top, as planned. The full QR-handshake flow with three
+signing tiers, additive-only attestations, anti-fraud detection,
+and the no-install-required `/sign/<tokenId>` static page is live.
 
 ## Context
 

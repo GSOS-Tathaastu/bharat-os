@@ -117,6 +117,18 @@ import {
   monthlyStatement
 } from '../phase1/earnings-log.mjs';
 import { taxSummary } from '../phase1/tax-summary.mjs';
+import {
+  aggregateAttestationsForWorker,
+  ATTESTATION_CATEGORIES,
+  ATTESTATION_TIERS,
+  buildTier2SignaturePayload,
+  createPortableAttestationToken,
+  PORTABLE_ATTESTATION_PROTOCOL_VERSION,
+  signTier0,
+  signTier1,
+  verifyTier2
+} from '../phase1/portable-attestation.mjs';
+import { sha256Hex } from './core.mjs';
 import { resetCircuit } from './sms-provider.mjs';
 import {
   applyRetention,
@@ -177,6 +189,7 @@ const consoleRoot = path.join(repoRoot, 'public/operator-console');
 const shellRoot = path.join(repoRoot, 'public/shell');
 const verifyRoot = path.join(repoRoot, 'public/verify');
 const legalRoot = path.join(repoRoot, 'public/legal');
+const signsRoot = path.join(repoRoot, 'public/signs');
 
 function jsonResponse(response, statusCode, value) {
   const body = JSON.stringify(value, null, 2);
@@ -993,6 +1006,36 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 5.9 — `/sign/<tokenId>` lands the customer on the
+      // minimal signing page. The HTML is purely static; the page
+      // discovers the tokenId from `location.pathname` and calls
+      // the API endpoints over fetch. No Bharat OS install required.
+      if (request.method === 'GET' && url.pathname.startsWith('/sign/')) {
+        // Every /sign/* path renders the same index.html shell;
+        // the tokenId is read client-side from the URL. This avoids
+        // having to template the HTML server-side.
+        const requestedPath = path.resolve(signsRoot, 'index.html');
+        if (!requestedPath.startsWith(signsRoot)) {
+          return notFound(response, url.pathname);
+        }
+        await staticResponse(response, requestedPath);
+        return;
+      }
+      // Static assets under /signs/ (CSS, JS) served the same way
+      // as /shell/.
+      if (request.method === 'GET' && url.pathname.startsWith('/signs/')) {
+        const relativePath =
+          url.pathname === '/signs/'
+            ? 'index.html'
+            : decodeURIComponent(url.pathname.slice('/signs/'.length));
+        const requestedPath = path.resolve(signsRoot, relativePath);
+        if (!requestedPath.startsWith(signsRoot)) {
+          return notFound(response, url.pathname);
+        }
+        await staticResponse(response, requestedPath);
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname.startsWith('/console/')) {
         const relativePath = url.pathname === '/console/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/console/'.length));
         const requestedPath = path.resolve(consoleRoot, relativePath);
@@ -1098,6 +1141,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'DELETE /api/identities/:identityId/earnings/:entryId',
             'GET /api/identities/:identityId/mesh/summary',
             'GET /api/identities/:identityId/tax/summary',
+            'POST /api/portable-attestation/init',
+            'POST /api/portable-attestation/:tokenId/sign-tier0',
+            'POST /api/portable-attestation/:tokenId/sign-tier1/send',
+            'POST /api/portable-attestation/:tokenId/sign-tier1/verify',
+            'GET /api/portable-attestation/:tokenId/sign-tier2/payload',
+            'POST /api/portable-attestation/:tokenId/sign-tier2',
+            'GET /api/identities/:identityId/portable-attestation/summary',
+            'GET /sign/:tokenId',
             'DELETE /api/identities/:identityId?confirm=YES_DELETE',
             'GET /api/dpdp/grievance',
             'POST /api/phone-otp/send',
@@ -2824,6 +2875,354 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           summary,
           statement: monthlyStatement(summary)
         });
+        return;
+      }
+
+      // Phase 5.9 — portable work-history attestation endpoints.
+      //
+      // The worker-initiated QR handshake flow:
+      //   1. Worker: POST /api/portable-attestation/init
+      //      → returns { tokenId, signUrl, qrPayload }
+      //      Worker displays the QR for the customer.
+      //   2. Customer scans QR → opens /sign/<tokenId> in their
+      //      browser (no Bharat OS install needed).
+      //   3. Customer picks a signing tier:
+      //      • Tier 0 (anonymous tap):
+      //        POST /api/portable-attestation/:tokenId/sign-tier0
+      //      • Tier 1 (OTP confirmed) — two steps:
+      //        POST /api/portable-attestation/:tokenId/sign-tier1/send
+      //          (body: { phone })
+      //        POST /api/portable-attestation/:tokenId/sign-tier1/verify
+      //          (body: { phone, code })
+      //      • Tier 2 (Bharat OS signed) — customer signs locally
+      //        and submits:
+      //        POST /api/portable-attestation/:tokenId/sign-tier2
+      //          (body: { customerId, signature })
+      //   4. Worker views summary on the Earn tab:
+      //      GET /api/identities/:id/portable-attestation/summary
+      //
+      // ADDITIVE-ONLY — there is no negative-attestation path.
+      // No "rate one star" route. Absence of signatures is not a
+      // negative signal.
+
+      // POST /api/portable-attestation/init
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 3 &&
+        parts[2] === 'init' &&
+        request.method === 'POST'
+      ) {
+        const body = await readRequestJson(request).catch(() => ({}));
+        const identity = await store.readIdentity(body.workerId).catch(() => null);
+        if (!identity) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'unknown_worker',
+              message: 'workerId must refer to an existing identity'
+            }
+          });
+          return;
+        }
+        let token;
+        try {
+          token = createPortableAttestationToken({
+            workerId: body.workerId,
+            category: body.category,
+            workerGps: body.workerGps,
+            ttlSeconds: body.ttlSeconds
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_token_init', message: error.message }
+          });
+          return;
+        }
+        await store.savePortableAttestation(token);
+        jsonResponse(response, 201, {
+          ok: true,
+          tokenId: token.tokenId,
+          expiresAt: token.expiresAt,
+          signUrl: `/sign/${encodeURIComponent(token.tokenId)}`,
+          qrPayload: token.tokenId,
+          disclaimer:
+            'Bharat OS records what others sign about this delivery. ' +
+            'We do NOT verify identity (Aadhaar does that) and do NOT ' +
+            'guarantee performance (the platform that dispatched the ' +
+            'job does that).'
+        });
+        return;
+      }
+
+      // Helper for the three sign-tier endpoints: load + validate
+      // the token, return { token, ready: true } or write the
+      // appropriate error response.
+      async function loadPendingToken(tokenIdRaw) {
+        const tokenId = decodeURIComponent(tokenIdRaw);
+        const token = await store.readPortableAttestation(tokenId).catch(() => null);
+        if (!token) {
+          notFound(response);
+          return null;
+        }
+        if (token.status === 'signed') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'token_already_signed',
+              message: 'This delivery receipt has already been signed.'
+            }
+          });
+          return null;
+        }
+        const now = new Date().toISOString();
+        if (token.expiresAt && now >= token.expiresAt) {
+          jsonResponse(response, 410, {
+            error: {
+              code: 'token_expired',
+              message: 'This delivery receipt has expired.'
+            }
+          });
+          return null;
+        }
+        return token;
+      }
+
+      // POST /api/portable-attestation/:tokenId/sign-tier0
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 4 &&
+        parts[3] === 'sign-tier0' &&
+        request.method === 'POST'
+      ) {
+        const token = await loadPendingToken(parts[2]);
+        if (!token) return;
+        // Use the rate-limiter's `clientKey` as the IP source so we
+        // honour the same X-Forwarded-For trust setting.
+        const ip = clientKey(request, { trustProxy: TRUST_PROXY });
+        const signed = signTier0(token, { clientIp: ip });
+        await store.savePortableAttestation(signed);
+        jsonResponse(response, 200, { ok: true, attestation: signed });
+        return;
+      }
+
+      // POST /api/portable-attestation/:tokenId/sign-tier1/send
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 5 &&
+        parts[3] === 'sign-tier1' &&
+        parts[4] === 'send' &&
+        request.method === 'POST'
+      ) {
+        const token = await loadPendingToken(parts[2]);
+        if (!token) return;
+        const body = await readRequestJson(request).catch(() => ({}));
+        const phone = normalisePhone(body.phone);
+        if (!phone) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_phone', message: 'Provide a valid phone number.' }
+          });
+          return;
+        }
+        const otp = createPhoneOtp({
+          identityId: token.workerId,
+          phone,
+          purpose: 'sensitive_action'
+        });
+        const { code, ...persisted } = otp;
+        await store.savePhoneOtp(persisted);
+        const sms = await sendSms({
+          phone,
+          body:
+            `Bharat OS sign code: ${code}. Confirms a delivery receipt. ` +
+            `Valid 5 minutes. Ignore if you didn't ask for this.`
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          otpId: persisted.otpId,
+          expiresAt: persisted.expiresAt,
+          phoneMasked: persisted.phoneMasked,
+          providerMessageId: sms.providerMessageId
+        });
+        return;
+      }
+
+      // POST /api/portable-attestation/:tokenId/sign-tier1/verify
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 5 &&
+        parts[3] === 'sign-tier1' &&
+        parts[4] === 'verify' &&
+        request.method === 'POST'
+      ) {
+        const token = await loadPendingToken(parts[2]);
+        if (!token) return;
+        const body = await readRequestJson(request).catch(() => ({}));
+        if (!body.otpId || !body.code) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'missing_fields',
+              message: 'otpId and code are required.'
+            }
+          });
+          return;
+        }
+        const otp = await store.readPhoneOtp(body.otpId).catch(() => null);
+        if (!otp) return notFound(response);
+        const result = verifyPhoneOtp(otp, body.code);
+        await store.savePhoneOtp(result.otp);
+        if (result.status !== 'verified') {
+          jsonResponse(response, 400, {
+            ok: false,
+            status: result.status,
+            otp: {
+              otpId: result.otp.otpId,
+              status: result.otp.status,
+              attempts: result.otp.attempts,
+              expiresAt: result.otp.expiresAt
+            }
+          });
+          return;
+        }
+        const signed = signTier1(token, { customerPhone: otp.phone });
+        await store.savePortableAttestation(signed);
+        jsonResponse(response, 200, { ok: true, attestation: signed });
+        return;
+      }
+
+      // GET /api/portable-attestation/:tokenId/sign-tier2/payload
+      // Returns the canonical payload string the customer's Bharat
+      // OS app must sign with their private key. Decoupling the
+      // payload from the POST lets clients fetch + sign offline
+      // (e.g., behind a captive portal) before submitting.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 5 &&
+        parts[3] === 'sign-tier2' &&
+        parts[4] === 'payload' &&
+        request.method === 'GET'
+      ) {
+        const token = await loadPendingToken(parts[2]);
+        if (!token) return;
+        jsonResponse(response, 200, {
+          ok: true,
+          tokenId: token.tokenId,
+          payload: buildTier2SignaturePayload(token),
+          protocolVersion: PORTABLE_ATTESTATION_PROTOCOL_VERSION
+        });
+        return;
+      }
+
+      // POST /api/portable-attestation/:tokenId/sign-tier2
+      // Body: { customerId, signature }
+      // The customer's Bharat OS app has already signed
+      // buildTier2SignaturePayload(token) locally and POSTs the
+      // resulting signature. The server verifies via the customer's
+      // public record.
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'portable-attestation' &&
+        parts.length === 4 &&
+        parts[3] === 'sign-tier2' &&
+        request.method === 'POST'
+      ) {
+        const token = await loadPendingToken(parts[2]);
+        if (!token) return;
+        const body = await readRequestJson(request).catch(() => ({}));
+        if (!body.customerId || !body.signature) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'missing_fields',
+              message: 'customerId and signature are required.'
+            }
+          });
+          return;
+        }
+        const customer = await store.readIdentity(body.customerId).catch(() => null);
+        if (!customer) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_customer', message: 'customerId does not resolve to an identity' }
+          });
+          return;
+        }
+        if (customer.id === token.workerId) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'self_sign',
+              message: 'A worker cannot sign their own work record.'
+            }
+          });
+          return;
+        }
+        // The customer's Bharat OS app signed
+        // `buildTier2SignaturePayload(token)` locally with their
+        // Ed25519 private key. Server only needs the public record
+        // to verify — never sees / handles the customer's private
+        // key (the §15-aligned model).
+        const payloadText = buildTier2SignaturePayload(token);
+        const attestation = {
+          ...token,
+          status: 'signed',
+          tier: ATTESTATION_TIERS.BHARAT_OS_SIGNED,
+          signerData: {
+            customerId: customer.id,
+            payloadHash: sha256Hex(payloadText)
+          },
+          signature: body.signature,
+          signedAt: new Date().toISOString()
+        };
+        const verify = verifyTier2(attestation, customer);
+        if (!verify.ok) {
+          jsonResponse(response, 400, {
+            error: { code: 'signature_invalid', message: verify.reason }
+          });
+          return;
+        }
+        await store.savePortableAttestation(attestation);
+        jsonResponse(response, 200, { ok: true, attestation });
+        return;
+      }
+
+      // GET /api/identities/:id/portable-attestation/summary?category=
+      if (
+        parts[0] === 'api' &&
+        parts[1] === 'identities' &&
+        parts.length === 5 &&
+        parts[3] === 'portable-attestation' &&
+        parts[4] === 'summary' &&
+        request.method === 'GET'
+      ) {
+        const workerId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(workerId).catch(() => null);
+        if (!identity) return notFound(response);
+        const category = url.searchParams.get('category') ?? undefined;
+        if (category && !ATTESTATION_CATEGORIES.includes(category)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_category',
+              message: `category must be one of: ${ATTESTATION_CATEGORIES.join(', ')}`
+            }
+          });
+          return;
+        }
+        if (typeof store.listPortableAttestations !== 'function') {
+          jsonResponse(response, 200, {
+            summary: aggregateAttestationsForWorker([], { workerId, category })
+          });
+          return;
+        }
+        const attestations = await store.listPortableAttestations({
+          workerId,
+          category,
+          status: 'signed'
+        });
+        const summary = aggregateAttestationsForWorker(attestations, {
+          workerId,
+          category
+        });
+        jsonResponse(response, 200, { summary });
         return;
       }
 
