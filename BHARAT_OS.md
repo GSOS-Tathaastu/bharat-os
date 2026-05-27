@@ -2106,13 +2106,23 @@ code lands; do not create a separate `STATUS.md` (§16).
   opt-in flow + storage + audit trail + DPDP cascade is real;
   worker can install (download + SHA-256-verify + persist to OPFS) +
   uninstall, but can't yet *use* the model for inference.
-  **Remaining**: 9.0c runtime adapter layer wrapping llama.cpp-wasm /
-  MLC-LLM / ONNX Runtime Web (~3-4 wks — **first introduction of
-  third-party runtime dependencies**; needs its own ADR for the
-  choice + the distroless-deploy trade-off); 9.0d integration with
+  **9.0c direction decided 2026-05-25**: ship **llama.cpp-wasm
+  ONLY** for v1 (universal CPU compatibility, accept 3-10 tok/s on
+  phones; single third-party dep; works without WebGPU on every
+  Indian phone the shell already targets); **lazy-load the runtime
+  on first Install tap** matching the Phase 2a.8 Tesseract.js
+  pattern — `/shell/` cache stays unchanged for users who never
+  install an SLM, runtime fetched from CDN/operator-host mirror
+  only when the worker actually opts in. MLC-LLM (WebGPU) deferred
+  as future polish once we have a Snapdragon 8 Gen 2+ test device.
+  ONNX Runtime Web not pursued — middle-tier without a clear win.
+  Still needs ADR 0114 for the choice rationale + distroless-deploy
+  trade-off before any code. **Remaining**: 9.0c runtime adapter
+  (~2-3 wks now, smaller than the original 3-4 wk estimate because
+  scope dropped from three runtimes to one); 9.0d integration with
   Phase 3.x federated rounds + Phase 6.0b mesh-inference workload
   events finally recording real ticks (~1 wk). Total remaining:
-  ~4-5 weeks.
+  ~3-4 weeks.
 - **Phase 9.1 (sketched)** — sponsored federated-round API. Depends on
   Phase 9.0. Sells privacy-preserving fine-tuning to banks / hospitals
   / government as a paid service routing through the operator network.

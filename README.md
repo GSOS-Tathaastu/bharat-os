@@ -197,9 +197,15 @@ Implemented pieces:
   runtime dependency yet** — shell uses only browser-native
   `fetch` + `crypto.subtle` + `navigator.storage`; zero-dep posture
   preserved. **Phase 9.0 progress ~30%**: 9.0a + 9.0b are storage +
-  UI scaffolding; 9.0c runtime adapter (~3-4 wks, third-party-dep
-  ADR required) is the bulk of remaining; 9.0d federated-round +
-  mesh-inference event integration (~1 wk).
+  UI scaffolding; 9.0c runtime adapter decided 2026-05-25 — ship
+  **llama.cpp-wasm only** for v1 (universal CPU compat; 3-10 tok/s
+  accepted; single third-party dep), **lazy-loaded on first Install
+  tap** (Phase 2a.8 Tesseract.js pattern; `/shell/` cache unchanged
+  for users who never install an SLM). MLC-LLM (WebGPU) deferred
+  as future polish; ONNX Runtime Web dropped. ADR 0114 required
+  for the choice + distroless-deploy trade-off before any code.
+  ~2-3 wks. 9.0d federated-round + mesh-inference integration ~1
+  wk.
 - Phase 9.0a **Tier-4 SLM model-pack registry — admin-curated
   metadata, public read, compatibility filter; no runtime yet**
   — First sub-phase of the Phase 9.0 arc (ADR 0107 Proposed).
