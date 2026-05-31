@@ -108,6 +108,17 @@ export function createFederatedRound({
   deadlineSecondsFromNow = 24 * 60 * 60,
   aggregationMode = 'hash_combiner',
   contributorBudget = DEFAULT_FEDERATED_BUDGET,
+  // Phase 9.0d — optional SLM round target. When set, the round is
+  // a fine-tuning task for a specific Tier-4 SLM pack (Phase 9.0a
+  // registry id). Workers participating in the round MUST have the
+  // pack installed (Phase 9.0b record) before they can submit a
+  // gradient update. `targetTask` is a free-form label the round
+  // creator uses to name what the fine-tuning is optimising for
+  // (e.g. "indic-intent-v1", "kirana-tone-v2"). `loraConfig` is
+  // an opaque JSON the worker passes to runtime.computeGradients().
+  slmModelPackId = null,
+  targetTask = null,
+  loraConfig = null,
   at = nowIso()
 } = {}) {
   if (!createdBy) throw new Error('createdBy identity ID is required.');
@@ -139,6 +150,11 @@ export function createFederatedRound({
       windowHours: Math.max(1, Number(contributorBudget?.windowHours ?? DEFAULT_FEDERATED_BUDGET.windowHours)),
       epsilonCap: validateEpsilon(contributorBudget?.epsilonCap ?? DEFAULT_FEDERATED_BUDGET.epsilonCap)
     },
+    // Phase 9.0d — SLM round target, all null for legacy classifier
+    // rounds. When non-null the round is a Tier-4 SLM fine-tune.
+    slmModelPackId: slmModelPackId == null ? null : String(slmModelPackId).slice(0, 160),
+    targetTask: targetTask == null ? null : String(targetTask).slice(0, 80),
+    loraConfig: loraConfig == null ? null : loraConfig,
     createdAt: at,
     deadlineAt,
     openedAt: null,
@@ -574,6 +590,12 @@ export function describeRound(round) {
     contributorBudget: round.contributorBudget ?? null,
     deadlineAt: round.deadlineAt,
     aggregatedModelHash: round.aggregatedModelHash,
-    aggregatedGradientLength: round.aggregatedGradientLength ?? null
+    aggregatedGradientLength: round.aggregatedGradientLength ?? null,
+    // Phase 9.0d — SLM round target. Surface to the FE so workers
+    // can tell which rounds are SLM-fine-tunes vs legacy classifier
+    // rounds + filter to packs they have installed.
+    slmModelPackId: round.slmModelPackId ?? null,
+    targetTask: round.targetTask ?? null,
+    loraConfig: round.loraConfig ?? null
   };
 }

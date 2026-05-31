@@ -470,3 +470,118 @@ export function useRemoveSlmInstall() {
     }
   });
 }
+
+// --- Federated rounds (Phase 3.x + 9.0d SLM extension) ---------------
+export interface FederatedRound {
+  roundId: string;
+  status: 'created' | 'open' | 'closed' | 'completed' | 'expired';
+  modelName: string;
+  createdBy: string;
+  baselineModelHash: string;
+  maxParticipants: number;
+  updateCount: number;
+  maxEpsilon: number;
+  epsilonSpent: number;
+  payoutPaisePerUpdate: number;
+  deadlineAt: string;
+  // Phase 9.0d additions:
+  slmModelPackId?: string | null;
+  targetTask?: string | null;
+  loraConfig?: unknown;
+}
+
+export function useFederatedRounds() {
+  return useQuery({
+    queryKey: ['federated-rounds'],
+    queryFn: () => api<{ rounds: FederatedRound[] }>('/api/federated/rounds').then((r) => r.rounds)
+  });
+}
+
+/**
+ * Phase 9.0d — server-side sign-and-submit gradient update.
+ * Body matches the existing Phase 3.x endpoint shape. Server signs
+ * with the contributor's stored private key (still server-side in
+ * Phase 2a; moves to device hardware keystore in Phase 2b per ADR
+ * 0066) and on accept auto-creates a `federated_round` mesh-
+ * contribution event for the round's per-update payout.
+ */
+export function useSubmitFederatedUpdate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      roundId,
+      contributorId,
+      baselineModelHash,
+      gradientHash,
+      gradientBase64,
+      gradientLength,
+      epsilon,
+      sampleCount
+    }: {
+      roundId: string;
+      contributorId: string;
+      baselineModelHash: string;
+      gradientHash: string;
+      gradientBase64: string;
+      gradientLength: number;
+      epsilon: number;
+      sampleCount: number;
+    }) =>
+      api(
+        `/api/federated/rounds/${encodeURIComponent(roundId)}/updates/sign-and-submit`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            contributorId,
+            baselineModelHash,
+            gradientHash,
+            gradientBytesBase64: gradientBase64,
+            gradientLength,
+            differentialPrivacyEpsilon: epsilon,
+            sampleCount
+          })
+        }
+      ),
+    onSuccess: (_data, { contributorId }) => {
+      qc.invalidateQueries({ queryKey: ['federated-rounds'] });
+      qc.invalidateQueries({ queryKey: ['mesh-balance', contributorId] });
+      qc.invalidateQueries({ queryKey: ['mesh-summary', contributorId] });
+    }
+  });
+}
+
+// --- Mesh-contribution event recording (Phase 9.0d real ticks) --------
+
+/**
+ * Record a mesh-contribution event. Phase 9.0d wires this from the
+ * Try Prompt UI so every `runtime.generate()` call records a real
+ * inference tick instead of the demo-seeded events that have been
+ * filling the ledger until now.
+ */
+export function useRecordMeshEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      operatorId: string;
+      workloadType: 'inference' | 'federated_round';
+      tokens?: number;
+      payoutPaise?: number;
+      roundId?: string;
+    }) =>
+      api('/api/mesh/contributions', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...body,
+          // Demo defaults — the worker is assumed to be in a chargeable
+          // state when actively using the runtime in the browser.
+          charging: true,
+          wifi: true,
+          batteryPercent: 100
+        })
+      }),
+    onSuccess: (_data, { operatorId }) => {
+      qc.invalidateQueries({ queryKey: ['mesh-balance', operatorId] });
+      qc.invalidateQueries({ queryKey: ['mesh-summary', operatorId] });
+    }
+  });
+}

@@ -78,6 +78,42 @@ test('createFederatedRound emits a versioned, deterministic round id with a dead
   assert.equal(round.epsilonSpent, 0);
   assert.equal(round.payoutPaisePerUpdate, FEDERATED_PAYOUT_PAISE_PER_UPDATE);
   assert.ok(round.roundId.startsWith('bos:fed-round:'));
+  // Phase 9.0d — SLM target fields default to null on legacy rounds.
+  assert.equal(round.slmModelPackId, null);
+  assert.equal(round.targetTask, null);
+  assert.equal(round.loraConfig, null);
+});
+
+test('createFederatedRound carries SLM target fields when provided (Phase 9.0d)', () => {
+  const researcher = createIdentity({ displayName: 'R' });
+  const round = createFederatedRound({
+    createdBy: researcher.id,
+    modelName: 'phi-3-mini-indic-intent',
+    baselineModelHash: 'sha256:baseline',
+    slmModelPackId: 'bos:slm:phi-3-mini-4k-q4_k_m',
+    targetTask: 'indic-intent-routing',
+    loraConfig: { rank: 8, target: ['q_proj', 'v_proj'] }
+  });
+  assert.equal(round.slmModelPackId, 'bos:slm:phi-3-mini-4k-q4_k_m');
+  assert.equal(round.targetTask, 'indic-intent-routing');
+  assert.deepEqual(round.loraConfig, { rank: 8, target: ['q_proj', 'v_proj'] });
+});
+
+test('describeRound surfaces SLM target fields (Phase 9.0d)', async () => {
+  const { describeRound } = await import('../../src/phase1/federated-round.mjs');
+  const researcher = createIdentity({ displayName: 'R' });
+  const round = createFederatedRound({
+    createdBy: researcher.id,
+    modelName: 'm',
+    baselineModelHash: 'sha256:b',
+    slmModelPackId: 'bos:slm:test',
+    targetTask: 'task-a',
+    loraConfig: { rank: 4 }
+  });
+  const desc = describeRound(round);
+  assert.equal(desc.slmModelPackId, 'bos:slm:test');
+  assert.equal(desc.targetTask, 'task-a');
+  assert.deepEqual(desc.loraConfig, { rank: 4 });
 });
 
 test('round lifecycle: created → accepting_updates → completed', () => {

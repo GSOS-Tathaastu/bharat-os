@@ -527,6 +527,29 @@ await store.saveMeshContributionEvent(priyaFederatedEvent);
 
 log(`  federated round: 1 (${federatedRound.modelName}) with 1 update from Priya`);
 
+// Phase 9.0d — SLM federated round. Targets the Phi-3-mini pack
+// registered separately via the admin endpoint (or registered
+// dynamically by an operator). The round is OPEN with no updates
+// yet so the /app/labs/ federated card has something to surface
+// even on a fresh seed.
+const slmFederatedRound = openRound(
+  createFederatedRound({
+    createdBy: sita.id,
+    modelName: 'phi-3-mini-indic-intent',
+    baselineModelHash: 'sha256:baseline-phi-3-mini-indic-intent',
+    maxParticipants: 100,
+    maxEpsilon: 1.0,
+    payoutPaisePerUpdate: 500,
+    deadlineSecondsFromNow: 14 * 24 * 60 * 60,
+    aggregationMode: 'fedavg',
+    slmModelPackId: 'bos:slm:phi-3-mini-4k-q4_k_m',
+    targetTask: 'indic-intent-routing',
+    loraConfig: { rank: 8, target: ['q_proj', 'v_proj'] }
+  })
+);
+await store.saveFederatedRound(slmFederatedRound);
+log(`  SLM federated round: 1 (${slmFederatedRound.modelName} → ${slmFederatedRound.slmModelPackId})`);
+
 // ─── Bootstrap simulation report ────────────────────────────────────────────
 const bootstrap = simulateDemandBootstrap({
   nodeCount: 100,

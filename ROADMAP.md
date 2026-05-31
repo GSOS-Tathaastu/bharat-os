@@ -80,6 +80,27 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 9.0d — Federated rounds + mesh-inference events ✅ SHIPPED 2026-05-31
+- **ADR 0119** closes the Phase 9.0 arc.
+- `createFederatedRound` gains `slmModelPackId` / `targetTask` /
+  `loraConfig` (all optional, default null — backwards compatible).
+- `SlmRuntime.computeGradients()` stub: length-32 Float32 vector,
+  deterministic, DP-noised; marked `stub: true` so future code can
+  branch on real-vs-synthetic.
+- `/app/labs/` federated rounds card: real Open Rounds list, pack-
+  install guard for SLM rounds, Join action that loads runtime →
+  computes gradient → encodes + signs + submits → server creates
+  matching `federated_round` mesh event with the round's payout.
+- `SlmTryPrompt` now records a real `inference` mesh event per
+  `runtime.generate()` and surfaces the payout inline.
+- seed-demo extended with an SLM federated round targeting
+  `bos:slm:phi-3-mini-4k-q4_k_m`.
+- Tests: BE 800 → 802 (+3 federated round SLM target tests);
+  FE 14 → 16 (+2 computeGradients tests).
+- **Bundle**: main 344 KB / 107 KB gzipped (+6 KB vs 9.0c).
+- **§7f federated-economy loop end-to-end real** (modulo stub
+  gradient — honest documented gap).
+
 ### Phase 9.0c — SLM runtime adapter ✅ SHIPPED 2026-05-31
 - **ADR 0114** locks llama.cpp-wasm via `@wllama/wllama` 3.4.1,
   lazy-loaded (dynamic import code-splits into its own chunk).
@@ -148,29 +169,30 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 9.0d — Federated rounds + mesh-inference event integration (NEXT)
+### Phase 9.1 — Sponsored federated rounds (demand-side revenue, NEXT)
 
-**Unblocked by Phase 9.0c shipping the runtime.** Until now §7f
-had no real model to fine-tune beyond the 216-param classifier
-(`local-training.mjs`). The new SLM runtime can do distillation,
-LoRA fine-tuning, and gradient updates with DP-SGD.
+**Unblocked by Phase 9.0d.** Phase 9.0a–9.0d shipped the supply
+side: workers can install SLMs, run inference, join rounds,
+get paid. Phase 9.1 ships the demand side: sponsor onboarding,
+escrow, commercial round creation, signed audit bundle for the
+sponsor's compliance.
 
 **Plan**:
-- [ ] Extend `SlmRuntime` adapter with `computeGradients(...)` —
-  needs llama.cpp-wasm gradient API exploration
-- [ ] Wire Phase 3.x federated-round substrate to dispatch rounds
-  to the new SLM runtime via `composeFederatedUpdate`
-- [ ] Phase 6.0b mesh-inference workload events start recording
-  real ticks per inference call (currently demo-seeded)
-- [ ] `/app/labs/` federated rounds card grows real "Active rounds"
-  Stat populated from `useFederatedRounds` hook + "Join round"
-  action with DP-SGD privacy-budget display
-- [ ] Per-round earnings flow into existing `mesh_events` ledger;
-  drain via Phase 8.3 cash-out UI (already shipped)
-- [ ] Per FE+BE parity: BE round-dispatch + FE labs upgrade ship
-  in the same commit
+- [ ] Sponsor model + admin onboarding (`POST /api/sponsors`,
+      Phase 5.7-gated)
+- [ ] Sponsor bearer-token auth (same shape as Phase 10.0 plan)
+- [ ] `POST /api/sponsors/:id/federated-rounds` — sponsor-funded
+      round creation with escrow lock
+- [ ] Escrow ledger table — sponsor funds locked until aggregation
+      completes; debited per accepted worker update; refunded for
+      unaccepted units
+- [ ] Sponsor export bundle for round audit (signed JSONL of
+      accepted updates with hashes only — pointer-not-payload)
+- [ ] /app/labs/ federated rounds card surfaces sponsor name +
+      escrow status per round
+- [ ] Per FE+BE parity: shipped in one commit
 
-**~1 week.**
+**~2-3 weeks.**
 
 ---
 

@@ -112,6 +112,53 @@ describe('runtime.generate', () => {
   });
 });
 
+describe('runtime.computeGradients (Phase 9.0d stub)', () => {
+  it('returns a stub gradient vector with metadata', async () => {
+    const { loadSlmRuntime } = await import('./slm-runtime');
+    const blob = new Blob([new Uint8Array([0])]);
+    mockLoadModel.mockResolvedValue(undefined);
+    const runtime = await loadSlmRuntime({ ggufBytes: blob });
+
+    const result = await runtime.computeGradients({
+      samples: [
+        { prompt: 'hi', completion: 'hello' },
+        { prompt: 'bye', completion: 'goodbye' }
+      ],
+      targetTask: 'demo-task',
+      epsilon: 0.5
+    });
+
+    expect(result.vector).toBeInstanceOf(Float32Array);
+    expect(result.vector.length).toBe(32);
+    expect(result.samples).toBe(2);
+    expect(result.epsilonSpent).toBe(0.5);
+    expect(result.stub).toBe(true);
+  });
+
+  it('produces deterministic vectors for the same (family, task, samples) — modulo DP noise', async () => {
+    const { loadSlmRuntime } = await import('./slm-runtime');
+    const blob = new Blob([new Uint8Array([0])]);
+    mockLoadModel.mockResolvedValue(undefined);
+    const runtime = await loadSlmRuntime({ ggufBytes: blob });
+
+    const args = {
+      samples: [{ prompt: 'p', completion: 'c' }],
+      targetTask: 't',
+      epsilon: 10 // high epsilon -> tiny noise
+    };
+    const a = await runtime.computeGradients(args);
+    const b = await runtime.computeGradients(args);
+
+    // Deterministic base should keep both vectors close in
+    // magnitude (DP noise is small at epsilon=10).
+    const dot = a.vector.reduce((acc, v, i) => acc + v * b.vector[i], 0);
+    const magA = Math.sqrt(a.vector.reduce((acc, v) => acc + v * v, 0));
+    const magB = Math.sqrt(b.vector.reduce((acc, v) => acc + v * v, 0));
+    const cosineSim = dot / (magA * magB);
+    expect(cosineSim).toBeGreaterThan(0.95);
+  });
+});
+
 describe('runtime.unload', () => {
   it('calls wllama.exit()', async () => {
     const { loadSlmRuntime } = await import('./slm-runtime');

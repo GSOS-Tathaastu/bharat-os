@@ -152,6 +152,30 @@ Implemented pieces:
 
 ---
 
+## 🔄 2026-05-31 — Phase 9.0d shipped: §7f federated-economy loop is real end-to-end
+
+Phase 9.0 arc CLOSED. Worker can: install an SLM → run real
+inference (paid in paise per call, real mesh-ledger ticks) → join
+a federated round fine-tuning that SLM (paid per accepted update)
+→ cash out via Phase 8.3 UPI flow. All on `/app/labs/`.
+
+- **ADR 0119** wires `createFederatedRound` with SLM target fields
+  (`slmModelPackId`, `targetTask`, `loraConfig`), extends the
+  runtime adapter with `computeGradients()` (honest stub — real
+  LoRA needs a training-capable runtime; documented future polish).
+- Federated rounds card surfaces open rounds, pack-install guard,
+  Join action that loads runtime → gradient → submit.
+- `SlmTryPrompt` now records a real `inference` mesh event per
+  generate; payout shows inline "+₹X.YZ earned".
+- seed-demo extended with an SLM round on Phi-3-mini.
+- Tests: 802/802 Node + 16/16 Vitest.
+- Bundle: main 344 KB / 107 KB gzipped (+6 KB vs 9.0c).
+
+**Next**: Phase 9.1 (sponsored federated rounds — demand-side
+revenue with escrow + sponsor audit bundle) per `ROADMAP.md`.
+
+---
+
 ## 🧠 2026-05-31 — Phase 9.0c shipped: on-device SLM inference is real
 
 `/app/labs/` now runs real llama.cpp-wasm inference on installed

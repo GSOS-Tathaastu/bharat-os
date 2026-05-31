@@ -2,11 +2,20 @@ import { useState, useRef } from 'react';
 import { Action, Card, Evidence, useToast } from '@/components/ui';
 import { readSlmBlob } from '@/lib/opfs';
 import { loadSlmRuntime, type SlmRuntime } from '@/lib/slm-runtime';
+import { useActiveIdentity, useRecordMeshEvent } from '@/lib/hooks';
 
 interface SlmTryPromptProps {
   modelPackId: string;
   family: string;
   onClose?: () => void;
+}
+
+// Rough token estimate — 4 chars per token is a reasonable
+// approximation for English; for vernacular it's closer to 2-3 chars.
+// Phase 9.0d records token counts for §13B inference payouts; the
+// estimate is honest about being an estimate.
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.round(text.length / 4));
 }
 
 const SAMPLE_PROMPTS = [
@@ -21,8 +30,11 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
   const [busy, setBusy] = useState<'idle' | 'loading' | 'generating'>('idle');
   const [loadProgress, setLoadProgress] = useState(0);
   const [generationMs, setGenerationMs] = useState<number | null>(null);
+  const [paisePaid, setPaisePaid] = useState<number | null>(null);
   const runtimeRef = useRef<SlmRuntime | null>(null);
   const show = useToast((s) => s.show);
+  const identity = useActiveIdentity();
+  const recordEvent = useRecordMeshEvent();
 
   async function ensureRuntime(): Promise<SlmRuntime | null> {
     if (runtimeRef.current) return runtimeRef.current;
@@ -60,6 +72,7 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
     setOutput('');
     setBusy('generating');
     setGenerationMs(null);
+    setPaisePaid(null);
     const startedAt = performance.now();
     try {
       const text = await runtime.generate({
@@ -69,6 +82,29 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
       });
       setOutput(text);
       setGenerationMs(Math.round(performance.now() - startedAt));
+
+      // Phase 9.0d — record a real mesh-inference event for this
+      // generation. Until now /mesh/balance reflected demo-seeded
+      // events; this is the first time worker activity in /app/
+      // produces real ledger ticks the cash-out flow can drain.
+      if (identity) {
+        const tokensServed = estimateTokens(prompt + text);
+        recordEvent.mutate(
+          {
+            operatorId: identity.id,
+            workloadType: 'inference',
+            tokens: tokensServed
+          },
+          {
+            onSuccess: (data) => {
+              const evt = (data as { event?: { payoutPaise?: number } }).event;
+              if (evt && typeof evt.payoutPaise === 'number') {
+                setPaisePaid(evt.payoutPaise);
+              }
+            }
+          }
+        );
+      }
     } catch (err) {
       show(`Generation failed: ${(err as Error).message}`, 'error');
     } finally {
@@ -132,6 +168,14 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
           {generationMs !== null && (
             <p className="mt-2 text-caption text-text-muted">
               Generated in {generationMs} ms · {modelPackId.replace(/^bos:slm-model-pack:/, '')}
+              {paisePaid !== null && paisePaid > 0 && (
+                <>
+                  {' · '}
+                  <span className="font-semibold text-trust-700">
+                    +₹{(paisePaid / 100).toFixed(2)} earned
+                  </span>
+                </>
+              )}
             </p>
           )}
         </div>

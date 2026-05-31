@@ -2777,7 +2777,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             peerId: body.peerId,
             charging: body.charging,
             wifi: body.wifi,
-            batteryPercent: body.batteryPercent
+            batteryPercent: body.batteryPercent,
+            // Phase 9.0d — propagate explicit payout + round id for
+            // federated_round events; ignored for token/byte-priced
+            // workloads where payout is derived from the rate table.
+            payoutPaise: body.payoutPaise,
+            roundId: body.roundId
           });
           await store.saveMeshContributionEvent(event);
           jsonResponse(response, 201, { ok: true, event });
@@ -2816,7 +2821,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
               payoutPaisePerUpdate: body.payoutPaisePerUpdate,
               deadlineSecondsFromNow: body.deadlineSecondsFromNow,
               aggregationMode: body.aggregationMode,
-              contributorBudget: body.contributorBudget
+              contributorBudget: body.contributorBudget,
+              // Phase 9.0d — optional SLM round target.
+              slmModelPackId: body.slmModelPackId,
+              targetTask: body.targetTask,
+              loraConfig: body.loraConfig
             })
           );
           await store.saveFederatedRound(round);

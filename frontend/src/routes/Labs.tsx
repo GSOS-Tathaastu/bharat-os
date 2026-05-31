@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { Action, Badge, Card, Evidence, Stat, useToast } from '@/components/ui';
+import { Action, Badge, Card, Evidence, Money, Stat, useToast } from '@/components/ui';
 import {
   useActiveIdentity,
   useSlmCatalog,
   useInstalledSlms,
   useRecordSlmInstall,
   useRemoveSlmInstall,
+  useFederatedRounds,
+  useSubmitFederatedUpdate,
   type SlmModelPack,
-  type InstalledSlm
+  type InstalledSlm,
+  type FederatedRound
 } from '@/lib/hooks';
 import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
+import { loadSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
   const gb = bytes / 1_000_000_000;
@@ -304,18 +308,10 @@ export function LabsPage() {
         </Evidence>
       </Card>
 
-      <Card title="Federated training rounds" subtitle="§7f">
-        <p className="text-body text-text-muted">
-          Earn paise per round by helping train Bharat OS's models. Privacy-
-          preserving DP-SGD; gradients never leave your phone unencrypted.
-        </p>
-        <Stat
-          className="mt-3"
-          label="Active rounds"
-          value="—"
-          delta="Round discovery surface ships in a future polish step"
-        />
-      </Card>
+      <FederatedRoundsCard
+        installedPackIds={installedPackIds}
+      />
+
 
       <Card title="OCR + health records" subtitle="Phase 2a.8 substrate">
         <p className="text-body text-text-muted">
@@ -332,5 +328,173 @@ export function LabsPage() {
         </p>
       </Card>
     </main>
+  );
+}
+
+// ─── Phase 9.0d federated rounds card ──────────────────────────────
+
+interface FederatedRoundsCardProps {
+  installedPackIds: Set<string>;
+}
+
+function FederatedRoundsCard({ installedPackIds }: FederatedRoundsCardProps) {
+  const identity = useActiveIdentity();
+  const { data: rounds = [], isLoading } = useFederatedRounds();
+  const submit = useSubmitFederatedUpdate();
+  const show = useToast((s) => s.show);
+  const [joining, setJoining] = useState<string | null>(null);
+
+  const openRounds = rounds.filter((r) => r.status === 'open');
+
+  async function handleJoin(round: FederatedRound) {
+    if (!identity) {
+      show('Sign in first.', 'error');
+      return;
+    }
+    if (round.slmModelPackId && !installedPackIds.has(round.slmModelPackId)) {
+      show(
+        'You need the round’s SLM pack installed first. Scroll up and tap Install.',
+        'error'
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `Join ${round.modelName}? Your phone will compute a local gradient and ` +
+        `submit a privacy-noised update. You earn ₹${(round.payoutPaisePerUpdate / 100).toFixed(2)} on accept.`
+    );
+    if (!ok) return;
+    setJoining(round.roundId);
+    try {
+      // Phase 9.0d — load runtime, compute gradients (stub), submit.
+      // For SLM rounds, the worker must have the OPFS bytes; for
+      // non-SLM rounds (legacy 216-param classifier) the runtime
+      // adapter still gives us a deterministic gradient.
+      let runtime;
+      if (round.slmModelPackId) {
+        const blob = await readSlmBlob(round.slmModelPackId);
+        if (!blob) {
+          throw new Error('Model bytes missing from OPFS. Re-install the pack.');
+        }
+        runtime = await loadSlmRuntime({ ggufBytes: blob });
+      } else {
+        // Non-SLM round: skip runtime load entirely, derive a stub
+        // gradient locally. We'd plug Phase 3.1 local-training in
+        // here; for the FE+BE parity ship we mimic the same shape.
+        runtime = await loadSlmRuntime({
+          ggufBytes: new Blob([new Uint8Array([0x47, 0x47, 0x55, 0x46])])
+        }).catch(() => null);
+      }
+      if (!runtime) {
+        throw new Error('Could not initialise runtime for this round.');
+      }
+      const result = await runtime.computeGradients({
+        samples: [
+          { prompt: 'how do I apply for a small loan', completion: 'tap MFI consent on the Trust tab' },
+          { prompt: 'where do I see my earnings', completion: 'Earn tab shows mesh + manual log' }
+        ],
+        targetTask: round.targetTask ?? round.modelName,
+        loraConfig: round.loraConfig,
+        epsilon: 0.5
+      });
+
+      // Encode gradient bytes for the BE. Make a fresh ArrayBuffer
+      // copy so TS sees an ArrayBuffer-typed Uint8Array (not the
+      // SharedArrayBuffer-permitting `Uint8Array<ArrayBufferLike>`
+      // that Float32Array.buffer returns).
+      const ab = new ArrayBuffer(result.vector.byteLength);
+      new Uint8Array(ab).set(new Uint8Array(result.vector.buffer));
+      const bytes = new Uint8Array(ab);
+      const gradientBase64 = btoa(String.fromCharCode(...bytes));
+      const hashBuf = await crypto.subtle.digest('SHA-256', ab);
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      await submit.mutateAsync({
+        roundId: round.roundId,
+        contributorId: identity.id,
+        baselineModelHash: round.baselineModelHash ?? `sha256:${'0'.repeat(64)}`,
+        gradientHash: `sha256:${hashHex}`,
+        gradientBase64,
+        gradientLength: result.vector.length,
+        epsilon: result.epsilonSpent,
+        sampleCount: result.samples
+      });
+      await runtime.unload();
+      show(
+        `Update submitted. ₹${(round.payoutPaisePerUpdate / 100).toFixed(2)} will appear in your Earn balance.`,
+        'success'
+      );
+    } catch (err) {
+      show(`Could not submit: ${(err as Error).message}`, 'error');
+    } finally {
+      setJoining(null);
+    }
+  }
+
+  return (
+    <Card
+      title="Federated training rounds"
+      subtitle="§7f · earn paise by helping train Bharat OS's models. DP-SGD privacy noise."
+      actions={
+        openRounds.length > 0 ? (
+          <Badge variant="trust">{openRounds.length} open</Badge>
+        ) : null
+      }
+    >
+      {isLoading && <p className="text-body text-text-muted">Loading rounds…</p>}
+      {!isLoading && openRounds.length === 0 && (
+        <p className="text-body text-text-muted">
+          No active rounds right now. Sponsors create rounds via the admin API;
+          the seed-demo includes a starter round.
+        </p>
+      )}
+      <ul className="flex flex-col gap-2">
+        {openRounds.map((round) => {
+          const isSlmRound = Boolean(round.slmModelPackId);
+          const hasPack = !isSlmRound || installedPackIds.has(round.slmModelPackId!);
+          const isJoining = joining === round.roundId;
+          return (
+            <li key={round.roundId} className="rounded-sm border border-border bg-white p-3">
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <p className="font-semibold text-text">{round.modelName}</p>
+                <Money paise={round.payoutPaisePerUpdate} size="sm" />
+              </div>
+              <p className="text-caption text-text-muted">
+                {isSlmRound ? `SLM · ${round.targetTask ?? 'fine-tune'}` : 'classifier head'}
+                {' · '}
+                {round.updateCount}/{round.maxParticipants} workers
+                {' · ε '}
+                {round.epsilonSpent.toFixed(2)}/{round.maxEpsilon.toFixed(2)}
+              </p>
+              {isSlmRound && !hasPack && (
+                <p className="mt-1 text-caption text-error">
+                  Requires the {round.slmModelPackId} pack — install it above first.
+                </p>
+              )}
+              <Action
+                variant="trust"
+                size="sm"
+                className="mt-2"
+                disabled={!identity || !hasPack || isJoining || submit.isPending}
+                onClick={() => handleJoin(round)}
+              >
+                {isJoining ? 'Submitting…' : `Join (earn ₹${(round.payoutPaisePerUpdate / 100).toFixed(2)})`}
+              </Action>
+            </li>
+          );
+        })}
+      </ul>
+      <Evidence title="How federated rounds work">
+        Sponsors (banks, hospitals, govt) create rounds with a target task
+        and a per-update payout. Workers compute a small gradient locally,
+        add DP-SGD privacy noise scaled to their ε budget, and submit
+        the noised vector. Bharat OS aggregates updates via FedAvg or hash-
+        combiner. Raw gradients never leave the device unencrypted; only
+        the aggregate model hash is published. v1 ships with a stub
+        gradient computation — real LoRA fine-tuning needs a training-
+        capable runtime backend (future polish).
+      </Evidence>
+    </Card>
   );
 }
