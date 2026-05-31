@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 🎯 2026-05-31 — Phase 10.4 shipped: labeling marketplace converges on quality
+
+Phase 10.4 wires ADR 0110's QC plan: **golden-set scoring on
+submit** + **worker score gate on next-item dispatch** + **sponsor
+sample-for-review** with reject (mesh + escrow clawback). Random-
+spam workers drop their score and get gated; sponsors can reject
+sampled submissions with a reason; clawbacks emit negative mesh
+events for honest ledger accounting.
+
+- **ADR 0123** — three QC layers + three module helpers + worker
+  stats endpoint + FE worker-score card + last-verdict surface.
+- `'labeling'` workload now accepts negative `payoutPaise` so
+  clawbacks reduce the worker's mesh balance honestly (Uber driver
+  chargeback semantics).
+- seed-demo: classification job's first item is a golden item
+  (`goldenAnswer: {value: 'business_loan'}`); job's QC config is
+  10% golden / 0.7 min score / 20% review sample.
+- Tests: **854/854 Node** (+16 QC tests: 11 pure helpers + 5
+  end-to-end HTTP). FE 16/16 unchanged.
+- Bundle: main 362 KB / 111 KB gzipped (+1 KB vs 10.3).
+
+**Phase 10 progress: ~75%.** Remaining: 10.5 signed export
+(~1 wk), 10.6 SLM pre-labeling hint (~1 wk). See `ROADMAP.md`.
+
+---
+
 ## 🏷 2026-05-31 — Phase 10.3 shipped: all 5 task kinds on /app/labels/
 
 Phase 10.2 shipped only preference_pair; Phase 10.3 wires in the

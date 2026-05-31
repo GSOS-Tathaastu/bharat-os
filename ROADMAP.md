@@ -80,6 +80,35 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 10.4 — QC pipeline ✅ SHIPPED 2026-05-31
+- **ADR 0123** — golden-set scoring on submit + worker score gate
+  on next-item dispatch + sponsor sample-for-review with reject
+  (mesh + escrow clawback).
+- Module helpers in `src/phase1/labeling-job.mjs`:
+  `computeWorkerScore`, `matchesGoldenAnswer` (5 task kinds),
+  `shouldSampleForReview` (deterministic FNV-1a).
+- Submit path: golden-mismatch → `rejected_golden_mismatch` (no
+  mesh, no escrow); accepted may flip to `pending_sponsor_review`
+  but mesh credit lands. Response carries `qcVerdict` + updated
+  `workerScore`.
+- Next-item: blocks workers below `qcMinWorkerScore` with honest
+  disclosure (`{reason: 'below_worker_score_gate', workerScore,
+  gate}`).
+- New sponsor routes: list pending sample (identityHash rotated
+  per (job, worker)); accept; reject with reason (claws back mesh
+  via negative event + sponsor escrow refund via re-lock).
+- `'labeling'` workload now accepts negative `payoutPaise` for
+  clawbacks.
+- New worker stats endpoint: `GET /api/identities/:id/labeling-stats`.
+- FE: overall worker-score card at top of Labels page; session view
+  stat row (Submitted / Accepted with running score / Earned);
+  last-verdict card; score-gate card with honest numbers.
+- seed-demo: classification job gains `goldenAnswer` on first item
+  + QC config (10% golden / 0.7 min score / 20% review sample).
+- Tests: BE 838 → 854 (+16: 11 pure helpers + 5 HTTP). FE 16/16
+  unchanged.
+- **Bundle**: main 359 → 362 KB / 111 KB gzipped (+1 KB).
+
 ### Phase 10.3 — Remaining task kinds ✅ SHIPPED 2026-05-31
 - **ADR 0122** — 4 new task components on `/app/labels/`. Pure FE,
   zero BE changes.
@@ -232,26 +261,34 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 10.4 + 10.5 + 10.6 — Labeling marketplace polish (NEXT)
+### Phase 10.5 + 10.6 — Labeling marketplace polish (NEXT)
 
-**Phase 10.0–10.3 SHIPPED.** All 5 task kinds first-class. Remaining
+**Phase 10.0–10.4 SHIPPED.** Quality loop is closed. Remaining
 sub-phases:
 
-- [ ] **10.4** — QC pipeline: golden-set rate config per job
-  (default 1-in-20), inter-annotator α threshold for accept,
-  sponsor-sample queue + reject API + worker score-gating.
-  ~2 wks.
 - [ ] **10.5** — signed JSONL export bundle for sponsor audit
-  (reuses Phase 9.1 federated-round export pattern; rotating
-  `identityHash` per (jobId, workerId)). ~1 wk.
+  (reuses Phase 9.1 federated-round export pattern + the QC
+  review-list identityHash rotation; signs with Bharat OS release
+  key). ~1 wk.
 - [ ] **10.6** — SLM pre-labeling hint: button on task UI that
   loads worker's installed Phi-3-mini → suggests a label →
   worker accepts/edits → submits. Cuts time-per-label ~3×.
-  Depends on Phase 9.0c. ~1 wk.
+  Depends on Phase 9.0c (already shipped). ~1 wk.
 
-Remaining ~4 wks. Then Phase 12+ (Bharat ID / SSO from
-explorations doc) or labeling-marketplace polish per sponsor
-feedback.
+### Phase 10 future polish (post-MVP)
+
+- **10.4.1** Inter-annotator α (Krippendorff α across N≥2 workers
+  per item; needs jobs with multiple submissions per item)
+- **10.4.2** Worker appeal of golden-set fail (sponsor adjudication)
+- **10.5.1** Premium-job UI gating (filter jobs by required score)
+- **10.1.1** Job cancel + refund route (`refundLockedEscrow` hook)
+- Per-worker time-series score trend on Labels page
+- Score-driven dynamic per-label pricing (premium workers earn
+  more per label)
+- Anti-fraud signals (rapid-fire submissions, bot-like timing)
+
+Remaining v1 ~2 wks. Then Phase 12+ (Bharat ID / SSO from
+explorations doc) or sponsor-feedback-driven polish.
 
 ---
 

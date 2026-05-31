@@ -245,8 +245,12 @@ import {
   createLabelingSubmission,
   workerCanClaim,
   totalLaunchCostPaise,
+  computeWorkerScore,
+  matchesGoldenAnswer,
+  shouldSampleForReview,
   LABELING_TASK_KINDS,
-  LABELING_MODALITIES
+  LABELING_MODALITIES,
+  QC_REJECTED_STATUSES
 } from '../phase1/labeling-job.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1431,7 +1435,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             ipTerms: body.ipTerms,
             consentPurposeCode: body.consentPurposeCode,
             description: body.description,
-            deadlineSecondsFromNow: body.deadlineSecondsFromNow
+            deadlineSecondsFromNow: body.deadlineSecondsFromNow,
+            // Phase 10.4 — QC config.
+            qcGoldenItemRateBps: body.qcGoldenItemRateBps,
+            qcMinWorkerScore: body.qcMinWorkerScore,
+            qcSponsorReviewRateBps: body.qcSponsorReviewRateBps
           });
         } catch (error) {
           jsonResponse(response, 400, {
@@ -1637,8 +1645,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
 
       // GET /api/labeling-jobs/:jobId/next-item — worker fetches the
       // next item to label. Returns null when no item is available
-      // for this worker (already submitted all available, or all
-      // items consumed).
+      // for this worker (already submitted all available, all items
+      // consumed, OR worker's score on this job is below the
+      // sponsor's gate — Phase 10.4).
       const nextItemMatch = /^\/api\/labeling-jobs\/([^/]+)\/next-item$/.exec(url.pathname);
       if (request.method === 'GET' && nextItemMatch) {
         const jobId = decodeURIComponent(nextItemMatch[1]);
@@ -1656,8 +1665,24 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
-        const items = await store.listLabelingJobItems({ jobId });
         const prevSubs = await store.listLabelingSubmissions({ jobId, workerId });
+        // Phase 10.4 — score gate. Honest disclosure: when a worker
+        // fails the gate we say so explicitly + return their current
+        // score + the threshold so the FE can render a useful card.
+        const gate = Number(job.qcMinWorkerScore ?? 0);
+        if (gate > 0) {
+          const score = computeWorkerScore(prevSubs);
+          if (score < gate) {
+            jsonResponse(response, 200, {
+              item: null,
+              reason: 'below_worker_score_gate',
+              workerScore: score,
+              gate
+            });
+            return;
+          }
+        }
+        const items = await store.listLabelingJobItems({ jobId });
         const submittedItemIds = new Set(prevSubs.map((s) => s.itemId));
         const item = items.find((it) => !it.consumed && !submittedItemIds.has(it.itemId));
         if (!item) {
@@ -1704,14 +1729,29 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
+        // Phase 10.4 — QC pipeline:
+        //   1. If item.goldenAnswer is set, compute golden-match.
+        //      Mismatch → status: 'rejected_golden_mismatch', no
+        //      mesh credit, no escrow debit. Honest rejection.
+        //   2. Otherwise, server samples a fraction of accepted
+        //      submissions for sponsor review (job-config rate).
+        //      Sampled → status: 'pending_sponsor_review' — worker
+        //      gets the mesh credit immediately (we don't punish
+        //      good workers for being sampled) but the sponsor can
+        //      claw it back via the reject endpoint below.
         let submission;
+        const goldenVerdict = matchesGoldenAnswer(job.taskKind, body.labelValue, item.goldenAnswer);
+        const goldenMismatch = goldenVerdict === false;
+        const baseStatus = goldenMismatch ? 'rejected_golden_mismatch' : 'accepted';
         try {
           submission = createLabelingSubmission({
             jobId,
             itemId: item.itemId,
             workerId: body.workerId,
             taskKind: job.taskKind,
-            labelValue: body.labelValue
+            labelValue: body.labelValue,
+            status: baseStatus,
+            rejectionReason: goldenMismatch ? 'golden_set_mismatch' : null
           });
         } catch (error) {
           jsonResponse(response, 400, {
@@ -1719,57 +1759,277 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
+
+        // For accepted submissions, optionally flip to
+        // 'pending_sponsor_review' via deterministic sample. Caller
+        // hash includes submissionId so reruns are idempotent.
+        if (!goldenMismatch && shouldSampleForReview(submission.submissionId, job.qcSponsorReviewRateBps)) {
+          submission = { ...submission, status: 'pending_sponsor_review' };
+        }
+
         await store.saveLabelingSubmission(submission);
-        // Bump job counter, mark item consumed.
+
+        // Item consumed regardless of status — the worker did the
+        // work, the slot is filled. submissionsRejected counts
+        // golden mismatches; submissionsAccepted counts both
+        // accepted and pending_sponsor_review (sponsor can flip the
+        // latter via the reject endpoint, which decrements counts).
         const updatedJob = {
           ...job,
-          submissionsAccepted: job.submissionsAccepted + 1,
-          escrowDebitedPaise: job.escrowDebitedPaise + job.perLabelPaise
+          submissionsAccepted:
+            submission.status === 'rejected_golden_mismatch'
+              ? job.submissionsAccepted
+              : job.submissionsAccepted + 1,
+          submissionsRejected:
+            submission.status === 'rejected_golden_mismatch'
+              ? job.submissionsRejected + 1
+              : job.submissionsRejected,
+          escrowDebitedPaise:
+            submission.status === 'rejected_golden_mismatch'
+              ? job.escrowDebitedPaise
+              : job.escrowDebitedPaise + job.perLabelPaise
         };
         await store.saveLabelingJob(updatedJob);
         const updatedItem = { ...item, consumed: true, submissionsCount: item.submissionsCount + 1 };
         await store.saveLabelingJobItem(updatedItem);
 
-        // Debit sponsor escrow for this label.
-        const sponsor = await store.readSponsor(job.sponsorId).catch(() => null);
-        if (sponsor && job.perLabelPaise > 0) {
-          try {
-            const debited = debitLockedEscrow(sponsor, job.perLabelPaise);
-            await store.saveSponsor(debited);
-            await store.appendLedger({
-              type: 'sponsor_escrow.debited',
-              sponsorId: job.sponsorId,
-              jobId,
-              submissionId: submission.submissionId,
-              amountPaise: job.perLabelPaise,
-              balancePaise: debited.escrowBalancePaise,
-              lockedPaise: debited.escrowLockedPaise,
-              at: new Date().toISOString()
-            });
-          } catch (escrowError) {
-            logger.warn('sponsor_escrow_debit_failed', {
-              requestId,
-              sponsorId: job.sponsorId,
-              jobId,
-              reason: escrowError.message
-            });
+        let meshEvent = null;
+        if (submission.status !== 'rejected_golden_mismatch' && job.perLabelPaise > 0) {
+          // Debit sponsor escrow for this label.
+          const sponsor = await store.readSponsor(job.sponsorId).catch(() => null);
+          if (sponsor) {
+            try {
+              const debited = debitLockedEscrow(sponsor, job.perLabelPaise);
+              await store.saveSponsor(debited);
+              await store.appendLedger({
+                type: 'sponsor_escrow.debited',
+                sponsorId: job.sponsorId,
+                jobId,
+                submissionId: submission.submissionId,
+                amountPaise: job.perLabelPaise,
+                balancePaise: debited.escrowBalancePaise,
+                lockedPaise: debited.escrowLockedPaise,
+                at: new Date().toISOString()
+              });
+            } catch (escrowError) {
+              logger.warn('sponsor_escrow_debit_failed', {
+                requestId,
+                sponsorId: job.sponsorId,
+                jobId,
+                reason: escrowError.message
+              });
+            }
           }
+          // Record the worker's mesh-contribution event.
+          meshEvent = createMeshContributionEvent({
+            operatorId: body.workerId,
+            workloadType: 'labeling',
+            payoutPaise: job.perLabelPaise,
+            jobId,
+            itemId: item.itemId
+          });
+          await store.saveMeshContributionEvent(meshEvent);
         }
 
-        // Record the worker's mesh-contribution event.
-        const meshEvent = createMeshContributionEvent({
-          operatorId: body.workerId,
-          workloadType: 'labeling',
-          payoutPaise: job.perLabelPaise,
-          jobId,
-          itemId: item.itemId
-        });
-        await store.saveMeshContributionEvent(meshEvent);
+        // Worker score after this submission — surface to the FE so
+        // it can render the running score honestly.
+        const allWorkerSubs = await store.listLabelingSubmissions({ jobId, workerId: body.workerId });
+        const workerScore = computeWorkerScore(allWorkerSubs);
 
         jsonResponse(response, 201, {
           ok: true,
           submission,
-          meshContributionEvent: meshEvent
+          meshContributionEvent: meshEvent,
+          workerScore,
+          qcVerdict: goldenMismatch
+            ? 'golden_set_mismatch'
+            : submission.status === 'pending_sponsor_review'
+              ? 'sampled_for_sponsor_review'
+              : 'accepted'
+        });
+        return;
+      }
+
+      // Phase 10.4 — sponsor-side QC. Two routes:
+      //   GET .../labeling-jobs/:jobId/submissions?status=pending_sponsor_review
+      //     — sponsor lists submissions waiting for human review.
+      //   POST .../labeling-jobs/:jobId/submissions/:subId/reject
+      //     — sponsor rejects a sampled submission with a reason.
+      //       We claw back the worker's mesh credit (negative
+      //       payoutPaise event) + refund the sponsor escrow.
+      //       Sponsor can also POST .../accept to approve a sampled
+      //       submission explicitly (clears pending status).
+      const sponsorReviewListMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/submissions$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorReviewListMatch) {
+        const sponsorId = decodeURIComponent(sponsorReviewListMatch[1]);
+        const jobId = decodeURIComponent(sponsorReviewListMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_job', message: 'job not found for this sponsor.' }
+          });
+          return;
+        }
+        const statusFilter = url.searchParams.get('status');
+        const all = await store.listLabelingSubmissions({ jobId });
+        const filtered = statusFilter ? all.filter((s) => s.status === statusFilter) : all;
+        // Pointer-not-payload: strip worker identity; sponsor sees
+        // rotating identityHash per (jobId, workerId) — same posture
+        // as the Phase 9.1 federated-round export.
+        const { sha256Hex } = await import('./core.mjs');
+        const surface = filtered.map((s) => ({
+          submissionId: s.submissionId,
+          itemId: s.itemId,
+          taskKind: s.taskKind,
+          labelValue: s.labelValue,
+          status: s.status,
+          submittedAt: s.submittedAt,
+          identityHash: 'sha256:' + sha256Hex(`${jobId}::${s.workerId}`)
+        }));
+        jsonResponse(response, 200, { submissions: surface });
+        return;
+      }
+
+      const sponsorRejectMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/submissions\/([^/]+)\/reject$/.exec(
+          url.pathname
+        );
+      const sponsorAcceptMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/submissions\/([^/]+)\/accept$/.exec(
+          url.pathname
+        );
+      if (request.method === 'POST' && (sponsorRejectMatch || sponsorAcceptMatch)) {
+        const isReject = Boolean(sponsorRejectMatch);
+        const match = sponsorRejectMatch ?? sponsorAcceptMatch;
+        const sponsorId = decodeURIComponent(match[1]);
+        const jobId = decodeURIComponent(match[2]);
+        const submissionId = decodeURIComponent(match[3]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_job', message: 'job not found for this sponsor.' }
+          });
+          return;
+        }
+        const submission = await store.readLabelingSubmission(submissionId).catch(() => null);
+        if (!submission || submission.jobId !== jobId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_submission', message: 'submission not found.' }
+          });
+          return;
+        }
+        if (submission.status !== 'pending_sponsor_review') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'not_pending_review',
+              message: `submission status is ${submission.status}; cannot adjudicate.`
+            }
+          });
+          return;
+        }
+        if (isReject) {
+          const body = await readRequestJson(request).catch(() => ({}));
+          const reason = String(body.reason ?? '').trim().slice(0, 400);
+          if (!reason || reason.length < 4) {
+            jsonResponse(response, 400, {
+              error: { code: 'reason_required', message: 'reject requires a non-empty reason (>= 4 chars).' }
+            });
+            return;
+          }
+          const updatedSubmission = {
+            ...submission,
+            status: 'rejected_sponsor_review',
+            rejectionReason: reason
+          };
+          await store.saveLabelingSubmission(updatedSubmission);
+
+          // Claw back the worker's mesh credit via a negative
+          // mesh-event. Refund the sponsor's escrow.
+          if (job.perLabelPaise > 0) {
+            const clawbackEvent = createMeshContributionEvent({
+              operatorId: submission.workerId,
+              workloadType: 'labeling',
+              payoutPaise: -job.perLabelPaise,
+              jobId,
+              itemId: submission.itemId
+            });
+            await store.saveMeshContributionEvent(clawbackEvent);
+
+            const refundedSponsor = lockEscrow(sponsor, job.perLabelPaise);
+            await store.saveSponsor(refundedSponsor);
+            await store.appendLedger({
+              type: 'sponsor_escrow.refunded',
+              sponsorId,
+              jobId,
+              submissionId,
+              amountPaise: job.perLabelPaise,
+              balancePaise: refundedSponsor.escrowBalancePaise,
+              lockedPaise: refundedSponsor.escrowLockedPaise,
+              reason: 'rejected_sponsor_review',
+              at: new Date().toISOString()
+            });
+          }
+
+          // Adjust job-level counters: previously accepted now
+          // rejected.
+          const updatedJob = {
+            ...job,
+            submissionsAccepted: Math.max(0, job.submissionsAccepted - 1),
+            submissionsRejected: job.submissionsRejected + 1,
+            escrowDebitedPaise: Math.max(0, job.escrowDebitedPaise - job.perLabelPaise)
+          };
+          await store.saveLabelingJob(updatedJob);
+          jsonResponse(response, 200, {
+            ok: true,
+            submission: updatedSubmission,
+            clawedBackPaise: job.perLabelPaise
+          });
+          return;
+        }
+        // Accept path: flip pending → accepted; no mesh / escrow
+        // changes (those already happened on submit).
+        const updatedSubmission = { ...submission, status: 'accepted' };
+        await store.saveLabelingSubmission(updatedSubmission);
+        jsonResponse(response, 200, { ok: true, submission: updatedSubmission });
+        return;
+      }
+
+      // Phase 10.4 — worker-facing stats endpoint. Returns per-job
+      // scores + a global summary. Used by the FE to render
+      // "Your score: 0.92" on the Labels surface.
+      const labelingStatsMatch =
+        /^\/api\/identities\/([^/]+)\/labeling-stats$/.exec(url.pathname);
+      if (request.method === 'GET' && labelingStatsMatch) {
+        const identityId = decodeURIComponent(labelingStatsMatch[1]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const all = await store.listLabelingSubmissions({ workerId: identityId });
+        const byJob = new Map();
+        for (const sub of all) {
+          if (!byJob.has(sub.jobId)) byJob.set(sub.jobId, []);
+          byJob.get(sub.jobId).push(sub);
+        }
+        const perJob = Array.from(byJob.entries()).map(([jobId, subs]) => ({
+          jobId,
+          submissionCount: subs.length,
+          acceptedCount: subs.filter((s) => s.status === 'accepted').length,
+          pendingReviewCount: subs.filter((s) => s.status === 'pending_sponsor_review').length,
+          rejectedCount: subs.filter((s) => QC_REJECTED_STATUSES.has(s.status)).length,
+          score: computeWorkerScore(subs)
+        }));
+        const overallScore = computeWorkerScore(all);
+        jsonResponse(response, 200, {
+          identityId,
+          overall: {
+            submissionCount: all.length,
+            score: overallScore
+          },
+          perJob
         });
         return;
       }

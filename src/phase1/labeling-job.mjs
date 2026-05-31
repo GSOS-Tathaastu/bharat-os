@@ -30,8 +30,26 @@ export const LABELING_JOB_STATUSES = [
 
 export const LABELING_SUBMISSION_STATUSES = [
   'accepted',
-  'rejected'
+  'rejected',
+  // Phase 10.4 — QC pipeline status variants. `rejected_golden_mismatch`
+  // is server-imposed when a worker submits to a golden-set item with
+  // the wrong answer; carries no mesh payout. `pending_sponsor_review`
+  // marks a sample of accepted submissions for human review by the
+  // sponsor; sponsor flips to `rejected_sponsor_review` (claws back
+  // mesh credit + refunds escrow) or `accepted` on approve.
+  'rejected_golden_mismatch',
+  'pending_sponsor_review',
+  'rejected_sponsor_review'
 ];
+
+// Phase 10.4 — accepted-equivalent statuses (count toward job
+// completion + worker score numerator). Kept as a Set so callers can
+// `has()` cheaply.
+export const ACCEPTED_SUBMISSION_STATUSES = new Set(['accepted']);
+export const QC_REJECTED_STATUSES = new Set([
+  'rejected_golden_mismatch',
+  'rejected_sponsor_review'
+]);
 
 function idFrom(prefix, payload) {
   return `${prefix}:${sha256Hex(stableStringify(payload)).slice(0, 32)}`;
@@ -69,6 +87,20 @@ export function createLabelingJob({
   consentPurposeCode,
   description = null,
   deadlineSecondsFromNow = 30 * 24 * 60 * 60,
+  // Phase 10.4 — QC pipeline config. All optional; defaults are
+  // permissive in v1 so existing jobs continue working without
+  // re-specifying QC params.
+  //   qcGoldenItemRateBps: basis-points share of items the sponsor
+  //     should mark as golden. 0 = no golden-set check. Default 0.
+  //   qcMinWorkerScore: minimum worker score (0..1) the next-item
+  //     dispatcher gates on. 0 = no gate. Workers with score >=
+  //     this can claim from this job.
+  //   qcSponsorReviewRateBps: basis-points share of accepted
+  //     submissions to route to the sponsor for human review. 0 =
+  //     no sampling. Default 0.
+  qcGoldenItemRateBps = 0,
+  qcMinWorkerScore = 0,
+  qcSponsorReviewRateBps = 0,
   createdBy = sponsorId,
   createdAt = nowIso()
 } = {}) {
@@ -92,6 +124,11 @@ export function createLabelingJob({
   const deadlineAt = new Date(
     new Date(createdAt).getTime() + Number(deadlineSecondsFromNow) * 1000
   ).toISOString();
+  // Clamp basis-points into [0, 10000].
+  const goldenBps = Math.max(0, Math.min(10_000, Math.floor(Number(qcGoldenItemRateBps ?? 0))));
+  const reviewBps = Math.max(0, Math.min(10_000, Math.floor(Number(qcSponsorReviewRateBps ?? 0))));
+  // Worker-score gate is in [0, 1].
+  const scoreGate = Math.max(0, Math.min(1, Number(qcMinWorkerScore ?? 0)));
   const core = {
     protocolVersion: LABELING_JOB_PROTOCOL_VERSION,
     objectType: 'labeling-job',
@@ -116,7 +153,12 @@ export function createLabelingJob({
     submissionsRejected: 0,
     escrowLockedPaise: 0,
     escrowDebitedPaise: 0,
-    itemsUploaded: 0
+    itemsUploaded: 0,
+    // Phase 10.4 — QC config snapshot. Locked-at-create; sponsor
+    // can't change them mid-job without revoking + re-creating.
+    qcGoldenItemRateBps: goldenBps,
+    qcMinWorkerScore: scoreGate,
+    qcSponsorReviewRateBps: reviewBps
   };
   return {
     jobId: idFrom('bos:labeling-job', { ...core, t: createdAt }),
@@ -225,4 +267,91 @@ export function workerCanClaim(job, item, prevSubmissions) {
 // sponsor escrow contract (sponsor must have available >= cost).
 export function totalLaunchCostPaise(job) {
   return Number(job.itemCount) * (Number(job.perLabelPaise) + Number(job.bharatOsFeePaise));
+}
+
+// Phase 10.4 — worker score in [0, 1] from a list of submissions.
+// Numerator = accepted submissions. Denominator = accepted +
+// QC-rejected (golden_mismatch + sponsor_review). pending_sponsor_
+// review submissions are NOT counted (they haven't been adjudicated
+// yet). Workers with zero adjudicated submissions get score 1 (give
+// new workers the benefit of the doubt; the score gate is intended
+// for repeat offenders, not first-timers).
+export function computeWorkerScore(submissions = []) {
+  let accepted = 0;
+  let rejected = 0;
+  for (const sub of submissions) {
+    if (sub.status === 'accepted') accepted += 1;
+    else if (QC_REJECTED_STATUSES.has(sub.status)) rejected += 1;
+  }
+  const total = accepted + rejected;
+  if (total === 0) return 1;
+  return accepted / total;
+}
+
+// Whether a labelValue matches the goldenAnswer for a given task
+// kind. We compare structurally — workers may submit additional
+// metadata (`{choice: 'a', confidence: 0.8}`) but as long as the
+// primary answer key matches we accept. Per task kind:
+//   preference_pair: equal `choice`
+//   classification: equal `value`
+//   span_annotation: equal `wordIndices` array (sorted)
+//   transcription: case-insensitive trimmed `transcript` equality
+//   safety_label: equal set of `values`
+//
+// Returns null when the goldenAnswer doesn't exist OR the comparison
+// is undefined for this task kind. Callers treat null as "no opinion."
+export function matchesGoldenAnswer(taskKind, labelValue, goldenAnswer) {
+  if (goldenAnswer == null) return null;
+  if (taskKind === 'preference_pair') {
+    return labelValue?.choice === goldenAnswer.choice;
+  }
+  if (taskKind === 'classification') {
+    return labelValue?.value === goldenAnswer.value;
+  }
+  if (taskKind === 'span_annotation') {
+    const a = Array.isArray(labelValue?.wordIndices)
+      ? [...labelValue.wordIndices].sort((x, y) => x - y)
+      : null;
+    const b = Array.isArray(goldenAnswer?.wordIndices)
+      ? [...goldenAnswer.wordIndices].sort((x, y) => x - y)
+      : null;
+    if (!a || !b) return null;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  if (taskKind === 'transcription') {
+    const a = String(labelValue?.transcript ?? '').trim().toLowerCase();
+    const b = String(goldenAnswer?.transcript ?? '').trim().toLowerCase();
+    if (!a || !b) return null;
+    return a === b;
+  }
+  if (taskKind === 'safety_label') {
+    const a = new Set(Array.isArray(labelValue?.values) ? labelValue.values : []);
+    const b = new Set(Array.isArray(goldenAnswer?.values) ? goldenAnswer.values : []);
+    if (a.size !== b.size) return false;
+    for (const v of a) if (!b.has(v)) return false;
+    return true;
+  }
+  return null;
+}
+
+// Deterministic sampling: hash(submissionId) modulo 10_000 < rateBps.
+// Means a sponsor's reviewRate of 500 bps (5%) catches roughly 5% of
+// accepted submissions, but a re-run on the same submission always
+// produces the same verdict (idempotent). Caller passes the
+// submissionId after creation so the same submission isn't sampled
+// twice with a different decision.
+export function shouldSampleForReview(submissionId, rateBps) {
+  if (!rateBps || rateBps <= 0) return false;
+  if (!submissionId) return false;
+  // 32-bit FNV-1a hash of submissionId (no crypto needed; just need
+  // a deterministic 0..2^32 spread).
+  let h = 2166136261;
+  for (let i = 0; i < submissionId.length; i += 1) {
+    h ^= submissionId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // Unsigned 32-bit modulo 10_000.
+  return (h >>> 0) % 10_000 < rateBps;
 }

@@ -554,16 +554,36 @@ export function useLabelingJobs(language?: string) {
   });
 }
 
+export interface NextItemResponse {
+  item: LabelingJobItem | null;
+  reason?: 'no_eligible_items' | 'below_worker_score_gate';
+  workerScore?: number;
+  gate?: number;
+}
+
 export function useLabelingNextItem(jobId: string | null, workerId: string | null | undefined) {
   return useQuery({
     queryKey: ['labeling-next-item', jobId, workerId],
     queryFn: () =>
-      api<{ item: LabelingJobItem | null; reason?: string }>(
+      api<NextItemResponse>(
         `/api/labeling-jobs/${encodeURIComponent(jobId!)}/next-item?workerId=${encodeURIComponent(workerId!)}`
       ),
     enabled: Boolean(jobId && workerId),
     staleTime: 0
   });
+}
+
+// Phase 10.4 — sponsor-side QC verdict + worker score returned on
+// every submit. FE renders an honest verdict line ("Accepted",
+// "Sampled for sponsor review", "Golden-set mismatch — no payout").
+export type QcVerdict = 'accepted' | 'sampled_for_sponsor_review' | 'golden_set_mismatch';
+
+export interface SubmitLabelResponse {
+  ok: true;
+  submission: { submissionId: string; jobId: string; itemId: string; status: string };
+  meshContributionEvent: { payoutPaise: number } | null;
+  workerScore: number;
+  qcVerdict: QcVerdict;
 }
 
 export function useSubmitLabel() {
@@ -580,11 +600,7 @@ export function useSubmitLabel() {
       workerId: string;
       labelValue: unknown;
     }) =>
-      api<{
-        ok: true;
-        submission: { submissionId: string; jobId: string; itemId: string };
-        meshContributionEvent: { payoutPaise: number } | null;
-      }>(`/api/labeling-jobs/${encodeURIComponent(jobId)}/submissions`, {
+      api<SubmitLabelResponse>(`/api/labeling-jobs/${encodeURIComponent(jobId)}/submissions`, {
         method: 'POST',
         body: JSON.stringify({ itemId, workerId, labelValue })
       }),
@@ -593,7 +609,37 @@ export function useSubmitLabel() {
       qc.invalidateQueries({ queryKey: ['labeling-jobs'] });
       qc.invalidateQueries({ queryKey: ['mesh-balance', workerId] });
       qc.invalidateQueries({ queryKey: ['mesh-summary', workerId] });
+      qc.invalidateQueries({ queryKey: ['labeling-stats', workerId] });
     }
+  });
+}
+
+// Phase 10.4 — worker-facing labeling stats. Used by the Labels
+// page to render "Your score: 0.92" + per-job acceptance breakdown.
+export interface LabelingStatsResponse {
+  identityId: string;
+  overall: {
+    submissionCount: number;
+    score: number;
+  };
+  perJob: Array<{
+    jobId: string;
+    submissionCount: number;
+    acceptedCount: number;
+    pendingReviewCount: number;
+    rejectedCount: number;
+    score: number;
+  }>;
+}
+
+export function useLabelingStats(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['labeling-stats', identityId],
+    queryFn: () =>
+      api<LabelingStatsResponse>(
+        `/api/identities/${encodeURIComponent(identityId!)}/labeling-stats`
+      ),
+    enabled: Boolean(identityId)
   });
 }
 

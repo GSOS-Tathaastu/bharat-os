@@ -73,8 +73,12 @@ function computePayoutPaise({ workloadType, tokens, bytes, payoutPaise }) {
   }
   if (workloadType === 'labeling') {
     // Phase 10.1 — payout set by the labeling job (caller passes
-    // explicit `payoutPaise`).
-    return Math.max(0, Number(payoutPaise ?? 0));
+    // explicit `payoutPaise`). Phase 10.4 — negative payouts are
+    // allowed here for sponsor-rejection clawbacks; the per-event
+    // amount is bounded by the job's `perLabelPaise` so a clawback
+    // can never exceed what the worker originally earned for the
+    // same submission.
+    return Math.round(Number(payoutPaise ?? 0));
   }
   return 0;
 }

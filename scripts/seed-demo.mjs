@@ -671,7 +671,17 @@ log(`  labeling job: 1 (${launchedJob.description}) — ${jobItems.length} items
 const phase103PostDeposit = depositEscrow(jobLockedSponsor, 10_000);
 await store.saveSponsor(phase103PostDeposit);
 
-async function launchSeedJob({ taskKind, description, items, perLabelPaise = 400, language = 'hi', currentSponsor }) {
+async function launchSeedJob({
+  taskKind,
+  description,
+  items,
+  perLabelPaise = 400,
+  language = 'hi',
+  currentSponsor,
+  qcGoldenItemRateBps = 0,
+  qcMinWorkerScore = 0,
+  qcSponsorReviewRateBps = 0
+}) {
   const draft = createLabelingJob({
     sponsorId: currentSponsor.sponsorId,
     taskKind,
@@ -682,10 +692,18 @@ async function launchSeedJob({ taskKind, description, items, perLabelPaise = 400
     itemCount: items.length,
     ipTerms: 'non_exclusive',
     consentPurposeCode: `bos:consent:labeling.${taskKind}`,
-    description
+    description,
+    qcGoldenItemRateBps,
+    qcMinWorkerScore,
+    qcSponsorReviewRateBps
   });
-  const jobItemRecords = items.map((body) =>
-    createLabelingJobItem({ jobId: draft.jobId, taskKind, body })
+  const jobItemRecords = items.map(({ goldenAnswer, ...body }) =>
+    createLabelingJobItem({
+      jobId: draft.jobId,
+      taskKind,
+      body,
+      goldenAnswer: goldenAnswer ?? null
+    })
   );
   const cost = totalLaunchCostPaise(draft);
   const locked = lockEscrow(currentSponsor, cost);
@@ -706,10 +724,14 @@ async function launchSeedJob({ taskKind, description, items, perLabelPaise = 400
 let runningSponsor = phase103PostDeposit;
 runningSponsor = await launchSeedJob({
   taskKind: 'classification',
-  description: 'Classify loan-applicant intent (Hindi).',
+  description: 'Classify loan-applicant intent (Hindi). 10% golden + 20% sponsor review sampling.',
   currentSponsor: runningSponsor,
+  qcGoldenItemRateBps: 1000,
+  qcMinWorkerScore: 0.7,
+  qcSponsorReviewRateBps: 2000,
   items: [
     {
+      // Golden item — known correct answer business_loan.
       prompt: 'What does the applicant want?',
       text: 'मुझे ₹1 लाख का loan चाहिए, business expand करना है।',
       options: [
@@ -717,7 +739,10 @@ runningSponsor = await launchSeedJob({
         { value: 'personal_loan', label: 'Personal loan', description: 'Household / lifestyle expenses' },
         { value: 'home_loan', label: 'Home loan', description: 'Real estate purchase' },
         { value: 'unclear', label: 'Unclear', description: 'Insufficient information' }
-      ]
+      ],
+      // Phase 10.4 — golden answer is read by the server-side QC
+      // pipeline and stripped before the worker sees the item.
+      goldenAnswer: { value: 'business_loan' }
     },
     {
       prompt: 'What does the applicant want?',

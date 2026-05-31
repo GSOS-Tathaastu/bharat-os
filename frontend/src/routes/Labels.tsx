@@ -5,8 +5,10 @@ import {
   useLabelingJobs,
   useLabelingNextItem,
   useSubmitLabel,
+  useLabelingStats,
   useSponsorDirectory,
-  type LabelingJobSurface
+  type LabelingJobSurface,
+  type QcVerdict
 } from '@/lib/hooks';
 import { PreferencePairTask } from '@/components/labeling/PreferencePairTask';
 import { ClassificationTask } from '@/components/labeling/ClassificationTask';
@@ -25,6 +27,7 @@ import type { LabelingTaskProps } from '@/components/labeling/types';
 export function LabelsPage() {
   const identity = useActiveIdentity();
   const { data: jobs = [], isLoading } = useLabelingJobs();
+  const { data: stats } = useLabelingStats(identity?.id);
   const [activeJob, setActiveJob] = useState<LabelingJobSurface | null>(null);
 
   if (activeJob) {
@@ -35,6 +38,9 @@ export function LabelsPage() {
       />
     );
   }
+
+  const overallScore = stats?.overall.score ?? null;
+  const overallCount = stats?.overall.submissionCount ?? 0;
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
@@ -49,6 +55,29 @@ export function LabelsPage() {
           Earn balance.
         </p>
       </div>
+
+      {overallCount > 0 && overallScore !== null && (
+        <Card tone={overallScore >= 0.9 ? 'trust' : overallScore >= 0.7 ? 'default' : 'warning'}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                Your score
+              </p>
+              <p className="text-display font-semibold tabular-nums text-text">
+                {(overallScore * 100).toFixed(0)}%
+              </p>
+            </div>
+            <Badge variant={overallScore >= 0.9 ? 'trust' : overallScore >= 0.7 ? 'neutral' : 'warning'}>
+              {overallScore >= 0.9 ? 'premium' : overallScore >= 0.7 ? 'good' : 'needs review'}
+            </Badge>
+          </div>
+          <p className="mt-2 text-caption text-text-muted">
+            Across {overallCount} submission{overallCount === 1 ? '' : 's'}. Score
+            climbs back when you label golden-set items correctly. ≥ 90 % unlocks
+            premium jobs (Phase 10.5 polish — coming).
+          </p>
+        </Card>
+      )}
 
       {isLoading && (
         <Card>
@@ -143,7 +172,10 @@ function LabelingSession({ job, onClose }: LabelingSessionProps) {
   const submit = useSubmitLabel();
   const show = useToast((s) => s.show);
   const [submittedCount, setSubmittedCount] = useState(0);
+  const [acceptedCount, setAcceptedCount] = useState(0);
   const [totalEarnedPaise, setTotalEarnedPaise] = useState(0);
+  const [lastVerdict, setLastVerdict] = useState<QcVerdict | null>(null);
+  const [currentScore, setCurrentScore] = useState<number | null>(null);
 
   async function handleSubmit(labelValue: unknown) {
     if (!data?.item || !workerId) return;
@@ -156,8 +188,24 @@ function LabelingSession({ job, onClose }: LabelingSessionProps) {
       });
       const earned = result.meshContributionEvent?.payoutPaise ?? 0;
       setSubmittedCount((n) => n + 1);
+      if (result.qcVerdict === 'accepted' || result.qcVerdict === 'sampled_for_sponsor_review') {
+        setAcceptedCount((n) => n + 1);
+      }
       setTotalEarnedPaise((t) => t + earned);
-      show(earned > 0 ? `+₹${(earned / 100).toFixed(2)} earned` : 'Submitted.', 'success');
+      setLastVerdict(result.qcVerdict);
+      setCurrentScore(result.workerScore);
+      const verdictMessage =
+        result.qcVerdict === 'accepted'
+          ? earned > 0
+            ? `+₹${(earned / 100).toFixed(2)} earned`
+            : 'Submitted.'
+          : result.qcVerdict === 'sampled_for_sponsor_review'
+            ? `+₹${(earned / 100).toFixed(2)} — sampled for sponsor review`
+            : 'Golden-set mismatch — no payout this time.';
+      show(
+        verdictMessage,
+        result.qcVerdict === 'golden_set_mismatch' ? 'error' : 'success'
+      );
       await refetch();
     } catch (err) {
       show((err as Error).message, 'error');
@@ -178,10 +226,53 @@ function LabelingSession({ job, onClose }: LabelingSessionProps) {
         </Action>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Stat label="Submitted" value={submittedCount} />
-        <Stat label="Earned this session" value={<Money paise={totalEarnedPaise} size="md" />} />
+        <Stat
+          label="Accepted"
+          value={`${acceptedCount}/${submittedCount}`}
+          delta={currentScore !== null ? `score ${(currentScore * 100).toFixed(0)}%` : undefined}
+        />
+        <Stat label="Earned" value={<Money paise={totalEarnedPaise} size="md" />} />
       </div>
+
+      {lastVerdict && (
+        <Card
+          tone={
+            lastVerdict === 'accepted'
+              ? 'trust'
+              : lastVerdict === 'sampled_for_sponsor_review'
+                ? 'warning'
+                : 'default'
+          }
+        >
+          <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Last verdict
+          </p>
+          <p className="mt-1 text-body">
+            {lastVerdict === 'accepted'
+              ? 'Accepted — paid to your mesh balance.'
+              : lastVerdict === 'sampled_for_sponsor_review'
+                ? 'Paid — sponsor may review this one. If rejected we claw back the credit.'
+                : 'Golden-set mismatch. No payout. Score may have dropped — read the item again and try the next one.'}
+          </p>
+        </Card>
+      )}
+
+      {data?.item === null && data?.reason === 'below_worker_score_gate' && (
+        <Card tone="warning">
+          <p className="text-body font-semibold">Score gate triggered for this job.</p>
+          <p className="text-caption text-text-muted">
+            Your score on this job ({data.workerScore !== undefined && `${(data.workerScore * 100).toFixed(0)}%`})
+            is below the sponsor's minimum ({data.gate !== undefined && `${(data.gate * 100).toFixed(0)}%`}).
+            Try a different job — your overall score climbs back when you label
+            other items correctly.
+          </p>
+          <Action variant="secondary" className="mt-3" onClick={onClose}>
+            Back to jobs
+          </Action>
+        </Card>
+      )}
 
       {isLoading && (
         <Card>
