@@ -152,19 +152,31 @@ Implemented pieces:
 
 ---
 
-## ⚠ 2026-05-27 — FE rebuild incoming (Phase 11)
+## 🚀 2026-05-31 — `/app/` is live (Phase 11.0–11.3 shipped, ADR 0116)
 
-The user-facing `/shell/` accumulated 4,811 lines of vanilla JS
-across Phase 1.0 → 9.0b and lost editorial coherence. A clean
-rebuild as `/app/` begins next session per **ADR 0115** — Vite +
-React 19 + TypeScript + Tailwind, tricolour brand (`#FF9933`
-saffron + `#138808` green + `#000080` navy on `#FFFFFF`), split-
-hero onboarding (Worker + Citizen), three primary surfaces + Labs
-catch-all. Existing `/shell/` survives as developer surface.
-Phase 9.0c (llama.cpp-wasm runtime) paused until `/app/` v1 ships.
+The Phase 11 FE rebuild scaffold + onboarding + worker + citizen
+surfaces are in. **`npm run build` inside `frontend/`** → static
+bundle at `public/app/build/` → existing API serves it at
+`/app/`. **Investor demo path is now real**: open `/app/`, pick a
+persona, land on a working dashboard.
 
-**FE+BE parity rule** activates from Phase 11: every phase ships
-both layers together. No more BE-first phases.
+```bash
+# One-time
+cd frontend && npm install
+
+# Build the FE
+npm run build
+
+# Run the API (serves /shell/, /app/, /console/, /verify/, /api/*)
+cd .. && node bin/bos-api.mjs --port 8787 --store .bharat-os-demo
+```
+
+Remaining: **Phase 11.4** (`/app/verify/` MFI bundle reader, ~2d),
+**Phase 11.5** (`/app/labs/` SLM install wire, ~2d), **Phase 11.6**
+(Playwright end-to-end demo smoke, ~1d). Then Phase 9.0c
+(llama.cpp-wasm runtime) resumes per the FE+BE parity rule.
+
+`/shell/` (developer surface) is untouched and still works.
 
 ---
 

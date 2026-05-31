@@ -14,3 +14,7 @@ coverage/
 dist/
 build/
 out/
+# Phase 11 — Vite build output. Run `npm run build` inside frontend/
+# to regenerate. Sources live in frontend/.
+public/app/build/
+frontend/tsconfig.tsbuildinfo

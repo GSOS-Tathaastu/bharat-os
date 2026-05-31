@@ -80,6 +80,20 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 11 — FE rebuild (~57% done)
+- **11.0** Vite + React 19 + TS + Tailwind + Zustand + TanStack
+  Query + Router 7 + Vitest scaffold; 12 design-system components
+  (Action/Badge/Card/Evidence/Field/Hero/Identity/Money/Sheet/Stat/
+  Tabs/Toast); `/app/` SPA serve route in API.
+- **11.1** Split-hero onboarding (Worker / Citizen) + persona
+  picker `<Sheet>`.
+- **11.2** `/app/worker/` — mesh balance + monthly summary + cash-
+  out with confirm gate + history + Trust Passport view.
+- **11.3** `/app/citizen/` — intent input + 5 suggestion chips +
+  recent activity list.
+- **Bundle**: 307 KB JS / 17 KB CSS (96/4 KB gzipped). Build: 1.25s.
+- **7/7 FE tests** (Vitest). **84/84 impacted Node tests still pass**.
+
 ### Test coverage
 - **798/798 Node tests pass** (run in batches of 16 files to dodge
   Windows process-spawn OOM).
@@ -96,43 +110,31 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 11 — Frontend rebuild as `/app/` (ADR 0115)
+### Phase 11 — Frontend rebuild as `/app/` (ADR 0115 + 0116)
 
-**Started 2026-05-27.** The existing `/shell/` (4,811 lines vanilla
-JS) lost editorial coherence across the Phase 1 → 9.0b accumulation.
-Phase 11 rebuilds the user-facing surface as a disciplined React
-app. Existing `/shell/` survives as developer surface.
+**Started 2026-05-27.** Sub-phases 11.0–11.3 SHIPPED 2026-05-31
+(ADR 0116). The `/app/` SPA is live; investor demo path works end
+to end.
 
-**Locked decisions**:
-- Stack: Vite + React 19 + TypeScript + Tailwind + shadcn/ui (copy-
-  paste, not npm dep) + Zustand + TanStack Query + React Router v7
-  + Vitest. **First significant npm dep surface for Bharat OS FE**;
-  backend stays zero-dep.
-- Brand: tricolour — `#FFFFFF` white surface, `#FF9933` flag-grade
-  saffron primary, `#138808` flag-grade green for trust/verified,
-  `#000080` navy for regulated flows. Flag colors as accents, not
-  splashes.
-- Onboarding: split-hero (Worker / Citizen) on the very first
-  screen. No single primary persona.
+**Remaining sub-phases**:
 
-**Sub-phase queue**:
-
-- [ ] **Phase 11.0** — Vite scaffold + design tokens + base components
-  + `/app/` route in API + Vitest CI. **~3 days. NEXT ACTION.**
-- [ ] **Phase 11.1** — Split-hero onboarding + persona picker +
-  identity state + switcher. ~2 days.
-- [ ] **Phase 11.2** — `/app/worker/` (Priya/Suresh/Rajesh): mesh
-  ticker → cash-out → MFI consent → Trust Passport. ~4 days.
-- [ ] **Phase 11.3** — `/app/citizen/` (Sita/Lakshmi/Anjali/Aarav):
-  intent → policy gate → orchestrated outcome → recent activity.
-  ~4 days.
+- [x] ~~**Phase 11.0**~~ — Vite scaffold + design tokens + 12
+  components + `/app/` route + Vitest. **Shipped (ADR 0116).**
+- [x] ~~**Phase 11.1**~~ — Split-hero onboarding + persona picker.
+  **Shipped (ADR 0116).**
+- [x] ~~**Phase 11.2**~~ — `/app/worker/` mesh + cash-out + Trust
+  view. **Shipped (ADR 0116).**
+- [x] ~~**Phase 11.3**~~ — `/app/citizen/` intent + recent
+  activity. **Shipped (ADR 0116).**
 - [ ] **Phase 11.4** — `/app/verify/` adaptation: MFI bundle read,
-  Trust Passport public view, evidence display. ~2 days.
+  Trust Passport public view, evidence display. ~2 days. **NEXT.**
 - [ ] **Phase 11.5** — `/app/labs/` catch-all: SLM install (Phase
   9.0b wire), federated rounds, OCR, voice/TTS settings. ~2 days.
-- [ ] **Phase 11.6** — Polish + investor-demo smoke. ~1 day.
+- [ ] **Phase 11.6** — Polish + Playwright end-to-end investor-demo
+  smoke + DPDP §12(3) erasure flow + MFI consent issuance form.
+  ~1 day.
 
-**Total**: ~18 days = ~2.5 weeks.
+**Remaining**: ~5 days.
 
 **Binding rule from Phase 11+**: FE + BE ship together in every
 phase. No more BE-first phases. See

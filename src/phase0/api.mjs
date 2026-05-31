@@ -1093,6 +1093,35 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 11.0 — /app/ surface (Vite-built React SPA). Static
+      // bundle lives at public/app/build/. Client-side routing
+      // means any /app/* path that doesn't match a real file falls
+      // back to index.html so React Router can resolve it.
+      if (request.method === 'GET' && url.pathname === '/app') {
+        response.writeHead(302, { location: '/app/' });
+        response.end();
+        return;
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/app/')) {
+        const appBuildRoot = path.join(repoRoot, 'public/app/build');
+        const relativePath =
+          url.pathname === '/app/' ? 'index.html' : decodeURIComponent(url.pathname.slice('/app/'.length));
+        const requestedPath = path.resolve(appBuildRoot, relativePath);
+        if (!requestedPath.startsWith(appBuildRoot)) {
+          return notFound(response, url.pathname);
+        }
+        // SPA fallback: any non-file path under /app/ returns
+        // index.html so client-side routing works.
+        try {
+          const fsModule = await import('node:fs/promises');
+          await fsModule.stat(requestedPath);
+          await staticResponse(response, requestedPath);
+        } catch (_error) {
+          await staticResponse(response, path.join(appBuildRoot, 'index.html'));
+        }
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname.startsWith('/shell/')) {
         // §7c vault transfer module is shared with `src/phase1` (canonical
         // artifact tested by node:test) — alias the shell-import path so we
@@ -1308,6 +1337,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',
+            'GET /app/*  (Phase 11 SPA — public/app/build/)',
             'POST /api/identities/:collectiveId/collective-memberships',
             'GET /api/identities/:memberId/collective-memberships',
             'POST /api/identities/:collectiveId/collective-memberships/:membershipId/revoke',
