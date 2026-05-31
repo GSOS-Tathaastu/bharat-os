@@ -144,6 +144,22 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+## ⚠ 2026-05-27 — FE rebuild incoming (Phase 11)
+
+The user-facing `/shell/` accumulated 4,811 lines of vanilla JS
+across Phase 1.0 → 9.0b and lost editorial coherence. A clean
+rebuild as `/app/` begins next session per **ADR 0115** — Vite +
+React 19 + TypeScript + Tailwind, tricolour brand (`#FF9933`
+saffron + `#138808` green + `#000080` navy on `#FFFFFF`), split-
+hero onboarding (Worker + Citizen), three primary surfaces + Labs
+catch-all. Existing `/shell/` survives as developer surface.
+Phase 9.0c (llama.cpp-wasm runtime) paused until `/app/` v1 ships.
+
+**FE+BE parity rule** activates from Phase 11: every phase ships
+both layers together. No more BE-first phases.
+
+---
+
 - Phase 9.0b **Per-identity SLM install records + DPDP cascade +
   shell install card; install pipeline end-to-end demoable; still
   no runtime (9.0c)** — Phase 9.0a shipped the registry but the

@@ -2077,6 +2077,56 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 🟡 **Proposed (design only — not yet implemented):**
 
+- **Phase 11 (ADR 0115)** — Frontend rebuild as `/app/` surface.
+  **Direction set 2026-05-27. Pauses Phase 9.0c (llama.cpp-wasm
+  runtime).** The 4,811-line vanilla-JS `/shell/` accumulated too
+  much tech debt across Phases 1.0 → 9.0b — every phase added a
+  card with no editorial discipline. On 2026-05-27 the founder
+  opened the demo cold and could not get past the "No profile"
+  wall; a 1-hour debug session failed to identify a single root
+  cause because the shell is structurally incoherent (it tries to
+  be worker dashboard + citizen orchestrator + verifier + settings
+  + labs simultaneously). Decision: stop polishing the shell,
+  rebuild the user-facing layer with discipline, leave `/shell/`
+  as developer surface. **Stack** (binding): Vite + React 19 +
+  TypeScript + Tailwind + shadcn/ui (copy-paste, not npm) +
+  Zustand + TanStack Query + React Router v7 + Vitest.
+  **First significant npm dependency surface for Bharat OS
+  frontend**; backend zero-npm-dep posture preserved.
+  **Surfaces**: split-hero `/app/` onboarding (no single primary
+  persona — investor decides on the fly between Worker / Citizen
+  on the very first screen), `/app/worker/` (Priya/Suresh/Rajesh
+  — mesh ticker → cash-out → MFI consent → Trust Passport),
+  `/app/citizen/` (Sita/Lakshmi/Anjali/Aarav — intent → policy
+  gate → orchestrated outcome → recent activity), `/app/verify/`
+  (adapted from existing `/verify/` for MFI bundle read),
+  `/app/labs/` (SLM install + federated rounds + OCR — moved out
+  of main surfaces), `/app/settings/`. **Brand**: tricolour-
+  inspired — white surface `#FFFFFF`, flag-grade saffron `#FF9933`
+  for primary actions, flag-grade green `#138808` for verified /
+  trust states, navy `#000080` for regulated / policy-gated flows.
+  Discipline rule: flag colors as accents not splashes, must not
+  look like a government app. Typography: Manrope (Latin) +
+  Noto Sans Devanagari/Tamil/Bengali (vernacular). 6-step type
+  scale, 2 weights, 7-step spacing, 3 border radii. **Component
+  library** built FIRST before any feature work: Hero (with split
+  variant), Card, Action (6 variants), Badge, Sheet, Tab, Toast,
+  Identity, Field, Money, Stat, Evidence. **State**: Zustand
+  stores (`useIdentityStore`, `useEarnStore`, `useTrustStore`)
+  replace global state object; TanStack Query replaces ad-hoc
+  `fetchJson`. **DPDP §15 bindings preserved end-to-end** (identity
+  switcher, pointer-not-payload Trust Passport, §12(3) erasure
+  cascade in /app/settings/, audit ledger evidence collapsibles).
+  **Sub-phases** 11.0 scaffold + design tokens + components + API
+  serve route (~3 days), 11.1 onboarding + persona picker (~2 days),
+  11.2 worker surface (~4 days), 11.3 citizen surface (~4 days),
+  11.4 verifier adaptation (~2 days), 11.5 labs catch-all (~2 days),
+  11.6 polish + investor-demo smoke (~1 day). Total ~18 days =
+  ~2.5 weeks. **FE+BE parity rule activates**: every phase from
+  Phase 12 onward ships both layers together; no more BE-first
+  phases that leave the FE to catch up (the failure pattern that
+  created the Phase 5.9→7.3 backlog and forced this rebuild).
+  Phase 9.0c (llama.cpp-wasm) restart: AFTER `/app/` v1 ships.
 - **Phase 10 (ADR 0110)** — Labeling marketplace (sponsor-paid, worker-
   executed, DPDP-audited Indic-language data labels). Strongest near-
   term monetisation lever surfaced in the 2026-05-25 strategy thread:
@@ -2127,16 +2177,21 @@ code lands; do not create a separate `STATUS.md` (§16).
   Phase 9.0. Sells privacy-preserving fine-tuning to banks / hospitals
   / government as a paid service routing through the operator network.
 
-Suggested sequencing: Phase 9.0c (runtime adapter wrapping
-llama.cpp-wasm / MLC-LLM — biggest unblock + third-party-dep ADR) →
-Phase 9.0d (federated-round + mesh-inference integration) → Phase
-9.1 (sponsored federated rounds — demand-side revenue) → Phase
-10.0–10.5 (labeling marketplace, sponsor-funded revenue line; sub-
-phases 10.0–10.2 launchable without Phase 9.0c — 10.3 SLM pre-
-labeling hint layers on after 9.0c lands; 10.4–10.5 QC + signed
-export harden before any commercial pilot). The 9.x and 10.x arcs
-share the existing consent / ledger / UPI rails but don't share code
-surfaces — can run in parallel once 9.0c lands.
+Suggested sequencing (revised 2026-05-27 after the FE rebuild
+decision):
+**Phase 11.0–11.6 (FE rebuild as /app/ surface, ~2.5 wks)** comes
+FIRST — pauses everything else until the demo is investor-ready.
+Then:
+- Phase 9.0c (llama.cpp-wasm runtime adapter, ~2-3 wks; resume
+  post-/app/, ships with its `/app/labs/` surface per the FE+BE
+  parity rule)
+- Phase 9.0d (federated-round + mesh-inference integration, ~1 wk)
+- Phase 9.1 (sponsored federated rounds — demand-side revenue)
+- Phase 10.0–10.5 (labeling marketplace, sponsor-funded revenue
+  line; 10.0–10.2 launchable independently of 9.0c)
+
+Every phase from Phase 11 onward ships FE+BE together per the
+binding rule recorded in 2026-05-27 session memory.
 
 ---
 
