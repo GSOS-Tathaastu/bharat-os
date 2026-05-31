@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Action, Badge, Card, Evidence, Tabs, useToast } from '@/components/ui';
+import { Action, Badge, Card, Evidence, Field, Sheet, Tabs, useToast } from '@/components/ui';
 import { ConsentGrantSheet } from '@/components/ConsentGrantSheet';
 import { DailyBriefCard } from '@/components/DailyBriefCard';
 import { CitizenNotes } from '@/routes/CitizenNotes';
 import {
   useActiveIdentity,
   useConsents,
+  useCreateFlagReport,
   useDailyBrief,
   useGrantConsent,
   useRecentOrchestrations,
@@ -16,6 +17,7 @@ import {
   type ConsentArtifact,
   type Orchestration
 } from '@/lib/hooks';
+import { isVoiceIntentSupported, VoiceIntentSession } from '@/lib/voice-intent';
 
 const ACTION_TYPE_LABEL: Record<string, string> = {
   service_booking: 'Service booking (Bharat OS marketplace)',
@@ -66,7 +68,94 @@ function CitizenIntent() {
   const grantConsent = useGrantConsent();
   const { data: recent = [] } = useRecentOrchestrations(identity?.id);
   const { data: briefData } = useDailyBrief(identity?.id);
+  const createFlag = useCreateFlagReport();
   const show = useToast((s) => s.show);
+
+  // Phase 12.0.4 — voice intent input. Browser SpeechRecognition is
+  // device-local; nothing leaves until the citizen taps Send. Phase
+  // 12.1b SLM-A will replace this with a true on-device vernacular
+  // model handling 22+ Indic languages.
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState('');
+  const voiceSupported = isVoiceIntentSupported();
+  const voiceRef = useRef<VoiceIntentSession | null>(null);
+
+  useEffect(
+    () => () => {
+      voiceRef.current?.abort();
+    },
+    []
+  );
+
+  function startVoice() {
+    if (listening) {
+      voiceRef.current?.stop();
+      return;
+    }
+    setInterim('');
+    const session = new VoiceIntentSession({
+      lang: 'en-IN',
+      onInterim: (t) => setInterim(t),
+      onFinal: (finalText) => {
+        setText((prev) => {
+          const sep = prev && !prev.endsWith(' ') ? ' ' : '';
+          return (prev + sep + finalText).trim();
+        });
+        setInterim('');
+      },
+      onError: (msg) => {
+        setListening(false);
+        setInterim('');
+        show(`Voice input: ${msg}`, 'error');
+      },
+      onEnd: () => {
+        setListening(false);
+        setInterim('');
+      }
+    });
+    if (session.start()) {
+      voiceRef.current = session;
+      setListening(true);
+    }
+  }
+
+  // Phase 12.0.4 — flag report state.
+  const [flagOpen, setFlagOpen] = useState(false);
+  const [flagSubject, setFlagSubject] = useState<{ id: string; label: string } | null>(null);
+  const [flagCategory, setFlagCategory] = useState('abuse');
+  const [flagDescription, setFlagDescription] = useState('');
+
+  function openFlag(subjectId: string, subjectLabel: string) {
+    setFlagSubject({ id: subjectId, label: subjectLabel });
+    setFlagCategory('abuse');
+    setFlagDescription('');
+    setFlagOpen(true);
+  }
+
+  function handleSubmitFlag() {
+    if (!identity || !flagSubject) return;
+    if (flagDescription.trim().length < 10) {
+      show('Tell us what happened in at least 10 characters.', 'error');
+      return;
+    }
+    createFlag.mutate(
+      {
+        reporterId: identity.id,
+        subjectId: flagSubject.id,
+        category: flagCategory,
+        description: flagDescription.trim()
+      },
+      {
+        onSuccess: () => {
+          setFlagOpen(false);
+          setFlagSubject(null);
+          setFlagDescription('');
+          show('Report filed. An operator will review under §9A.', 'success');
+        },
+        onError: (err: Error) => show(err.message, 'error')
+      }
+    );
+  }
 
   // Phase 12.0.2 — when the citizen taps "Review + grant" on the
   // daily brief card, route through the existing ConsentGrantSheet
@@ -151,13 +240,36 @@ function CitizenIntent() {
       <DailyBriefCard onGrantConsent={handleGrantBriefConsent} />
 
       <Card>
-        <textarea
-          rows={3}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Speak in any language. Hindi · Marathi · Bhojpuri · Tamil · Bengali · English."
-          className="w-full resize-none rounded-sm border border-border bg-white px-3 py-2 text-body text-text placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-100"
-        />
+        <div className="relative">
+          <textarea
+            rows={3}
+            value={text + (listening && interim ? ` ${interim}` : '')}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Speak in any language. Hindi · Marathi · Bhojpuri · Tamil · Bengali · English."
+            className={
+              'w-full resize-none rounded-sm border bg-white px-3 py-2 text-body text-text placeholder:text-text-muted focus:outline-none focus:ring-2 ' +
+              (listening
+                ? 'border-error focus:border-error focus:ring-orange-100'
+                : 'border-border focus:border-primary focus:ring-primary-100')
+            }
+          />
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={startVoice}
+              className={
+                'absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors ' +
+                (listening
+                  ? 'border-error bg-error-50 text-error animate-pulse'
+                  : 'border-border bg-white text-text-muted hover:border-primary hover:text-primary')
+              }
+              aria-label={listening ? 'Stop listening' : 'Speak your intent'}
+              title={listening ? 'Stop listening' : 'Speak your intent'}
+            >
+              {listening ? '⏹' : '🎤'}
+            </button>
+          )}
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {SUGGESTIONS.map((s) => (
             <button
@@ -218,16 +330,101 @@ function CitizenIntent() {
           <ul className="divide-y divide-border">
             {recent.map((o) => (
               <li key={o.orchestrationId} className="py-2 first:pt-0 last:pb-0">
-                <p className="font-semibold text-text">{o.intent?.intentText ?? '—'}</p>
-                <p className="text-caption text-text-muted">
-                  {o.actionRequest?.actionType ?? '—'} ·{' '}
-                  {new Date(o.createdAt).toLocaleString('en-IN')}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-text">{o.intent?.intentText ?? '—'}</p>
+                    <p className="text-caption text-text-muted">
+                      {o.actionRequest?.actionType ?? '—'} ·{' '}
+                      {new Date(o.createdAt).toLocaleString('en-IN')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openFlag(
+                        o.orchestrationId,
+                        o.intent?.intentText ?? o.actionRequest?.actionType ?? 'orchestration'
+                      )
+                    }
+                    className="shrink-0 rounded-sm border border-border bg-white px-2 py-1 text-caption text-text-muted hover:border-error hover:text-error"
+                    aria-label="Report this activity"
+                    title="Report this activity"
+                  >
+                    Report
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </Card>
+
+      {/* Phase 12.0.4 — §9A flag report sheet. */}
+      <Sheet
+        open={flagOpen}
+        onClose={() => {
+          setFlagOpen(false);
+          setFlagSubject(null);
+        }}
+        title="Report this activity"
+      >
+        <div className="space-y-3">
+          <p className="text-body text-text-muted">
+            Operators review §9A reports. False reports are themselves a
+            flaggable offence. Bharat OS surfaces resolutions in your audit
+            ledger.
+          </p>
+          {flagSubject && (
+            <Card>
+              <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                Subject
+              </p>
+              <p className="mt-1 text-body">{flagSubject.label}</p>
+              <p className="text-caption font-mono text-text-muted">
+                {flagSubject.id.replace(/^bos:[a-z-]+:/, '')}
+              </p>
+            </Card>
+          )}
+          <div>
+            <p className="mb-1 text-caption font-semibold text-text">Category</p>
+            <div className="flex flex-wrap gap-2">
+              {['abuse', 'fraud', 'spam', 'safety', 'other'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setFlagCategory(c)}
+                  className={
+                    'rounded-sm border-2 px-3 py-1 text-caption font-semibold capitalize ' +
+                    (flagCategory === c
+                      ? 'border-error bg-error-50 text-error'
+                      : 'border-border bg-white text-text-muted hover:border-error')
+                  }
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-caption font-semibold text-text">What happened?</p>
+            <textarea
+              rows={4}
+              value={flagDescription}
+              onChange={(e) => setFlagDescription(e.target.value)}
+              placeholder="At least 10 characters. Be factual."
+              className="w-full resize-none rounded-sm border border-border bg-white px-3 py-2 text-body text-text placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-100"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Action variant="destructive" onClick={handleSubmitFlag} disabled={createFlag.isPending}>
+              {createFlag.isPending ? 'Filing…' : 'File report'}
+            </Action>
+            <Action variant="ghost" onClick={() => setFlagOpen(false)}>
+              Cancel
+            </Action>
+          </div>
+        </div>
+      </Sheet>
     </main>
   );
 }

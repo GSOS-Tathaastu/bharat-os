@@ -1,13 +1,25 @@
-import { useState } from 'react';
-import { Action, Card, Field, Sheet, useToast } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { Action, Badge, Card, Evidence, Field, Sheet, useToast } from '@/components/ui';
 import { useIdentityStore } from '@/lib/identity-store';
 import { useNavigate } from 'react-router-dom';
 import {
   useActiveIdentity,
   useAuditSignerPublicKey,
   useDownloadMyData,
-  useEraseIdentity
+  useDpdpGrievance,
+  useEraseIdentity,
+  usePushPublicKey,
+  usePushSubscriptions,
+  useSubscribePush,
+  useUnsubscribePush,
+  useVaultSnapshot
 } from '@/lib/hooks';
+import {
+  currentPushSubscription,
+  registerAppServiceWorker,
+  subscribeToPush,
+  unsubscribeFromPush
+} from '@/lib/push';
 
 export function SettingsPage() {
   const clear = useIdentityStore((s) => s.clear);
@@ -16,10 +28,29 @@ export function SettingsPage() {
   const downloadMyData = useDownloadMyData();
   const eraseIdentity = useEraseIdentity();
   const auditSigner = useAuditSignerPublicKey();
+  // Phase 12.0.4 additions.
+  const pushPublicKey = usePushPublicKey();
+  const { data: pushSubs = [] } = usePushSubscriptions(identity?.id);
+  const subscribe = useSubscribePush();
+  const unsubscribeMutation = useUnsubscribePush();
+  const grievance = useDpdpGrievance();
+  const vaultSnapshot = useVaultSnapshot();
   const show = useToast((s) => s.show);
 
   const [eraseOpen, setEraseOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [browserPushPermission, setBrowserPushPermission] = useState<NotificationPermission | 'unsupported'>(
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  );
+  const [hasBrowserSubscription, setHasBrowserSubscription] = useState<boolean | null>(null);
+
+  // Register service worker eagerly on first Settings open (no-op if
+  // already registered).
+  useEffect(() => {
+    registerAppServiceWorker().then(() => {
+      currentPushSubscription().then((sub) => setHasBrowserSubscription(!!sub));
+    });
+  }, []);
 
   function handleDownload() {
     if (!identity) return;
@@ -45,6 +76,76 @@ export function SettingsPage() {
           show('Account erased. Goodbye.', 'success');
           clear();
           setTimeout(() => navigate('/'), 600);
+        },
+        onError: (err: Error) => show(err.message, 'error')
+      }
+    );
+  }
+
+  async function handleSubscribePush() {
+    if (!identity || !pushPublicKey.data?.publicKey) return;
+    try {
+      const sub = await subscribeToPush({ vapidPublicKey: pushPublicKey.data.publicKey });
+      if (!sub) {
+        show('Browser denied notification permission. Enable in browser settings.', 'error');
+        setBrowserPushPermission(Notification.permission);
+        return;
+      }
+      await subscribe.mutateAsync({
+        identityId: identity.id,
+        endpoint: sub.endpoint,
+        keys: sub.keys,
+        permission: 'granted',
+        source: 'app',
+        userAgent: navigator.userAgent,
+        storeDeliveryKeys: true
+      });
+      setBrowserPushPermission('granted');
+      setHasBrowserSubscription(true);
+      show('Push notifications enabled.', 'success');
+    } catch (err) {
+      show((err as Error).message, 'error');
+    }
+  }
+
+  async function handleUnsubscribePush() {
+    if (!identity) return;
+    try {
+      const subRecord = pushSubs[0];
+      await unsubscribeFromPush();
+      if (subRecord) {
+        await unsubscribeMutation.mutateAsync({
+          identityId: identity.id,
+          subscriptionId: subRecord.subscriptionId
+        });
+      }
+      setHasBrowserSubscription(false);
+      show('Push notifications disabled.', 'success');
+    } catch (err) {
+      show((err as Error).message, 'error');
+    }
+  }
+
+  function handleExportBundle() {
+    if (!identity) return;
+    vaultSnapshot.mutate(
+      { identityId: identity.id },
+      {
+        onSuccess: (snapshot) => {
+          const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+            type: 'application/json'
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `bharat-os-account-${identity.displayName.replace(/\s+/g, '-').toLowerCase()}-${new Date()
+            .toISOString()
+            .slice(0, 10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          show('Account bundle downloaded. Store it like a password manager backup.', 'success');
         },
         onError: (err: Error) => show(err.message, 'error')
       }
@@ -85,6 +186,69 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      {/* Phase 12.0.4 — Push notifications opt-in. */}
+      <Card title="Push notifications" tone="trust">
+        {pushPublicKey.isPending ? (
+          <p className="text-body text-text-muted">Checking server configuration…</p>
+        ) : !pushPublicKey.data ? (
+          <p className="text-body text-text-muted">
+            Push is not configured on this server. Your operator can enable it by
+            setting <span className="font-mono">BHARAT_OS_VAPID_PUBLIC_KEY / PRIVATE_KEY / SUBJECT</span>.
+          </p>
+        ) : browserPushPermission === 'unsupported' ? (
+          <p className="text-body text-text-muted">
+            This browser does not support push notifications.
+          </p>
+        ) : browserPushPermission === 'denied' ? (
+          <p className="text-body text-error">
+            You blocked notifications for Bharat OS in this browser. Unblock in
+            your browser's site settings, then refresh.
+          </p>
+        ) : hasBrowserSubscription || pushSubs.length > 0 ? (
+          <>
+            <p className="text-body text-text-muted mb-3">
+              You will receive alerts for cash-outs, SIM-swap detection, sponsor
+              review verdicts, and matched jobs.{' '}
+              <Badge variant="trust">enabled</Badge>
+            </p>
+            <Action variant="ghost" onClick={handleUnsubscribePush}>
+              Disable push
+            </Action>
+          </>
+        ) : (
+          <>
+            <p className="text-body text-text-muted mb-3">
+              Bharat OS uses real Web Push to alert you about cash-outs,
+              account-recovery attempts, and matched jobs. Notifications come
+              through your browser; we never SMS-spam.
+            </p>
+            <Action onClick={handleSubscribePush} disabled={subscribe.isPending}>
+              {subscribe.isPending ? 'Subscribing…' : 'Enable push notifications'}
+            </Action>
+          </>
+        )}
+      </Card>
+
+      {/* Phase 12.0.4 — Export account bundle (vault snapshot). */}
+      <Card title="Export account bundle" tone="governance">
+        <p className="text-body text-text-muted mb-3">
+          Download a signed JSON file with your identity, vault key, and
+          metadata references. Use it to restore your account on a new
+          device or device-pair-by-file.
+        </p>
+        <Action variant="secondary" onClick={handleExportBundle} disabled={vaultSnapshot.isPending}>
+          {vaultSnapshot.isPending ? 'Preparing bundle…' : 'Download bundle (.json)'}
+        </Action>
+        <Evidence title="What is in the bundle?">
+          Your Ed25519 public + private keys (in PEM), your vault key (used to
+          decrypt your memory records), your display name, your verified
+          attestations, and references to your memory records. Treat this file
+          like a password manager export — encrypt it, store it offline, never
+          share it. Phase 2b Android moves the private key to the device
+          hardware keystore so re-export will not be needed.
+        </Evidence>
+      </Card>
+
       <Card title="Notifications">
         <p className="text-body text-text-muted">
           Push for recovery alerts, cash-out updates, and job alerts. Available
@@ -120,6 +284,72 @@ export function SettingsPage() {
             </details>
           </div>
         ) : null}
+      </Card>
+
+      {/* Phase 12.0.4 — DPDP grievance contact (§12(4)). */}
+      <Card title="Data Protection Officer (DPDP §12(4))" tone="governance">
+        <p className="text-body text-text-muted mb-3">
+          If Bharat OS has mishandled your data, you have the right to raise a
+          grievance under the Digital Personal Data Protection Act, 2023.
+        </p>
+        {grievance.isPending ? (
+          <p className="text-caption text-text-muted">Loading…</p>
+        ) : grievance.data?.contact ? (
+          <ul className="space-y-1 text-body">
+            {grievance.data.contact.name && (
+              <li>
+                <span className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                  DPO:
+                </span>{' '}
+                {grievance.data.contact.name}
+              </li>
+            )}
+            {grievance.data.contact.email && (
+              <li>
+                <span className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                  Email:
+                </span>{' '}
+                <a
+                  className="underline text-primary"
+                  href={`mailto:${grievance.data.contact.email}`}
+                >
+                  {grievance.data.contact.email}
+                </a>
+              </li>
+            )}
+            {grievance.data.contact.postal && (
+              <li>
+                <span className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                  Postal:
+                </span>{' '}
+                <span className="whitespace-pre-line">{grievance.data.contact.postal}</span>
+              </li>
+            )}
+            {grievance.data.contact.responseSlaDays != null && (
+              <li>
+                <span className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+                  Response within:
+                </span>{' '}
+                {grievance.data.contact.responseSlaDays} days
+              </li>
+            )}
+            {grievance.data.contact.grievanceEscalation && (
+              <li className="mt-3 text-caption text-text-muted">
+                Escalation:{' '}
+                <a
+                  className="underline"
+                  href={grievance.data.contact.grievanceEscalation.split(' ')[0]}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {grievance.data.contact.grievanceEscalation}
+                </a>
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="text-caption text-text-muted">DPO contact not configured.</p>
+        )}
       </Card>
 
       <Card title="Developer">

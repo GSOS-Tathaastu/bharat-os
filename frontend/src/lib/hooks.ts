@@ -792,6 +792,169 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0.4 cross-cutting sweep ---------------------------------
+//
+// Push notifications, DPDP grievance contact, flag reports (§9A), and
+// vault transfer (account bundle export). Each substrate has been
+// BE-complete for several phases (Phase 7.0 push, Phase 5.x DPDP §12,
+// Phase 9.0 flag reports, Phase 5.0 recovery bundle).
+
+export interface PushPublicKeyResponse {
+  publicKey: string;
+  subject: string;
+}
+
+export function usePushPublicKey() {
+  return useQuery({
+    queryKey: ['push-public-key'],
+    queryFn: async () => {
+      try {
+        return await api<PushPublicKeyResponse>('/api/push-public-key');
+      } catch (err) {
+        // Server returns 503 push_disabled when VAPID isn't configured.
+        // We swallow and return null so the FE can render an honest
+        // "Push is not configured on this server" card instead of
+        // throwing.
+        const e = err as { status?: number };
+        if (e.status === 503) return null;
+        throw err;
+      }
+    },
+    staleTime: Infinity,
+    retry: false
+  });
+}
+
+export interface PushSubscriptionRecord {
+  subscriptionId: string;
+  identityId: string;
+  endpointHash?: string;
+  permission: string;
+  source: string;
+  storeDeliveryKeys: boolean;
+  userAgent?: string;
+  createdAt: string;
+}
+
+export function usePushSubscriptions(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['push-subscriptions', identityId],
+    queryFn: () =>
+      api<{ subscriptions: PushSubscriptionRecord[] }>(
+        `/api/push/subscriptions?identityId=${encodeURIComponent(identityId!)}`
+      ).then((r) => r.subscriptions),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface SubscribePushInput {
+  identityId: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  permission: 'granted';
+  source: 'app';
+  userAgent?: string;
+  storeDeliveryKeys: boolean;
+}
+
+export function useSubscribePush() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SubscribePushInput) =>
+      api<{ ok: boolean; subscription: PushSubscriptionRecord }>(
+        '/api/push/subscriptions',
+        {
+          method: 'POST',
+          body: JSON.stringify(input)
+        }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['push-subscriptions', identityId] });
+    }
+  });
+}
+
+export function useUnsubscribePush() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      subscriptionId
+    }: {
+      identityId: string;
+      subscriptionId: string;
+    }) =>
+      api<{ ok: boolean }>(
+        `/api/push/subscriptions/${encodeURIComponent(subscriptionId)}`,
+        { method: 'DELETE' }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['push-subscriptions', identityId] });
+    }
+  });
+}
+
+export interface DpdpGrievanceContact {
+  contact: {
+    name?: string;
+    email?: string;
+    postal?: string;
+    grievanceEscalation?: string;
+    responseSlaDays?: number;
+    protocolVersion?: string;
+  };
+}
+
+export function useDpdpGrievance() {
+  return useQuery({
+    queryKey: ['dpdp-grievance'],
+    queryFn: () => api<DpdpGrievanceContact>('/api/dpdp/grievance'),
+    staleTime: 24 * 60 * 60 * 1000
+  });
+}
+
+export interface VaultSnapshot {
+  identity: {
+    id: string;
+    displayName: string;
+    publicKeyPem: string;
+    privateKeyPem: string;
+    vaultKeyBase64: string;
+    attestations: Record<string, unknown>;
+  };
+  memoryRecordRefs: Array<{
+    recordId: string;
+    manifestId: string | null;
+    label: string | null;
+    createdAt: string | null;
+  }>;
+  warning: string;
+}
+
+export function useVaultSnapshot() {
+  return useMutation({
+    mutationFn: ({ identityId }: { identityId: string }) =>
+      api<VaultSnapshot>(`/api/identities/${encodeURIComponent(identityId)}/vault-snapshot`)
+  });
+}
+
+export interface FlagReportInput {
+  reporterId: string;
+  subjectId: string;
+  category: string;
+  description: string;
+  evidenceRefs?: string[];
+}
+
+export function useCreateFlagReport() {
+  return useMutation({
+    mutationFn: (input: FlagReportInput) =>
+      api<{ ok: boolean; report: unknown }>('/api/flags', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+  });
+}
+
 // --- Phase 12.0.3 worker sweep: e-Shram + schemes + tax + collective
 // memberships + trust attestation mint --------------------------------
 

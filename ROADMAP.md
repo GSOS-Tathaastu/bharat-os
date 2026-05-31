@@ -398,6 +398,25 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.0.4 — Cross-cutting sweep ✅ SHIPPED 2026-06-01
+- **ADR 0133** — third of four substrate-integration sub-phases.
+  Five integrations across /settings + /citizen/home.
+- (1) Push notifications opt-in on /settings — VAPID + service
+  worker (/app/sw.js) + honest unsupported/denied/disabled
+  states.
+- (2) Vault transfer download (.json) on /settings — Phase 5.0
+  recovery bundle as a download.
+- (3) DPDP grievance contact card on /settings — DPO name +
+  email + postal + escalation URL.
+- (4) Voice intent mic on /citizen/home — browser
+  SpeechRecognition (en-IN; on-device).
+- (5) Flag reports (§9A) — Report button on each Recent Activity
+  row → category + description → POST /api/flags.
+- Mostly FE; one operational BE change (VAPID env vars).
+- 5 new hooks + voice-intent helper + service worker.
+- Tests: Node 890/890 unchanged, FE Vitest 45/45 unchanged.
+- **Bundle**: main 421 → 434 KB / 129 KB gzipped (+13 KB).
+
 #### Phase 12.0.3 — Worker sweep ✅ SHIPPED 2026-06-01
 - **ADR 0132** — second of four substrate-integration sub-phases.
   Five integrations across `/worker/earn` + `/worker/trust` (no

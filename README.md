@@ -152,6 +152,33 @@ Implemented pieces:
 
 ---
 
+## 🔔 2026-06-01 — Phase 12.0.4 shipped: cross-cutting sweep — push + vault transfer + DPDP grievance + voice + flag reports
+
+Third of four substrate-integration sub-phases. Five wires
+across `/settings` + `/citizen/home`. Mostly FE; one
+operational BE change (VAPID env vars for real Web Push).
+
+- **ADR 0133** — Settings on `/app/` becomes a real control
+  panel; citizen home gains mic + flag-this-activity.
+- **Push notifications opt-in** on Settings (real VAPID +
+  service worker + honest unsupported/denied/disabled states).
+- **Vault transfer** — download account bundle (.json) for
+  device migration / backup.
+- **DPDP §12(4) grievance** — DPO contact card from the
+  substrate.
+- **Voice intent** — mic button on the citizen home intent
+  textarea (browser SpeechRecognition; en-IN; on-device per §15).
+- **Flag reports (§9A)** — Report button on each Recent
+  Activity row → category + description → operator review.
+- 5 new hooks + voice helper + `frontend/public/sw.js`.
+- Bundle: main 434 KB / 129 KB gzipped (+13 KB vs 12.0.3).
+
+**Next: Phase 12.0.5** — sponsor `/app/sponsor/` admin surface
+(labeling marketplace + escrow + signed export download
+graduates from `/shell/`).
+
+---
+
 ## 🏛 2026-06-01 — Phase 12.0.3 shipped: worker home wires in government benefits + tax view + Trust Passport attestation mint
 
 Second of four substrate-integration sub-phases. Five wires
