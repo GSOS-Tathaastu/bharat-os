@@ -515,6 +515,88 @@ export function useSponsorDirectory(sponsorId: string | null | undefined) {
   });
 }
 
+// --- Phase 10 labeling marketplace ----------------------------------
+
+export type LabelingTaskKind =
+  | 'preference_pair'
+  | 'classification'
+  | 'span_annotation'
+  | 'transcription'
+  | 'safety_label';
+
+export interface LabelingJobSurface {
+  jobId: string;
+  sponsorId: string;
+  taskKind: LabelingTaskKind;
+  language: string;
+  modality: 'text' | 'voice' | 'image';
+  perLabelPaise: number;
+  description: string | null;
+  itemCount: number;
+  submissionsAccepted: number;
+  deadlineAt: string;
+}
+
+export interface LabelingJobItem {
+  itemId: string;
+  jobId: string;
+  taskKind: LabelingTaskKind;
+  body: unknown;
+}
+
+export function useLabelingJobs(language?: string) {
+  return useQuery({
+    queryKey: ['labeling-jobs', language],
+    queryFn: () =>
+      api<{ jobs: LabelingJobSurface[] }>(
+        `/api/labeling-jobs${language ? `?language=${encodeURIComponent(language)}` : ''}`
+      ).then((r) => r.jobs)
+  });
+}
+
+export function useLabelingNextItem(jobId: string | null, workerId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['labeling-next-item', jobId, workerId],
+    queryFn: () =>
+      api<{ item: LabelingJobItem | null; reason?: string }>(
+        `/api/labeling-jobs/${encodeURIComponent(jobId!)}/next-item?workerId=${encodeURIComponent(workerId!)}`
+      ),
+    enabled: Boolean(jobId && workerId),
+    staleTime: 0
+  });
+}
+
+export function useSubmitLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      jobId,
+      itemId,
+      workerId,
+      labelValue
+    }: {
+      jobId: string;
+      itemId: string;
+      workerId: string;
+      labelValue: unknown;
+    }) =>
+      api<{
+        ok: true;
+        submission: { submissionId: string; jobId: string; itemId: string };
+        meshContributionEvent: { payoutPaise: number } | null;
+      }>(`/api/labeling-jobs/${encodeURIComponent(jobId)}/submissions`, {
+        method: 'POST',
+        body: JSON.stringify({ itemId, workerId, labelValue })
+      }),
+    onSuccess: (_data, { workerId, jobId }) => {
+      qc.invalidateQueries({ queryKey: ['labeling-next-item', jobId, workerId] });
+      qc.invalidateQueries({ queryKey: ['labeling-jobs'] });
+      qc.invalidateQueries({ queryKey: ['mesh-balance', workerId] });
+      qc.invalidateQueries({ queryKey: ['mesh-summary', workerId] });
+    }
+  });
+}
+
 export function useFederatedRounds() {
   return useQuery({
     queryKey: ['federated-rounds'],

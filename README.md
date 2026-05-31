@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 🏷 2026-05-31 — Phase 10.1 + 10.2 shipped: labeling marketplace v1
+
+Workers can earn paise per accepted label TODAY on `/app/labels/`.
+Sponsors create draft jobs → upload corpus → launch (escrow locks
+for `itemCount × perLabel`) → workers discover jobs filtered by
+language → tap a preference-pair → submit → server accepts +
+debits sponsor escrow + credits worker mesh + records ledger
+events. Full Bharat OS rail (UPI cash-out via Phase 8.3) drains
+the worker's mesh balance.
+
+- **ADR 0121** — module + lifecycle + escrow integration + worker
+  surface.
+- **Labels** is now a tab on the Worker bottom nav (5 tabs:
+  Earn / Labels / Trust / Labs / Settings).
+- v1 ships **preference_pair** task UI; other task kinds (Phase
+  10.3) show an honest "not supported in /app/ v1" card.
+- seed-demo: 5 Hindi-language preference-pair items under the
+  existing Pragati Microfinance sponsor — runnable on fresh seed.
+- Tests: **838/838 Node** (+17 labeling); 16/16 Vitest.
+- Bundle: main 352 KB / 109 KB gzipped (+2 KB vs 9.1).
+
+**Next**: Phase 10.3 (remaining task kinds) → 10.4 (QC) → 10.5
+(signed export) → 10.6 (SLM pre-labeling hint). See `ROADMAP.md`.
+
+---
+
 ## 💰 2026-05-31 — Phase 9.1 shipped: first non-investor revenue line
 
 Sponsors (banks, hospitals, govt, LLM trainers) can now pay Bharat

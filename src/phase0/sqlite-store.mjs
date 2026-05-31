@@ -405,6 +405,30 @@ const SCHEMAS = `
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS labeling_jobs (
+    job_id TEXT PRIMARY KEY,
+    sponsor_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_labeling_jobs_sponsor ON labeling_jobs(sponsor_id);
+
+  CREATE TABLE IF NOT EXISTS labeling_job_items (
+    item_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_labeling_items_job ON labeling_job_items(job_id);
+
+  CREATE TABLE IF NOT EXISTS labeling_submissions (
+    submission_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_labeling_sub_job ON labeling_submissions(job_id);
+  CREATE INDEX IF NOT EXISTS idx_labeling_sub_worker ON labeling_submissions(worker_id);
 `;
 
 function parse(row) {
@@ -1875,6 +1899,115 @@ export class SqliteStore {
     return this._listAll('sponsors');
   }
 
+  // Phase 10.1 — labeling marketplace CRUD. labeling_submissions
+  // also cascade by worker_id in eraseUserData.
+  async saveLabelingJob(job) {
+    if (!job?.jobId) throw new Error('labeling job requires jobId.');
+    await this.init();
+    this._upsert(
+      'labeling_jobs',
+      ['job_id', 'sponsor_id', 'json'],
+      [job.jobId, job.sponsorId, JSON.stringify(job)]
+    );
+    await this.appendLedger({
+      type: 'labeling_job.saved',
+      jobId: job.jobId,
+      sponsorId: job.sponsorId,
+      status: job.status,
+      itemCount: job.itemCount,
+      perLabelPaise: job.perLabelPaise
+    });
+    return job;
+  }
+
+  async readLabelingJob(jobId) {
+    await this.init();
+    return this._readOne('labeling_jobs', 'job_id', jobId);
+  }
+
+  async listLabelingJobs() {
+    await this.init();
+    return this._listAll('labeling_jobs');
+  }
+
+  async saveLabelingJobItem(item) {
+    if (!item?.itemId) throw new Error('labeling job item requires itemId.');
+    await this.init();
+    this._upsert(
+      'labeling_job_items',
+      ['item_id', 'job_id', 'json'],
+      [item.itemId, item.jobId, JSON.stringify(item)]
+    );
+    return item;
+  }
+
+  async readLabelingJobItem(itemId) {
+    await this.init();
+    return this._readOne('labeling_job_items', 'item_id', itemId);
+  }
+
+  async listLabelingJobItems({ jobId } = {}) {
+    await this.init();
+    if (jobId) {
+      const rows = this.db
+        .prepare('SELECT json FROM labeling_job_items WHERE job_id = ?')
+        .all(jobId);
+      return rows.map((r) => JSON.parse(r.json));
+    }
+    return this._listAll('labeling_job_items');
+  }
+
+  async saveLabelingSubmission(submission) {
+    if (!submission?.submissionId) {
+      throw new Error('labeling submission requires submissionId.');
+    }
+    await this.init();
+    this._upsert(
+      'labeling_submissions',
+      ['submission_id', 'job_id', 'worker_id', 'item_id', 'json'],
+      [
+        submission.submissionId,
+        submission.jobId,
+        submission.workerId,
+        submission.itemId,
+        JSON.stringify(submission)
+      ]
+    );
+    await this.appendLedger({
+      type: submission.status === 'accepted'
+        ? 'labeling_submission.accepted'
+        : 'labeling_submission.rejected',
+      submissionId: submission.submissionId,
+      jobId: submission.jobId,
+      itemId: submission.itemId,
+      workerId: submission.workerId
+    });
+    return submission;
+  }
+
+  async readLabelingSubmission(submissionId) {
+    await this.init();
+    return this._readOne('labeling_submissions', 'submission_id', submissionId);
+  }
+
+  async listLabelingSubmissions({ jobId, workerId } = {}) {
+    await this.init();
+    let sql = 'SELECT json FROM labeling_submissions';
+    const where = [];
+    const params = [];
+    if (jobId) {
+      where.push('job_id = ?');
+      params.push(jobId);
+    }
+    if (workerId) {
+      where.push('worker_id = ?');
+      params.push(workerId);
+    }
+    if (where.length) sql += ' WHERE ' + where.join(' AND ');
+    const rows = this.db.prepare(sql).all(...params);
+    return rows.map((r) => JSON.parse(r.json));
+  }
+
   // ─── Ledger ────────────────────────────────────────────────────────────
 
   async appendLedger(event) {
@@ -2021,6 +2154,9 @@ export class SqliteStore {
       // server-side install record so it can't be used as a
       // reattachment vector.
       sections.installedSlms = sweep('installed_slms', ['identity_id']);
+      // Phase 10.1 — labeling submissions cascade by worker_id.
+      // Jobs + items are sponsor-owned and stay.
+      sections.labelingSubmissions = sweep('labeling_submissions', ['worker_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

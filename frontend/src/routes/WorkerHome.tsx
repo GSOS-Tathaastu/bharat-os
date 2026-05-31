@@ -6,6 +6,7 @@ import { WorkerTrust } from './WorkerTrust';
 
 const TABS = [
   { to: '/worker/earn', label: 'Earn', icon: '💼' },
+  { to: '/labels', label: 'Labels', icon: '🏷' },
   { to: '/worker/trust', label: 'Trust', icon: '🛡' },
   { to: '/labs', label: 'Labs', icon: '🧪' },
   { to: '/settings', label: 'Settings', icon: '⚙' }

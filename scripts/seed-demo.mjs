@@ -39,6 +39,11 @@ import {
 } from '../src/phase1/federated-round.mjs';
 import { signTrustAttestation } from '../src/phase1/trust-attestation.mjs';
 import { createSponsor, depositEscrow, lockEscrow } from '../src/phase1/sponsor.mjs';
+import {
+  createLabelingJob,
+  createLabelingJobItem,
+  totalLaunchCostPaise
+} from '../src/phase1/labeling-job.mjs';
 
 function log(line) {
   process.stdout.write(`${line}\n`);
@@ -588,6 +593,76 @@ const sponsoredRound = openRound(
 );
 await store.saveFederatedRound(sponsoredRound);
 log(`  sponsor: 1 (${lockedSponsor.displayName}) — sponsored round: 1`);
+
+// Phase 10.1 — seed a sponsor-funded labeling job. Uses the same
+// Pragati sponsor (just lock more escrow). 5 preference-pair items
+// at Rs 4 per label = Rs 20 total lock. Launches immediately so
+// the /app/labels/ surface has a job on fresh seed.
+const labelingPerLabelPaise = 400; // Rs 4 per accepted label
+const labelingItemCount = 5;
+const draftJob = createLabelingJob({
+  sponsorId: lockedSponsor.sponsorId,
+  taskKind: 'preference_pair',
+  language: 'hi',
+  modality: 'text',
+  perLabelPaise: labelingPerLabelPaise,
+  bharatOsFeePaise: 0,
+  itemCount: labelingItemCount,
+  ipTerms: 'non_exclusive',
+  consentPurposeCode: 'bos:consent:labeling.preference_pair',
+  description: 'Pick the more helpful loan-application explanation (Hindi).'
+});
+
+const sampleItems = [
+  {
+    prompt: 'Loan applicant asks: "मेरा EMI कितना होगा?"',
+    a: 'EMI calculation depends on principal, rate, and tenure. Please provide your loan amount.',
+    b: 'अगर आप ₹50,000 का लोन 12 महीने में 12% पर लेते हैं, आपकी EMI लगभग ₹4,442 होगी।'
+  },
+  {
+    prompt: 'Applicant asks: "क्या मुझे co-signer चाहिए?"',
+    a: 'Yes, if your credit score is below 650 or income is irregular.',
+    b: 'No co-signer needed for personal loans up to Rs 1 lakh if you have salary.'
+  },
+  {
+    prompt: 'Applicant asks: "interest rate negotiable hai?"',
+    a: 'Interest rates are non-negotiable for retail loans.',
+    b: 'हाँ, अगर आपका credit score 750+ है तो rate negotiate हो सकती है। शाखा से बात करें।'
+  },
+  {
+    prompt: 'Applicant asks: "Documents kya lagenge?"',
+    a: 'आधार, PAN, salary slips (3 months), bank statement (6 months), और address proof।',
+    b: 'You need to submit all KYC documents as per RBI guidelines.'
+  },
+  {
+    prompt: 'Applicant asks: "कितने दिन में approval मिलेगा?"',
+    a: 'Typically 7 working days for personal loans subject to verification.',
+    b: 'अगर आपके सारे documents ready हैं तो 48 घंटे में approval मिल सकता है।'
+  }
+];
+
+const jobItems = sampleItems.map((body) =>
+  createLabelingJobItem({
+    jobId: draftJob.jobId,
+    taskKind: 'preference_pair',
+    body
+  })
+);
+
+const launchedJob = {
+  ...draftJob,
+  status: 'active',
+  itemsUploaded: jobItems.length,
+  launchedAt: new Date().toISOString(),
+  escrowLockedPaise: totalLaunchCostPaise(draftJob)
+};
+const jobLockedSponsor = lockEscrow(lockedSponsor, totalLaunchCostPaise(draftJob));
+await store.saveSponsor(jobLockedSponsor);
+await store.saveLabelingJob(launchedJob);
+for (const item of jobItems) {
+  await store.saveLabelingJobItem(item);
+}
+log(`  labeling job: 1 (${launchedJob.description}) — ${jobItems.length} items at Rs ${(labelingPerLabelPaise / 100).toFixed(2)} each`);
 
 // ─── Bootstrap simulation report ────────────────────────────────────────────
 const bootstrap = simulateDemandBootstrap({

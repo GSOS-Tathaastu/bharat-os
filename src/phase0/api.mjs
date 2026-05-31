@@ -239,6 +239,15 @@ import {
   SPONSOR_STATUSES
 } from '../phase1/sponsor.mjs';
 import { checkSponsorAuth } from './sponsor-auth.mjs';
+import {
+  createLabelingJob,
+  createLabelingJobItem,
+  createLabelingSubmission,
+  workerCanClaim,
+  totalLaunchCostPaise,
+  LABELING_TASK_KINDS,
+  LABELING_MODALITIES
+} from '../phase1/labeling-job.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1397,6 +1406,374 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 10.1 — labeling-job lifecycle endpoints. Sponsor-bearer
+      // gated for create/upload/launch; public for worker-side
+      // discovery; worker-anchored for submissions.
+
+      // POST /api/sponsors/:id/labeling-jobs — create a DRAFT job
+      // (no escrow lock yet). Upload items + launch separately.
+      const sponsorJobCreateMatch = /^\/api\/sponsors\/([^/]+)\/labeling-jobs$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorJobCreateMatch) {
+        const sponsorId = decodeURIComponent(sponsorJobCreateMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const body = await readRequestJson(request);
+        let job;
+        try {
+          job = createLabelingJob({
+            sponsorId,
+            taskKind: body.taskKind,
+            language: body.language,
+            modality: body.modality,
+            perLabelPaise: body.perLabelPaise,
+            bharatOsFeePaise: body.bharatOsFeePaise,
+            itemCount: body.itemCount,
+            ipTerms: body.ipTerms,
+            consentPurposeCode: body.consentPurposeCode,
+            description: body.description,
+            deadlineSecondsFromNow: body.deadlineSecondsFromNow
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_labeling_job', message: error.message }
+          });
+          return;
+        }
+        await store.saveLabelingJob(job);
+        jsonResponse(response, 201, { ok: true, job });
+        return;
+      }
+
+      // GET /api/sponsors/:id/labeling-jobs — sponsor lists own jobs.
+      if (request.method === 'GET' && sponsorJobCreateMatch) {
+        const sponsorId = decodeURIComponent(sponsorJobCreateMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const all = await store.listLabelingJobs();
+        jsonResponse(response, 200, {
+          jobs: all.filter((j) => j.sponsorId === sponsorId)
+        });
+        return;
+      }
+
+      // POST /api/sponsors/:id/labeling-jobs/:jobId/items — upload corpus.
+      // Body: { items: [{body, goldenAnswer?}, ...] }. Server creates a
+      // labeling-job-item per entry + bumps job.itemsUploaded counter.
+      const sponsorJobItemsMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/items$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorJobItemsMatch) {
+        const sponsorId = decodeURIComponent(sponsorJobItemsMatch[1]);
+        const jobId = decodeURIComponent(sponsorJobItemsMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_job', message: 'labeling job not found for this sponsor.' }
+          });
+          return;
+        }
+        if (job.status !== 'draft') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'job_not_draft',
+              message: 'items can only be uploaded while the job is in draft.'
+            }
+          });
+          return;
+        }
+        const body = await readRequestJson(request);
+        const incoming = Array.isArray(body.items) ? body.items : [];
+        if (incoming.length === 0) {
+          jsonResponse(response, 400, {
+            error: { code: 'no_items', message: 'items array required.' }
+          });
+          return;
+        }
+        if (job.itemsUploaded + incoming.length > job.itemCount) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'exceeds_item_count',
+              message: `job declared ${job.itemCount} items; ${job.itemsUploaded} already uploaded.`
+            }
+          });
+          return;
+        }
+        let created = 0;
+        for (const raw of incoming) {
+          let item;
+          try {
+            item = createLabelingJobItem({
+              jobId,
+              taskKind: job.taskKind,
+              body: raw.body,
+              goldenAnswer: raw.goldenAnswer ?? null
+            });
+          } catch (_error) {
+            continue; // skip malformed entries silently in v1
+          }
+          await store.saveLabelingJobItem(item);
+          created += 1;
+        }
+        const updatedJob = {
+          ...job,
+          itemsUploaded: job.itemsUploaded + created
+        };
+        await store.saveLabelingJob(updatedJob);
+        jsonResponse(response, 201, {
+          ok: true,
+          job: updatedJob,
+          itemsCreated: created
+        });
+        return;
+      }
+
+      // POST /api/sponsors/:id/labeling-jobs/:jobId/launch — flip
+      // draft → active + lock escrow for the full job cost.
+      const sponsorJobLaunchMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/launch$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorJobLaunchMatch) {
+        const sponsorId = decodeURIComponent(sponsorJobLaunchMatch[1]);
+        const jobId = decodeURIComponent(sponsorJobLaunchMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_job', message: 'labeling job not found.' }
+          });
+          return;
+        }
+        if (job.status !== 'draft') {
+          jsonResponse(response, 409, {
+            error: { code: 'job_not_draft', message: `cannot launch in status ${job.status}.` }
+          });
+          return;
+        }
+        if (job.itemsUploaded < job.itemCount) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'items_incomplete',
+              message: `uploaded ${job.itemsUploaded}/${job.itemCount} items; upload the rest before launch.`
+            }
+          });
+          return;
+        }
+        const cost = totalLaunchCostPaise(job);
+        let lockedSponsor;
+        try {
+          lockedSponsor = lockEscrow(sponsor, cost);
+        } catch (error) {
+          jsonResponse(response, 402, {
+            error: {
+              code: 'insufficient_escrow',
+              message: error.message,
+              requiredPaise: cost,
+              availablePaise: sponsor.escrowBalancePaise - sponsor.escrowLockedPaise
+            }
+          });
+          return;
+        }
+        const launched = {
+          ...job,
+          status: 'active',
+          launchedAt: new Date().toISOString(),
+          escrowLockedPaise: cost
+        };
+        await store.saveSponsor(lockedSponsor);
+        await store.saveLabelingJob(launched);
+        await store.appendLedger({
+          type: 'sponsor_escrow.locked',
+          sponsorId,
+          jobId,
+          amountPaise: cost,
+          balancePaise: lockedSponsor.escrowBalancePaise,
+          lockedPaise: lockedSponsor.escrowLockedPaise,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          job: launched,
+          sponsor: publicSponsor(lockedSponsor)
+        });
+        return;
+      }
+
+      // Public listing of ACTIVE labeling jobs — used by the worker
+      // /app/labels/ surface. Filter by language so workers see only
+      // jobs they can attempt. No sponsor-bearer required; the worker
+      // surface is open by design (jobs are public marketplace
+      // listings).
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'labeling-jobs'
+        && parts.length === 2
+        && request.method === 'GET'
+      ) {
+        const all = await store.listLabelingJobs();
+        const language = url.searchParams.get('language');
+        const taskKind = url.searchParams.get('taskKind');
+        let active = all.filter((j) => j.status === 'active');
+        if (language) active = active.filter((j) => j.language === language);
+        if (taskKind) active = active.filter((j) => j.taskKind === taskKind);
+        // Strip sensitive sponsor-only fields; worker doesn't need
+        // escrow numbers, just the per-label payout + task-kind +
+        // remaining items.
+        const surface = active.map((j) => ({
+          jobId: j.jobId,
+          sponsorId: j.sponsorId,
+          taskKind: j.taskKind,
+          language: j.language,
+          modality: j.modality,
+          perLabelPaise: j.perLabelPaise,
+          description: j.description,
+          itemCount: j.itemCount,
+          submissionsAccepted: j.submissionsAccepted,
+          deadlineAt: j.deadlineAt
+        }));
+        jsonResponse(response, 200, { jobs: surface });
+        return;
+      }
+
+      // GET /api/labeling-jobs/:jobId/next-item — worker fetches the
+      // next item to label. Returns null when no item is available
+      // for this worker (already submitted all available, or all
+      // items consumed).
+      const nextItemMatch = /^\/api\/labeling-jobs\/([^/]+)\/next-item$/.exec(url.pathname);
+      if (request.method === 'GET' && nextItemMatch) {
+        const jobId = decodeURIComponent(nextItemMatch[1]);
+        const workerId = url.searchParams.get('workerId');
+        if (!workerId) {
+          jsonResponse(response, 400, {
+            error: { code: 'missing_worker_id', message: 'workerId query param required.' }
+          });
+          return;
+        }
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.status !== 'active') {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_or_inactive_job', message: 'job not available.' }
+          });
+          return;
+        }
+        const items = await store.listLabelingJobItems({ jobId });
+        const prevSubs = await store.listLabelingSubmissions({ jobId, workerId });
+        const submittedItemIds = new Set(prevSubs.map((s) => s.itemId));
+        const item = items.find((it) => !it.consumed && !submittedItemIds.has(it.itemId));
+        if (!item) {
+          jsonResponse(response, 200, { item: null, reason: 'no_eligible_items' });
+          return;
+        }
+        // Strip golden answer before sending to the worker (server
+        // keeps it for the QC pipeline).
+        const { goldenAnswer: _golden, ...workerSurface } = item;
+        jsonResponse(response, 200, { item: workerSurface });
+        return;
+      }
+
+      // POST /api/labeling-jobs/:jobId/submissions — worker submits a
+      // label. Server creates the submission + bumps counters +
+      // debits sponsor escrow + records mesh-contribution event.
+      const submissionMatch = /^\/api\/labeling-jobs\/([^/]+)\/submissions$/.exec(url.pathname);
+      if (request.method === 'POST' && submissionMatch) {
+        const jobId = decodeURIComponent(submissionMatch[1]);
+        const body = await readRequestJson(request);
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.status !== 'active') {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_or_inactive_job', message: 'job not available.' }
+          });
+          return;
+        }
+        const item = await store.readLabelingJobItem(body.itemId).catch(() => null);
+        if (!item || item.jobId !== jobId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_item', message: 'item not found for this job.' }
+          });
+          return;
+        }
+        const worker = await store.readIdentity(body.workerId).catch(() => null);
+        if (!worker) return notFound(response);
+        const prevSubs = await store.listLabelingSubmissions({ jobId, workerId: body.workerId });
+        if (!workerCanClaim(job, item, prevSubs)) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'cannot_claim',
+              message: 'worker already submitted for this item or item consumed.'
+            }
+          });
+          return;
+        }
+        let submission;
+        try {
+          submission = createLabelingSubmission({
+            jobId,
+            itemId: item.itemId,
+            workerId: body.workerId,
+            taskKind: job.taskKind,
+            labelValue: body.labelValue
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_submission', message: error.message }
+          });
+          return;
+        }
+        await store.saveLabelingSubmission(submission);
+        // Bump job counter, mark item consumed.
+        const updatedJob = {
+          ...job,
+          submissionsAccepted: job.submissionsAccepted + 1,
+          escrowDebitedPaise: job.escrowDebitedPaise + job.perLabelPaise
+        };
+        await store.saveLabelingJob(updatedJob);
+        const updatedItem = { ...item, consumed: true, submissionsCount: item.submissionsCount + 1 };
+        await store.saveLabelingJobItem(updatedItem);
+
+        // Debit sponsor escrow for this label.
+        const sponsor = await store.readSponsor(job.sponsorId).catch(() => null);
+        if (sponsor && job.perLabelPaise > 0) {
+          try {
+            const debited = debitLockedEscrow(sponsor, job.perLabelPaise);
+            await store.saveSponsor(debited);
+            await store.appendLedger({
+              type: 'sponsor_escrow.debited',
+              sponsorId: job.sponsorId,
+              jobId,
+              submissionId: submission.submissionId,
+              amountPaise: job.perLabelPaise,
+              balancePaise: debited.escrowBalancePaise,
+              lockedPaise: debited.escrowLockedPaise,
+              at: new Date().toISOString()
+            });
+          } catch (escrowError) {
+            logger.warn('sponsor_escrow_debit_failed', {
+              requestId,
+              sponsorId: job.sponsorId,
+              jobId,
+              reason: escrowError.message
+            });
+          }
+        }
+
+        // Record the worker's mesh-contribution event.
+        const meshEvent = createMeshContributionEvent({
+          operatorId: body.workerId,
+          workloadType: 'labeling',
+          payoutPaise: job.perLabelPaise,
+          jobId,
+          itemId: item.itemId
+        });
+        await store.saveMeshContributionEvent(meshEvent);
+
+        jsonResponse(response, 201, {
+          ok: true,
+          submission,
+          meshContributionEvent: meshEvent
+        });
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -1659,6 +2036,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/sponsors/:sponsorId/federated-rounds  (bearer-gated)',
             'POST /api/sponsors/:sponsorId/federated-rounds  (bearer-gated)',
             'GET /api/sponsors/:sponsorId/federated-rounds/:roundId/export  (bearer-gated)',
+            'POST /api/sponsors/:sponsorId/labeling-jobs  (bearer-gated; create draft)',
+            'GET /api/sponsors/:sponsorId/labeling-jobs  (bearer-gated; list own)',
+            'POST /api/sponsors/:sponsorId/labeling-jobs/:jobId/items  (bearer-gated)',
+            'POST /api/sponsors/:sponsorId/labeling-jobs/:jobId/launch  (bearer-gated; locks escrow)',
+            'GET /api/labeling-jobs  (public worker discovery)',
+            'GET /api/labeling-jobs/:jobId/next-item?workerId=…  (next-item dispatch)',
+            'POST /api/labeling-jobs/:jobId/submissions  (worker label submission)',
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',

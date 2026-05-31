@@ -61,6 +61,9 @@ export class BosStore {
     this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
     this.installedSlmsPath = path.join(rootPath, 'installed-slms');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
+    this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
+    this.labelingJobItemsPath = path.join(rootPath, 'labeling-job-items');
+    this.labelingSubmissionsPath = path.join(rootPath, 'labeling-submissions');
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
@@ -96,6 +99,9 @@ export class BosStore {
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
+    await fs.mkdir(this.labelingJobsPath, { recursive: true });
+    await fs.mkdir(this.labelingJobItemsPath, { recursive: true });
+    await fs.mkdir(this.labelingSubmissionsPath, { recursive: true });
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.mkdir(this.attestationsPath, { recursive: true });
@@ -406,6 +412,19 @@ export class BosStore {
       this.installedSlmFile,
       'installId'
     );
+    // Phase 10.1 — labeling submissions are per-worker; cascade
+    // on identity erase. Jobs and items are sponsor-owned and stay.
+    const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
+    let labelingRemoved = 0;
+    for (const sub of labelingSubmissions) {
+      try {
+        await fs.unlink(this.labelingSubmissionFile(sub.submissionId));
+        labelingRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.labelingSubmissions = labelingRemoved;
     await sweep(
       'workerNotifications',
       () => this.listWorkerNotifications(),
@@ -1217,6 +1236,96 @@ export class BosStore {
 
   async listSponsors() {
     return listJson(this.sponsorsPath);
+  }
+
+  // Phase 10.1 — labeling marketplace tables. Three resources:
+  //   labeling_jobs       — one row per sponsor-created job
+  //   labeling_job_items  — one row per uploaded corpus item
+  //   labeling_submissions — one row per worker label submission
+  // Sponsor-created jobs live in the sponsor's lane (sponsor-bearer
+  // gated); items + submissions cascade by job. Per-identity worker
+  // submissions DO go in the DPDP §12(3) sweep so a worker's labels
+  // get anonymised on identity erase.
+  labelingJobFile(jobId) {
+    return path.join(this.labelingJobsPath, `${safeName(jobId)}.json`);
+  }
+  labelingJobItemFile(itemId) {
+    return path.join(this.labelingJobItemsPath, `${safeName(itemId)}.json`);
+  }
+  labelingSubmissionFile(submissionId) {
+    return path.join(this.labelingSubmissionsPath, `${safeName(submissionId)}.json`);
+  }
+
+  async saveLabelingJob(job) {
+    if (!job?.jobId) throw new Error('labeling job requires jobId.');
+    await this.init();
+    await writeJson(this.labelingJobFile(job.jobId), job);
+    await this.appendLedger({
+      type: 'labeling_job.saved',
+      jobId: job.jobId,
+      sponsorId: job.sponsorId,
+      status: job.status,
+      itemCount: job.itemCount,
+      perLabelPaise: job.perLabelPaise,
+      at: new Date().toISOString()
+    });
+    return job;
+  }
+
+  async readLabelingJob(jobId) {
+    return readJson(this.labelingJobFile(jobId));
+  }
+
+  async listLabelingJobs() {
+    return listJson(this.labelingJobsPath);
+  }
+
+  async saveLabelingJobItem(item) {
+    if (!item?.itemId) throw new Error('labeling job item requires itemId.');
+    await this.init();
+    await writeJson(this.labelingJobItemFile(item.itemId), item);
+    return item;
+  }
+
+  async readLabelingJobItem(itemId) {
+    return readJson(this.labelingJobItemFile(itemId));
+  }
+
+  async listLabelingJobItems({ jobId } = {}) {
+    const all = await listJson(this.labelingJobItemsPath);
+    if (jobId) return all.filter((i) => i.jobId === jobId);
+    return all;
+  }
+
+  async saveLabelingSubmission(submission) {
+    if (!submission?.submissionId) {
+      throw new Error('labeling submission requires submissionId.');
+    }
+    await this.init();
+    await writeJson(this.labelingSubmissionFile(submission.submissionId), submission);
+    await this.appendLedger({
+      type: submission.status === 'accepted'
+        ? 'labeling_submission.accepted'
+        : 'labeling_submission.rejected',
+      submissionId: submission.submissionId,
+      jobId: submission.jobId,
+      itemId: submission.itemId,
+      workerId: submission.workerId,
+      at: new Date().toISOString()
+    });
+    return submission;
+  }
+
+  async readLabelingSubmission(submissionId) {
+    return readJson(this.labelingSubmissionFile(submissionId));
+  }
+
+  async listLabelingSubmissions({ jobId, workerId } = {}) {
+    const all = await listJson(this.labelingSubmissionsPath);
+    let r = all;
+    if (jobId) r = r.filter((s) => s.jobId === jobId);
+    if (workerId) r = r.filter((s) => s.workerId === workerId);
+    return r;
   }
 
   async computeContribution(identityId) {

@@ -27,7 +27,13 @@ export const MESH_WORKLOAD_TYPES = [
   // payout is set by the round (see `federated-round.mjs`), so this
   // workload type carries an explicit `payoutPaise` rather than
   // deriving one from tokens/bytes.
-  'federated_round'
+  'federated_round',
+  // Phase 10.1 — labeling marketplace submissions. Per-label payout
+  // is set by the job; like federated_round, this workload type
+  // carries `payoutPaise` explicitly + a `jobId` (reusing `roundId`
+  // slot would have been wrong because the event is for a labeling
+  // job not a round; we add `jobId` below).
+  'labeling'
 ];
 
 // §13B midpoint operator payouts. Stored in paise (1 INR = 100 paise) so
@@ -65,6 +71,11 @@ function computePayoutPaise({ workloadType, tokens, bytes, payoutPaise }) {
     // Payout is set by the round (caller passes explicit `payoutPaise`).
     return Math.max(0, Number(payoutPaise ?? 0));
   }
+  if (workloadType === 'labeling') {
+    // Phase 10.1 — payout set by the labeling job (caller passes
+    // explicit `payoutPaise`).
+    return Math.max(0, Number(payoutPaise ?? 0));
+  }
   return 0;
 }
 
@@ -82,6 +93,10 @@ export function createMeshContributionEvent({
   // round, not from tokens/bytes; the caller passes it explicitly.
   payoutPaise: explicitPayoutPaise,
   roundId,
+  // Phase 10.1 — labeling-marketplace job ref. Like roundId, only
+  // set for the matching workload type.
+  jobId,
+  itemId,
   at = nowIso()
 }) {
   if (!operatorId) throw new Error('operatorId is required.');
@@ -94,6 +109,7 @@ export function createMeshContributionEvent({
   if (
     workloadType !== 'inference' &&
     workloadType !== 'federated_round' &&
+    workloadType !== 'labeling' &&
     !Number.isFinite(Number(bytes))
   ) {
     throw new Error('storage events require a numeric bytes count.');
@@ -114,11 +130,15 @@ export function createMeshContributionEvent({
     workloadType,
     tokens: workloadType === 'inference' ? Number(tokens) : null,
     bytes:
-      workloadType === 'inference' || workloadType === 'federated_round'
+      workloadType === 'inference' ||
+      workloadType === 'federated_round' ||
+      workloadType === 'labeling'
         ? null
         : Number(bytes),
     peerId: peerId ?? null,
     roundId: workloadType === 'federated_round' ? (roundId ?? null) : null,
+    jobId: workloadType === 'labeling' ? (jobId ?? null) : null,
+    itemId: workloadType === 'labeling' ? (itemId ?? null) : null,
     deviceState: {
       charging: Boolean(charging),
       wifi: Boolean(wifi),

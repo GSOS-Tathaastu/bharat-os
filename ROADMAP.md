@@ -80,6 +80,26 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 10.1 + 10.2 — Labeling marketplace v1 ✅ SHIPPED 2026-05-31
+- **ADR 0121** — workers earn paise per accepted label TODAY.
+- `src/phase1/labeling-job.mjs` — module: 5 task kinds, 6-state
+  lifecycle, validators, `workerCanClaim` shared client + server.
+- Both backends grow `labeling_jobs` + `labeling_job_items` +
+  `labeling_submissions` (with worker_id index); submissions
+  cascade on identity erase.
+- `'labeling'` joins `MESH_WORKLOAD_TYPES`; mesh-event accepts
+  `jobId` + `itemId`.
+- API: sponsor-bearer-gated draft / upload-items / launch (locks
+  escrow); public worker discovery + next-item + submit; sponsor
+  escrow debits per accepted label; mesh event auto-recorded.
+- FE: new Labels tab on Worker bottom nav (5 tabs); `LabelsPage`
+  with `<LabelingJobCard>` discovery + session view +
+  `<PreferencePairTask>` A/B UI (other kinds → Phase 10.3).
+- seed-demo: 5 Hindi-language preference-pair items under
+  Pragati Microfinance sponsor with escrow auto-locked.
+- Tests: BE 821 → 838 (+17 labeling); FE 16/16 unchanged.
+- **Bundle**: main 352 KB / 109 KB gzipped (+2 KB vs 9.1).
+
 ### Phase 9.1 — Sponsored federated rounds ✅ SHIPPED 2026-05-31
 - **ADR 0120** opens the demand side.
 - `src/phase1/sponsor.mjs` — sponsor model, bearer-token hash,
@@ -195,29 +215,29 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 10 — Labeling marketplace (NEXT)
+### Phase 10.3 + 10.4 + 10.5 + 10.6 — Labeling marketplace polish (NEXT)
 
-**Unblocked by Phase 9.1.** ADR 0110 sketched the demand-side
-labeling marketplace; the sponsor module + auth middleware +
-escrow pattern from Phase 9.1 directly reuse here.
+**Phase 10.0–10.2 SHIPPED.** Remaining sub-phases:
 
-**Sub-phase plan (per ADR 0110)**:
-- [ ] **10.0** — sponsor reuses 9.1; add labeling-job schema +
-  admin onboarding (~1 wk)
-- [ ] **10.1** — job spec API + corpus upload + escrow lock on
-  launch (~1 wk)
-- [ ] **10.2** — worker discovery + new shell **🏷 Label** tab
-  (~1.5 wks)
-- [ ] **10.3** — per-task-kind UIs (preference pair /
-  classification / span / transcription) (~2 wks)
-- [ ] **10.4** — QC pipeline (golden-set + inter-annotator α +
-  sponsor sample) (~2 wks)
-- [ ] **10.5** — signed JSONL export bundle (reuses 9.1 export
-  shape) (~1 wk)
-- [ ] **10.6** — SLM pre-labeling hint (Phase 9.0c runtime hook)
-  (~1 wk)
+- [ ] **10.3** — other task kinds in `/app/labels/`: classification
+  (span + multi-choice category), span_annotation (tap-to-highlight
+  text or audio waveform), transcription (voice + Indic ASR pre-
+  fill), safety_label (multi-checkbox). ~2 wks.
+- [ ] **10.4** — QC pipeline: golden-set rate config per job
+  (default 1-in-20), inter-annotator α threshold for accept,
+  sponsor-sample queue + reject API + worker score-gating.
+  ~2 wks.
+- [ ] **10.5** — signed JSONL export bundle for sponsor audit
+  (reuses Phase 9.1 federated-round export pattern; rotating
+  `identityHash` per (jobId, workerId)). ~1 wk.
+- [ ] **10.6** — SLM pre-labeling hint: button on task UI that
+  loads worker's installed Phi-3-mini → suggests a label →
+  worker accepts/edits → submits. Cuts time-per-label ~3×.
+  Depends on Phase 9.0c. ~1 wk.
 
-Total ~9-10 wks; 10.0–10.2 launchable independently of 9.0c.
+Remaining ~6 wks. Then Phase 12+ (Bharat ID / SSO from
+explorations doc) or labeling-marketplace polish per sponsor
+feedback.
 
 ---
 

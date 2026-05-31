@@ -7,6 +7,7 @@ import { WorkerHome } from '@/routes/WorkerHome';
 import { CitizenHome } from '@/routes/CitizenHome';
 import { VerifyPage } from '@/routes/Verify';
 import { LabsPage } from '@/routes/Labs';
+import { LabelsPage } from '@/routes/Labels';
 import { SettingsPage } from '@/routes/Settings';
 import { TopBar } from '@/components/TopBar';
 
@@ -51,6 +52,14 @@ export default function App() {
           element={
             <ProtectedSurface>
               <LabsPage />
+            </ProtectedSurface>
+          }
+        />
+        <Route
+          path="/labels"
+          element={
+            <ProtectedSurface>
+              <LabelsPage />
             </ProtectedSurface>
           }
         />
