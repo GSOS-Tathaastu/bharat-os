@@ -181,3 +181,292 @@ export function useSendIntent() {
     }
   });
 }
+
+// --- MFI consent (Phase 6.1) ------------------------------------------
+export interface MfiConsent {
+  consentId: string;
+  workerId: string;
+  mfiName: string;
+  purpose: string;
+  financialYear: string;
+  ttlSeconds: number;
+  expiresAt: string;
+  maxReads: number;
+  readsRemaining: number;
+  revokedAt?: string | null;
+  revocationReason?: string | null;
+  issuedAt: string;
+}
+
+export function useMfiConsents(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['mfi-consents', identityId],
+    queryFn: () =>
+      api<{ consents: MfiConsent[] }>(
+        `/api/identities/${encodeURIComponent(identityId!)}/income-verification/consents`
+      ).then((r) => r.consents),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface IssueConsentInput {
+  identityId: string;
+  mfiName: string;
+  purpose: string;
+  financialYear: string;
+  ttlSeconds: number;
+  maxReads: number;
+}
+
+export interface IssueConsentResponse {
+  ok: true;
+  consent: MfiConsent;
+  mfiFetchUrl: string;
+}
+
+export function useIssueMfiConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: IssueConsentInput) =>
+      api<IssueConsentResponse>(
+        `/api/identities/${encodeURIComponent(input.identityId)}/income-verification/consents`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            mfiName: input.mfiName,
+            purpose: input.purpose,
+            financialYear: input.financialYear,
+            ttlSeconds: input.ttlSeconds,
+            maxReads: input.maxReads
+          })
+        }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['mfi-consents', identityId] });
+    }
+  });
+}
+
+export function useRevokeMfiConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      consentId,
+      reason
+    }: {
+      identityId: string;
+      consentId: string;
+      reason: string;
+    }) =>
+      api(
+        `/api/identities/${encodeURIComponent(identityId)}/income-verification/consents/${encodeURIComponent(consentId)}/revoke`,
+        { method: 'POST', body: JSON.stringify({ reason }) }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['mfi-consents', identityId] });
+    }
+  });
+}
+
+// Verifier-side bundle fetch. `useMfiBundle` is read once per consentId;
+// the server burns one read counter per call.
+export interface MfiBundle {
+  status: 'valid' | 'expired' | 'revoked' | 'exhausted' | 'signature_invalid' | 'unknown_worker' | 'malformed';
+  consent?: MfiConsent;
+  bundle?: {
+    workerId: string;
+    workerDisplayName: string;
+    mfiName: string;
+    financialYear: string;
+    issuedAt: string;
+    aggregates: {
+      totalEarningsPaise: number;
+      monthsWithIncome: number;
+      earningsByMonth: Array<{ month: string; paise: number }>;
+    };
+    attestations: Array<{ subject: string; claim: string; issuedAt: string }>;
+    collectiveMemberships: Array<{ collectiveName: string; role: string; verified: boolean }>;
+    eshramRegistrations: Array<{ uanMasked: string; verified: boolean }>;
+    schemeEntitlements: Array<{ schemeCode: string; verified: boolean }>;
+    signature: string;
+    disclaimer: string;
+  };
+  reason?: string;
+}
+
+export function useMfiBundle(consentId: string | null) {
+  return useQuery({
+    queryKey: ['mfi-bundle', consentId],
+    queryFn: () => api<MfiBundle>(`/api/income-verification/${encodeURIComponent(consentId!)}`),
+    enabled: Boolean(consentId),
+    retry: false,
+    staleTime: Infinity // server burns a read; never auto-refetch
+  });
+}
+
+// --- SLM model packs + installs (Phase 9.0a / 9.0b) ------------------
+export interface SlmModelPack {
+  modelPackId: string;
+  family: string;
+  variant?: string | null;
+  parameterCount: number;
+  quantization: string;
+  diskBytes: number;
+  ramRequiredMb: number;
+  runtime: string;
+  sourceUrl: string;
+  sourceHash: string;
+  license: string;
+  capabilities: string[];
+  contextWindow?: number | null;
+  description?: string | null;
+  status: 'registered' | 'revoked';
+}
+
+export interface SlmCatalogResponse {
+  modelPacks: SlmModelPack[];
+  totalRegistered: number;
+  totalActive: number;
+  supportedRuntimes: string[];
+  supportedQuantizations: string[];
+  supportedLicenses: string[];
+  supportedCapabilities: string[];
+}
+
+export function useSlmCatalog() {
+  return useQuery({
+    queryKey: ['slm-catalog'],
+    queryFn: () => api<SlmCatalogResponse>('/api/slm-model-packs?activeOnly=true')
+  });
+}
+
+export interface InstalledSlm {
+  installId: string;
+  identityId: string;
+  modelPackId: string;
+  runtimeBackend: string;
+  downloadedBytes: number;
+  status: 'installed' | 'failed';
+  failureReason?: string | null;
+  installedAt: string;
+  pack?: {
+    family?: string;
+    variant?: string;
+    quantization?: string;
+    parameterCount?: number;
+    diskBytes?: number;
+    license?: string;
+    status?: string;
+  } | null;
+}
+
+export function useInstalledSlms(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['installed-slms', identityId],
+    queryFn: () =>
+      api<{ installs: InstalledSlm[] }>(
+        `/api/identities/${encodeURIComponent(identityId!)}/installed-slms`
+      ).then((r) => r.installs),
+    enabled: Boolean(identityId)
+  });
+}
+
+export function useRecordSlmInstall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      modelPackId,
+      runtimeBackend,
+      downloadedBytes,
+      status,
+      failureReason,
+      observedHash
+    }: {
+      identityId: string;
+      modelPackId: string;
+      runtimeBackend: string;
+      downloadedBytes: number;
+      status: 'installed' | 'failed';
+      failureReason?: string;
+      observedHash?: string;
+    }) =>
+      api(`/api/identities/${encodeURIComponent(identityId)}/installed-slms`, {
+        method: 'POST',
+        body: JSON.stringify({
+          modelPackId,
+          runtimeBackend,
+          downloadedBytes,
+          status,
+          failureReason,
+          observedHash
+        })
+      }),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['installed-slms', identityId] });
+    }
+  });
+}
+
+// --- DPDP §12 export + erasure (Phase 4.0) ----------------------------
+
+export interface ErasurePreview {
+  identityId: string;
+  sections: Record<string, { count: number; description: string }>;
+  warning: string;
+}
+
+export function useErasurePreview(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['erasure-preview', identityId],
+    queryFn: () =>
+      api<ErasurePreview>(`/api/identities/${encodeURIComponent(identityId!)}/erasure-preview`),
+    enabled: false // explicit fetch only — opens when user starts the flow
+  });
+}
+
+export function useDownloadMyData() {
+  return useMutation({
+    mutationFn: async ({ identityId }: { identityId: string }) => {
+      const response = await fetch(
+        `/api/identities/${encodeURIComponent(identityId)}/export`
+      );
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bharat-os-export-${identityId.replace(/[^a-zA-Z0-9]/g, '-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return blob.size;
+    }
+  });
+}
+
+export function useEraseIdentity() {
+  return useMutation({
+    mutationFn: ({ identityId }: { identityId: string }) =>
+      api(`/api/identities/${encodeURIComponent(identityId)}?confirm=YES_DELETE`, {
+        method: 'DELETE'
+      })
+  });
+}
+
+export function useRemoveSlmInstall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ identityId, installId }: { identityId: string; installId: string }) =>
+      api(`/api/identities/${encodeURIComponent(identityId)}/installed-slms/${encodeURIComponent(installId)}`, {
+        method: 'DELETE'
+      }),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['installed-slms', identityId] });
+    }
+  });
+}

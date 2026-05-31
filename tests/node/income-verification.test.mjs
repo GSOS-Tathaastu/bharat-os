@@ -26,6 +26,7 @@ import {
 } from '../../src/phase1/portable-attestation.mjs';
 import { createPhase0ApiServer } from '../../src/phase0/api.mjs';
 import { SqliteStore } from '../../src/phase0/sqlite-store.mjs';
+import { BosStore } from '../../src/phase0/store.mjs';
 import { collectUserData } from '../../src/phase1/dpdp-rights.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -471,6 +472,59 @@ test('eraseUserData removes income-verification consents in the cascade', async 
   const remaining = await store.listIncomeVerificationConsents({ workerId: identity.id });
   assert.equal(remaining.length, 0);
   store.close();
+});
+
+// ─── BosStore parity (Phase 11.4 surfaced the gap) ────────────────────
+
+async function freshFileStore(name) {
+  const root = path.join(tmpRoot, `file-${Date.now()}-${process.pid}-${name}`);
+  await fs.rm(root, { recursive: true, force: true });
+  const store = new BosStore(root);
+  await store.init();
+  return { root, store };
+}
+
+test('BosStore round-trips income-verification consents', async () => {
+  const { store } = await freshFileStore('roundtrip');
+  const identity = createIdentity({ displayName: 'W' });
+  await store.saveIdentity(identity);
+  const consent = createIncomeVerificationConsent({
+    identity,
+    mfiName: 'L',
+    purpose: 'P',
+    financialYear: '2025-26'
+  });
+  await store.saveIncomeVerificationConsent(consent);
+  const read = await store.readIncomeVerificationConsent(consent.consentId);
+  assert.equal(read.consentId, consent.consentId);
+  assert.equal(read.workerId, identity.id);
+});
+
+test('BosStore.listIncomeVerificationConsents filters by worker', async () => {
+  const { store } = await freshFileStore('list');
+  const alice = createIdentity({ displayName: 'A' });
+  const bob = createIdentity({ displayName: 'B' });
+  await store.saveIdentity(alice);
+  await store.saveIdentity(bob);
+  await store.saveIncomeVerificationConsent(
+    createIncomeVerificationConsent({
+      identity: alice,
+      mfiName: 'L',
+      purpose: 'P',
+      financialYear: '2025-26'
+    })
+  );
+  await store.saveIncomeVerificationConsent(
+    createIncomeVerificationConsent({
+      identity: bob,
+      mfiName: 'L',
+      purpose: 'P',
+      financialYear: '2025-26'
+    })
+  );
+  const aliceOnly = await store.listIncomeVerificationConsents({ workerId: alice.id });
+  assert.equal(aliceOnly.length, 1);
+  assert.equal(aliceOnly[0].workerId, alice.id);
 });
 
 // ─── End-to-end API ──────────────────────────────────────────────────

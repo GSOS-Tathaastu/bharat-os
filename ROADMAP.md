@@ -80,7 +80,7 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
-### Phase 11 — FE rebuild (~57% done)
+### Phase 11 — FE rebuild ✅ CLOSED 2026-05-31
 - **11.0** Vite + React 19 + TS + Tailwind + Zustand + TanStack
   Query + Router 7 + Vitest scaffold; 12 design-system components
   (Action/Badge/Card/Evidence/Field/Hero/Identity/Money/Sheet/Stat/
@@ -91,8 +91,20 @@ plus the first half of the on-device-SLM arc.
   out with confirm gate + history + Trust Passport view.
 - **11.3** `/app/citizen/` — intent input + 5 suggestion chips +
   recent activity list.
-- **Bundle**: 307 KB JS / 17 KB CSS (96/4 KB gzipped). Build: 1.25s.
-- **7/7 FE tests** (Vitest). **84/84 impacted Node tests still pass**.
+- **11.4** `/app/verify/` — public route; MFI bundle reader with
+  status badges + per-section cards + signature evidence; worker
+  MFI consent issuance form + share-URL copy + per-row revoke;
+  **file-store BosStore parity fix** (caught pre-existing gap).
+- **11.5** `/app/labs/` — wired to real Phase 9.0a/9.0b SLM
+  endpoints (catalogue + install + remove with audit-trail-real
+  failure path); federated rounds + OCR + voice cards as
+  placeholders pointing at /shell/.
+- **11.6** `/app/settings/` — DPDP §12 download-my-data + §12(3)
+  two-step type-DELETE erase flow; persona-forget action;
+  developer escape hatch to /shell/.
+- **Bundle**: 330 KB JS / 18 KB CSS (102/4 KB gzipped). Build: 1.42s.
+- **7/7 FE tests** (Vitest). **800/800 Node tests** (was 798;
+  +2 BosStore MFI parity tests).
 
 ### Test coverage
 - **798/798 Node tests pass** (run in batches of 16 files to dodge
@@ -110,35 +122,27 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 11 — Frontend rebuild as `/app/` (ADR 0115 + 0116)
+### Phase 9.0c — llama.cpp-wasm runtime adapter (NEXT)
 
-**Started 2026-05-27.** Sub-phases 11.0–11.3 SHIPPED 2026-05-31
-(ADR 0116). The `/app/` SPA is live; investor demo path works end
-to end.
+**Resumes 2026-06.** Phase 11 closure unblocks this. Per the
+FE+BE parity rule, the runtime ships with its own `/app/labs/`
+panel upgrade so installed SLM packs can actually run inference.
 
-**Remaining sub-phases**:
+**Plan**:
+- [ ] **ADR 0114** — runtime choice (llama.cpp-wasm only;
+  distroless-deploy trade-off; vendoring posture). Drafted first.
+- [ ] `src/phase1/slm-runtime.mjs` wrapping llama.cpp-wasm with
+  lazy-load from CDN/mirror on first install tap (Phase 2a.8
+  Tesseract.js pattern). `runtime.generate({prompt, maxTokens})`
+  + `runtime.computeGradients(...)`.
+- [ ] OPFS-aware model loading (reads installed-slm record + loads
+  weights from OPFS handle from Phase 9.0b).
+- [ ] `/app/labs/` install card upgrade: real OPFS download with
+  progress bar + real SHA-256 verify + post-install "Try a prompt"
+  textarea + result card.
+- [ ] Vitest tests using a stub model (no real 2 GB download in CI).
 
-- [x] ~~**Phase 11.0**~~ — Vite scaffold + design tokens + 12
-  components + `/app/` route + Vitest. **Shipped (ADR 0116).**
-- [x] ~~**Phase 11.1**~~ — Split-hero onboarding + persona picker.
-  **Shipped (ADR 0116).**
-- [x] ~~**Phase 11.2**~~ — `/app/worker/` mesh + cash-out + Trust
-  view. **Shipped (ADR 0116).**
-- [x] ~~**Phase 11.3**~~ — `/app/citizen/` intent + recent
-  activity. **Shipped (ADR 0116).**
-- [ ] **Phase 11.4** — `/app/verify/` adaptation: MFI bundle read,
-  Trust Passport public view, evidence display. ~2 days. **NEXT.**
-- [ ] **Phase 11.5** — `/app/labs/` catch-all: SLM install (Phase
-  9.0b wire), federated rounds, OCR, voice/TTS settings. ~2 days.
-- [ ] **Phase 11.6** — Polish + Playwright end-to-end investor-demo
-  smoke + DPDP §12(3) erasure flow + MFI consent issuance form.
-  ~1 day.
-
-**Remaining**: ~5 days.
-
-**Binding rule from Phase 11+**: FE + BE ship together in every
-phase. No more BE-first phases. See
-`memory/fe-be-parity-rule.md`.
+**~2-3 weeks.**
 
 ---
 

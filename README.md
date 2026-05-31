@@ -152,13 +152,9 @@ Implemented pieces:
 
 ---
 
-## 🚀 2026-05-31 — `/app/` is live (Phase 11.0–11.3 shipped, ADR 0116)
+## 🎉 2026-05-31 — Phase 11 arc CLOSED (`/app/` v1 shipped end-to-end)
 
-The Phase 11 FE rebuild scaffold + onboarding + worker + citizen
-surfaces are in. **`npm run build` inside `frontend/`** → static
-bundle at `public/app/build/` → existing API serves it at
-`/app/`. **Investor demo path is now real**: open `/app/`, pick a
-persona, land on a working dashboard.
+All Phase 11 sub-phases shipped — investor demo path is real.
 
 ```bash
 # One-time
@@ -171,12 +167,20 @@ npm run build
 cd .. && node bin/bos-api.mjs --port 8787 --store .bharat-os-demo
 ```
 
-Remaining: **Phase 11.4** (`/app/verify/` MFI bundle reader, ~2d),
-**Phase 11.5** (`/app/labs/` SLM install wire, ~2d), **Phase 11.6**
-(Playwright end-to-end demo smoke, ~1d). Then Phase 9.0c
-(llama.cpp-wasm runtime) resumes per the FE+BE parity rule.
+Then open:
+- **`/app/`** — new SPA, split-hero Worker / Citizen onboarding
+- **`/app/worker/`** — mesh earn + cash-out + MFI consent + Trust
+- **`/app/citizen/`** — intent input + recent activity
+- **`/app/verify/?consent=…`** — verifier reads signed MFI bundle
+- **`/app/labs/`** — SLM install (wired to Phase 9.0a/9.0b) +
+  federated rounds + OCR placeholders
+- **`/app/settings/`** — DPDP §12 download + erase
+- **`/shell/`** — developer surface, untouched
 
-`/shell/` (developer surface) is untouched and still works.
+**Tests**: 800 Node + 7 Vitest. **Bundle**: 330 KB JS / 18 KB CSS
+(102 / 4 KB gzipped).
+
+**Next**: Phase 9.0c (llama.cpp-wasm runtime) — see `ROADMAP.md`.
 
 ---
 

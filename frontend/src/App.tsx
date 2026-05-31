@@ -44,14 +44,8 @@ export default function App() {
             </ProtectedSurface>
           }
         />
-        <Route
-          path="/verify"
-          element={
-            <ProtectedSurface>
-              <VerifyPage />
-            </ProtectedSurface>
-          }
-        />
+        {/* /verify is public — MFI staff don't have a Bharat OS persona */}
+        <Route path="/verify" element={<VerifyPage />} />
         <Route
           path="/labs"
           element={

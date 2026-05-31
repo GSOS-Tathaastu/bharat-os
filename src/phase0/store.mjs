@@ -51,6 +51,7 @@ export class BosStore {
     this.meshContributionsPath = path.join(rootPath, 'mesh-contributions');
     this.pairingSessionsPath = path.join(rootPath, 'pairing-sessions');
     this.healthDocumentsPath = path.join(rootPath, 'health-documents');
+    this.incomeVerificationConsentsPath = path.join(rootPath, 'income-verification-consents');
     this.profileCredentialsPath = path.join(rootPath, 'profile-credentials');
     this.pushSubscriptionsPath = path.join(rootPath, 'push-subscriptions');
     this.workerNotificationsPath = path.join(rootPath, 'worker-notifications');
@@ -84,6 +85,7 @@ export class BosStore {
     await fs.mkdir(this.meshContributionsPath, { recursive: true });
     await fs.mkdir(this.pairingSessionsPath, { recursive: true });
     await fs.mkdir(this.healthDocumentsPath, { recursive: true });
+    await fs.mkdir(this.incomeVerificationConsentsPath, { recursive: true });
     await fs.mkdir(this.profileCredentialsPath, { recursive: true });
     await fs.mkdir(this.pushSubscriptionsPath, { recursive: true });
     await fs.mkdir(this.workerNotificationsPath, { recursive: true });
@@ -973,6 +975,35 @@ export class BosStore {
     } catch (_error) {
       return false;
     }
+  }
+
+  // Phase 6.1 — MFI income-verification consents. Missing from the
+  // file store until Phase 11.4 surfaced the gap during smoke. Kept
+  // in parity with sqlite-store CRUD shape so the API works under
+  // either backend.
+  incomeVerificationConsentFile(consentId) {
+    return path.join(this.incomeVerificationConsentsPath, `${safeName(consentId)}.json`);
+  }
+
+  async saveIncomeVerificationConsent(consent) {
+    if (!consent?.consentId) {
+      throw new Error('income-verification consent requires consentId.');
+    }
+    await this.init();
+    await writeJson(this.incomeVerificationConsentFile(consent.consentId), consent);
+    return consent;
+  }
+
+  async readIncomeVerificationConsent(consentId) {
+    return readJson(this.incomeVerificationConsentFile(consentId));
+  }
+
+  async listIncomeVerificationConsents({ workerId } = {}) {
+    const all = await listJson(this.incomeVerificationConsentsPath);
+    if (workerId) {
+      return all.filter((c) => c.workerId === workerId);
+    }
+    return all;
   }
 
   async saveWorkerNotification(notification) {
