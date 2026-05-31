@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Action, Badge, Card, Evidence, Stat, useToast } from '@/components/ui';
 import {
   useActiveIdentity,
@@ -8,15 +9,26 @@ import {
   type SlmModelPack,
   type InstalledSlm
 } from '@/lib/hooks';
+import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
+import { SlmTryPrompt } from '@/components/SlmTryPrompt';
 
 function formatGb(bytes: number): string {
   const gb = bytes / 1_000_000_000;
-  return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
+  if (gb >= 0.1) return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
+  const mb = bytes / 1_000_000;
+  return `${Math.round(mb)} MB`;
 }
 
 function formatBillions(params: number): string {
-  const b = params / 1_000_000_000;
-  return `${b.toFixed(b >= 10 ? 0 : 1)}B`;
+  if (params >= 1_000_000_000) {
+    const b = params / 1_000_000_000;
+    return `${b.toFixed(b >= 10 ? 0 : 1)}B`;
+  }
+  if (params >= 1_000_000) {
+    const m = params / 1_000_000;
+    return `${Math.round(m)}M`;
+  }
+  return `${params}`;
 }
 
 const INSTALL_STATUS_VARIANT: Record<InstalledSlm['status'], 'trust' | 'error'> = {
@@ -32,40 +44,65 @@ export function LabsPage() {
   const remove = useRemoveSlmInstall();
   const show = useToast((s) => s.show);
 
+  // Per-pack install progress for the catalogue tiles.
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  // The "Try a prompt" surface — open for one installed pack at a time.
+  const [tryingPack, setTryingPack] = useState<{ modelPackId: string; family: string } | null>(null);
+
   const installedPackIds = new Set(installs.filter((i) => i.status === 'installed').map((i) => i.modelPackId));
 
   async function handleInstall(pack: SlmModelPack) {
     if (!identity) return;
+    if (!opfsSupported()) {
+      show('Browser lacks OPFS — install requires Chrome / Edge / Firefox 111+ / Safari 17+.', 'error');
+      return;
+    }
     const ok = window.confirm(
       `Install ${pack.family}${pack.variant ? ' · ' + pack.variant : ''}? ` +
         `Downloads ${formatGb(pack.diskBytes)} from the operator's mirror, ` +
-        `SHA-256 verifies against the registry, and stores in your browser's ` +
+        `SHA-256-verifies against the registry, and stores in your browser's ` +
         `private storage. You can remove it anytime.`
     );
     if (!ok) return;
 
-    // Phase 11.5 ships the UI; the real download flow with OPFS + SHA-256
-    // verify still lives in /shell/ (Phase 9.0b). Here we simulate the
-    // failure path (no real mirror yet) so the install record is created
-    // with status=failed, demonstrating the audit trail.
+    setInstalling(pack.modelPackId);
+    setProgress(0);
     try {
-      const response = await fetch(pack.sourceUrl, { mode: 'no-cors' }).catch((e) => {
-        throw new Error(`Mirror unreachable: ${(e as Error).message}`);
+      const { observedHash, downloadedBytes } = await downloadAndPersist({
+        url: pack.sourceUrl,
+        modelPackId: pack.modelPackId,
+        onProgress: (loaded, total) => {
+          setProgress(total > 0 ? Math.round((loaded / total) * 100) : 0);
+        }
       });
-      if (!response?.ok) {
-        throw new Error('Mirror returned non-200');
-      }
+      // Server-side createInstalledSlmRecord defends the
+      // expected-vs-observed invariant; we pass the observed hash and
+      // let the server be the source of truth. If they mismatch the
+      // server returns 400 invalid_install_record.
+      const verified = observedHash === pack.sourceHash;
       record.mutate(
         {
           identityId: identity.id,
           modelPackId: pack.modelPackId,
           runtimeBackend: 'llama_cpp_wasm',
-          downloadedBytes: pack.diskBytes,
-          status: 'installed',
-          observedHash: pack.sourceHash
+          downloadedBytes,
+          status: verified ? 'installed' : 'failed',
+          failureReason: verified
+            ? undefined
+            : `SHA-256 mismatch: expected ${pack.sourceHash}, observed ${observedHash}`,
+          observedHash
         },
         {
-          onSuccess: () => show('Pack installed.', 'success'),
+          onSuccess: () => {
+            if (verified) {
+              show(`Installed ${pack.family}. Tap "Try a prompt" to test it.`, 'success');
+            } else {
+              // Discard the corrupted blob from OPFS.
+              removeSlmBlob(pack.modelPackId).catch(() => {});
+              show('Install failed: SHA-256 mismatch — discarded.', 'error');
+            }
+          },
           onError: (err: Error) => show(err.message, 'error')
         }
       );
@@ -80,10 +117,12 @@ export function LabsPage() {
           failureReason: (err as Error).message
         },
         {
-          onSuccess: () => show(`Install failed honestly: ${(err as Error).message}`, 'info'),
-          onError: (e: Error) => show(e.message, 'error')
+          onSuccess: () => show(`Install failed: ${(err as Error).message}`, 'info')
         }
       );
+    } finally {
+      setInstalling(null);
+      setProgress(0);
     }
   }
 
@@ -91,6 +130,9 @@ export function LabsPage() {
     if (!identity) return;
     const ok = window.confirm(`Remove ${install.pack?.family ?? install.modelPackId}?`);
     if (!ok) return;
+    // Wipe OPFS first; even if the server delete fails we no longer
+    // hold the bytes on this device.
+    removeSlmBlob(install.modelPackId).catch(() => {});
     remove.mutate(
       { identityId: identity.id, installId: install.installId },
       {
@@ -98,6 +140,19 @@ export function LabsPage() {
         onError: (err: Error) => show(err.message, 'error')
       }
     );
+  }
+
+  async function handleTryPrompt(install: InstalledSlm) {
+    // Only allow "Try a prompt" when the bytes are actually in OPFS.
+    const blob = await readSlmBlob(install.modelPackId);
+    if (!blob) {
+      show('Model bytes missing from OPFS. Re-install the pack.', 'error');
+      return;
+    }
+    setTryingPack({
+      modelPackId: install.modelPackId,
+      family: install.pack?.family ?? install.modelPackId
+    });
   }
 
   return (
@@ -112,11 +167,30 @@ export function LabsPage() {
         </p>
       </div>
 
+      {tryingPack && (
+        <SlmTryPrompt
+          modelPackId={tryingPack.modelPackId}
+          family={tryingPack.family}
+          onClose={() => setTryingPack(null)}
+        />
+      )}
+
       <Card
         title="On-device language model"
-        subtitle="Phase 9.0a (registry) + 9.0b (install flow) are live. Runtime that actually executes inference lands in Phase 9.0c."
+        subtitle="Phase 9.0a (registry) + 9.0b (install) + 9.0c (runtime) live. WASM lazy-loaded on first generation."
         actions={catalog && <Badge variant="neutral">{catalog.totalActive} packs available</Badge>}
       >
+        {!opfsSupported() && (
+          <Card tone="warning" className="mb-4">
+            <p className="text-body font-semibold">OPFS not supported</p>
+            <p className="text-caption text-text-muted mt-1">
+              On-device SLM install needs Origin Private File System: Chrome / Edge,
+              Firefox 111+, Safari 17+. Older browsers can still browse the
+              catalogue.
+            </p>
+          </Card>
+        )}
+
         {installs.length > 0 && (
           <div className="mb-4 border-b border-border pb-4">
             <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
@@ -126,9 +200,9 @@ export function LabsPage() {
               {installs.map((i) => (
                 <li
                   key={i.installId}
-                  className="flex items-center justify-between rounded-sm border border-border bg-white p-2"
+                  className="flex items-center justify-between gap-2 rounded-sm border border-border bg-white p-2"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-text">
                       {i.pack?.family ?? i.modelPackId}
                       {i.pack?.variant ? ` · ${i.pack.variant}` : ''}
@@ -141,6 +215,11 @@ export function LabsPage() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Badge variant={INSTALL_STATUS_VARIANT[i.status]}>{i.status}</Badge>
+                    {i.status === 'installed' && (
+                      <Action variant="trust" size="sm" onClick={() => handleTryPrompt(i)}>
+                        Try a prompt
+                      </Action>
+                    )}
                     <Action variant="ghost" size="sm" onClick={() => handleRemove(i)}>
                       Remove
                     </Action>
@@ -161,49 +240,67 @@ export function LabsPage() {
           </p>
         )}
         <div className="grid gap-2">
-          {catalog?.modelPacks.map((pack) => (
-            <div
-              key={pack.modelPackId}
-              className="rounded-sm border border-border bg-white p-3"
-            >
-              <div className="mb-1 flex items-baseline justify-between gap-2">
-                <p className="font-semibold text-text">
-                  {pack.family}
-                  {pack.variant ? ` · ${pack.variant}` : ''}
-                </p>
-                <span className="text-caption uppercase tracking-wide text-text-muted">
-                  {pack.runtime.replace(/_/g, ' ')}
-                </span>
-              </div>
-              <p className="text-caption text-text-muted">
-                {formatBillions(pack.parameterCount)} params · {pack.quantization} ·{' '}
-                {pack.license} · {formatGb(pack.diskBytes)} download
-              </p>
-              {pack.description && (
-                <p className="mt-1 text-caption text-text-muted">{pack.description}</p>
-              )}
-              <Action
-                size="sm"
-                className="mt-2"
-                disabled={installedPackIds.has(pack.modelPackId) || record.isPending}
-                onClick={() => handleInstall(pack)}
+          {catalog?.modelPacks.map((pack) => {
+            const isInstalling = installing === pack.modelPackId;
+            return (
+              <div
+                key={pack.modelPackId}
+                className="rounded-sm border border-border bg-white p-3"
               >
-                {installedPackIds.has(pack.modelPackId)
-                  ? 'Already installed'
-                  : `Install (${formatGb(pack.diskBytes)})`}
-              </Action>
-            </div>
-          ))}
+                <div className="mb-1 flex items-baseline justify-between gap-2">
+                  <p className="font-semibold text-text">
+                    {pack.family}
+                    {pack.variant ? ` · ${pack.variant}` : ''}
+                  </p>
+                  <span className="text-caption uppercase tracking-wide text-text-muted">
+                    {pack.runtime.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <p className="text-caption text-text-muted">
+                  {formatBillions(pack.parameterCount)} params · {pack.quantization} ·{' '}
+                  {pack.license} · {formatGb(pack.diskBytes)} download
+                </p>
+                {pack.description && (
+                  <p className="mt-1 text-caption text-text-muted">{pack.description}</p>
+                )}
+                <div className="mt-2 flex items-center gap-2">
+                  <Action
+                    size="sm"
+                    disabled={
+                      installedPackIds.has(pack.modelPackId) ||
+                      record.isPending ||
+                      isInstalling
+                    }
+                    onClick={() => handleInstall(pack)}
+                  >
+                    {installedPackIds.has(pack.modelPackId)
+                      ? 'Already installed'
+                      : isInstalling
+                        ? `Downloading… ${progress}%`
+                        : `Install (${formatGb(pack.diskBytes)})`}
+                  </Action>
+                </div>
+                {isInstalling && (
+                  <progress
+                    className="mt-2 block h-1 w-full"
+                    value={progress}
+                    max={100}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
         <Evidence title="How on-device SLMs work">
-          When you tap Install, the browser would stream the model from a
-          Bharat OS-curated mirror (HTTPS-only, SHA-256 verified). The bytes
-          live in your browser's Origin Private File System — never on the
-          Bharat OS server. The server only records THAT you installed pack X,
-          not the bytes themselves. The runtime that actually RUNS the model
-          lands in Phase 9.0c (llama.cpp-wasm). Until then, install attempts
-          fail honestly with `failed` status — the audit trail is real even
-          when the mirror isn't.
+          When you tap Install, the browser streams the GGUF model from a
+          Bharat OS-curated mirror (HTTPS-only). The bytes write straight to
+          your browser's Origin Private File System while SHA-256 is computed
+          incrementally; on mismatch the blob is discarded and the install
+          record stores status:&nbsp;failed honestly. On match, "Try a prompt"
+          becomes available: the llama.cpp-wasm runtime lazy-loads from CDN
+          on first use, the model loads into WASM memory, and generation
+          streams locally. Nothing about your prompt or the response leaves
+          your device.
         </Evidence>
       </Card>
 
@@ -216,7 +313,7 @@ export function LabsPage() {
           className="mt-3"
           label="Active rounds"
           value="—"
-          delta="Round discovery surface ships in Phase 11.6 polish"
+          delta="Round discovery surface ships in a future polish step"
         />
       </Card>
 

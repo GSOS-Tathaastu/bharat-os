@@ -152,6 +152,33 @@ Implemented pieces:
 
 ---
 
+## 🧠 2026-05-31 — Phase 9.0c shipped: on-device SLM inference is real
+
+`/app/labs/` now runs real llama.cpp-wasm inference on installed
+GGUF packs. Tap **Install** → stream-download with progress + real
+SHA-256 verify + OPFS persist. On match: tap **Try a prompt** →
+WASM runtime lazy-loads from CDN → tokens stream into the UI. The
+prompt never leaves the device.
+
+- **ADR 0114** locks the runtime choice (llama.cpp-wasm via
+  `@wllama/wllama` 3.4.1, lazy-loaded via dynamic import).
+- Main bundle stays **105 KB gzipped** — wllama lives in its own
+  126 KB-gzipped lazy chunk, paid only by users who generate.
+- **14/14 Vitest** (+7 for the adapter), **800/800 Node** (backend
+  untouched — adapter rides Phase 9.0a/9.0b endpoints).
+- Backend zero-npm-dep posture preserved. Frontend dep surface
+  now: 258 npm packages.
+
+**External item**: pick a small real GGUF (e.g. SmolLM2-135M ≈ 90 MB
+from HuggingFace), pre-compute SHA-256, register via admin endpoint
+— then the install→verify→generate loop demos end-to-end against a
+real model. See `ROADMAP.md` external items.
+
+**Next**: Phase 9.0d (federated rounds + mesh-inference events
+real-tick recording) per the FE+BE parity rule.
+
+---
+
 ## 🎉 2026-05-31 — Phase 11 arc CLOSED (`/app/` v1 shipped end-to-end)
 
 All Phase 11 sub-phases shipped — investor demo path is real.

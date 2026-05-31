@@ -80,6 +80,32 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 9.0c — SLM runtime adapter ✅ SHIPPED 2026-05-31
+- **ADR 0114** locks llama.cpp-wasm via `@wllama/wllama` 3.4.1,
+  lazy-loaded (dynamic import code-splits into its own chunk).
+- `src/lib/slm-runtime.ts` — stable `SlmRuntime` adapter API
+  (forward-compatible for v2 MLC-LLM): `loadSlmRuntime({ggufBytes,
+  onProgress})`, `runtime.generate({prompt, maxTokens, onToken})`
+  streaming, `runtime.unload()`.
+- `src/lib/opfs.ts` — OPFS helpers: `downloadAndPersist` (streams
+  fetch into OPFS while computing SHA-256 concurrently), `readSlm
+  Blob`, `removeSlmBlob`.
+- `<SlmTryPrompt>` component — sample chips + textarea + streaming
+  output + generation latency.
+- `/app/labs/` install flow upgraded: real fetch with progress,
+  real SHA-256, server enforces expected==observed, OPFS persist,
+  Try a prompt action on installed packs.
+- 7 Vitest tests with wllama mocked (load, ArrayBuffer wrap,
+  progress, streaming, onToken-false stop, unload, error swallow).
+- **Bundle**: main 338 KB / 105 KB gzipped (+8 KB vs Phase 11.6);
+  wllama lazy chunk 292 KB / 126 KB gzipped (paid only by users
+  who generate).
+- §15: bytes never on server, prompt never leaves device, honest
+  mode disclosure, lazy-loading honored, integrity check before
+  installed status, discard on mismatch, audit ledger covers all.
+- **Backend**: zero changes — uses Phase 9.0a/9.0b endpoints
+  already deployed.
+
 ### Phase 11 — FE rebuild ✅ CLOSED 2026-05-31
 - **11.0** Vite + React 19 + TS + Tailwind + Zustand + TanStack
   Query + Router 7 + Vitest scaffold; 12 design-system components
@@ -122,27 +148,29 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 9.0c — llama.cpp-wasm runtime adapter (NEXT)
+### Phase 9.0d — Federated rounds + mesh-inference event integration (NEXT)
 
-**Resumes 2026-06.** Phase 11 closure unblocks this. Per the
-FE+BE parity rule, the runtime ships with its own `/app/labs/`
-panel upgrade so installed SLM packs can actually run inference.
+**Unblocked by Phase 9.0c shipping the runtime.** Until now §7f
+had no real model to fine-tune beyond the 216-param classifier
+(`local-training.mjs`). The new SLM runtime can do distillation,
+LoRA fine-tuning, and gradient updates with DP-SGD.
 
 **Plan**:
-- [ ] **ADR 0114** — runtime choice (llama.cpp-wasm only;
-  distroless-deploy trade-off; vendoring posture). Drafted first.
-- [ ] `src/phase1/slm-runtime.mjs` wrapping llama.cpp-wasm with
-  lazy-load from CDN/mirror on first install tap (Phase 2a.8
-  Tesseract.js pattern). `runtime.generate({prompt, maxTokens})`
-  + `runtime.computeGradients(...)`.
-- [ ] OPFS-aware model loading (reads installed-slm record + loads
-  weights from OPFS handle from Phase 9.0b).
-- [ ] `/app/labs/` install card upgrade: real OPFS download with
-  progress bar + real SHA-256 verify + post-install "Try a prompt"
-  textarea + result card.
-- [ ] Vitest tests using a stub model (no real 2 GB download in CI).
+- [ ] Extend `SlmRuntime` adapter with `computeGradients(...)` —
+  needs llama.cpp-wasm gradient API exploration
+- [ ] Wire Phase 3.x federated-round substrate to dispatch rounds
+  to the new SLM runtime via `composeFederatedUpdate`
+- [ ] Phase 6.0b mesh-inference workload events start recording
+  real ticks per inference call (currently demo-seeded)
+- [ ] `/app/labs/` federated rounds card grows real "Active rounds"
+  Stat populated from `useFederatedRounds` hook + "Join round"
+  action with DP-SGD privacy-budget display
+- [ ] Per-round earnings flow into existing `mesh_events` ledger;
+  drain via Phase 8.3 cash-out UI (already shipped)
+- [ ] Per FE+BE parity: BE round-dispatch + FE labs upgrade ship
+  in the same commit
 
-**~2-3 weeks.**
+**~1 week.**
 
 ---
 
@@ -291,9 +319,13 @@ These need the founder to drive personally. None started.
 - [ ] **Bharat OS domain registration** + brand decisions
 - [ ] **Patent counsel engagement** — §14A defensive strategy
 - [ ] **Regulatory counsel** — DPDP / RBI / MeitY items
-- [ ] **Real Phi-3-mini / Gemma-2B mirror hosting** — Phase 9.0a/b
-  ships the catalogue with `models.bharat-os.example` placeholder
-  URLs; needs real CDN-backed mirror before 9.0c lands
+- [ ] **Real demo SLM with pre-computed SHA-256** — Phase 9.0c
+  shipped the runtime + OPFS install flow but the seeded packs
+  still point at `models.bharat-os.example`. Pick a small public
+  GGUF (e.g. SmolLM2-135M ≈ 90 MB from HuggingFace), pre-compute
+  its SHA-256, register a pack via the admin endpoint. Once done,
+  the full "install → SHA verify → try a prompt" loop demos
+  end-to-end.
 - [ ] **VAPID key generation + ops storage** — Phase 7.0 is wired
   but production VAPID keys haven't been generated for any
   operator. Without these, push delivery falls back to local-only.
