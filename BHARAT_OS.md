@@ -2112,19 +2112,42 @@ the cross-references below:
    default. Substrate stays intact; FE chooses what to surface.
    `memory/ondc-bridge-hidden-v1.md`.
 
-**Sequencing (~6-7 weeks total when resumed):**
+**11.8 SHIPPED 2026-05-31 (ADR 0127). 11.9 SHIPPED 2026-05-31
+(ADR 0128).**
+
+**Phase 12.x → 13.x sequencing locked 2026-05-31** after a
+founder conversation that produced two more strategic decisions
+on top of the four earlier:
+
+5. **Citizen data labelling + sponsor sale as a revenue line.**
+   Citizens monetize THEIR own data (intents, conversations,
+   document interactions, etc.) via Bharat OS — signed consent,
+   per-data-point payouts, revocation. Different motion from
+   today's labeling marketplace (workers label sponsors' data).
+   `memory/citizen-data-as-product-revenue.md`. Phase 13.x.
+6. **Compute network as new mesh workload.** Extend §13B with
+   `compute_serving` — worker phones serve SLM inferences to
+   OTHER citizens for fiat-credit. Storage network already
+   substrate (low priority for v1).
+   `memory/compute-network-mesh-workload.md`. Phase 13.x.
 
 | Phase | Scope | Cost |
 | --- | --- | --- |
-| **11.8** | Per-scope consent grant UI launched from Outcome card + auto-re-send → closes the "Book a cab" loop end-to-end. Pure FE; reuses Phase 1.3 consent substrate. | ~1 day |
-| **11.9** | Hero rebrand to Earn / Use + in-flow role chooser (Label data / Drive / Cook / Run a shop / …). Provider tiles "coming soon" until 12.0 substrate lands. | ~1 day |
-| **12.0** | `providerIdentity` substrate — schema + KYC-heavy onboarding + linkage to root recovery. BE + FE per parity rule. | ~1.5 wks |
-| **12.1** | Marketplace v1 (citizen side). `service_booking` plan returns `{providers, ondcBridge}` split; `/app/citizen/marketplace/` surfaces native only + "invite a provider" empty state. | ~1.5 wks |
-| **12.2** | Provider self-serve onboarding per role (driver / cook / kirana / maid / skilled). KYC + role attestation + photo + location. Real provider growth begins. | ~2 wks |
+| **12.0** | `providerIdentity` substrate (BE+FE). Schema + KYC-heavy onboarding + linkage to root recovery. Earner home: two ledger cards (micro-task + marketplace). | ~1.5 wks |
+| **12.1a** | Marketplace substrate + baseline UX. Real geo (provider lat/lng + service radius), provider profiles, ranked citizen search, ONDC sandbox bridge hidden behind empty-state, **new parallel citizen-booking escrow** (state machine: pre_authorized → in_progress → provider_marked_complete → citizen_confirmed \| disputed \| auto_released_24h). | ~2 wks |
+| **12.1b** | SLM AI-orchestration layer on top. Vernacular intent → structured action (22+ Indic languages) · offline-first decisioning · on-device dynamic forms · on-device negotiation agent for marketplace. Reuses Phase 9.0c runtime + Phase 10.6 prompt/parse pattern. | ~3 wks |
+| **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
+| **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
+| **13.x** | SLM USP features: on-device document summariser · PII redactor · personalization (preferences never leave device) · skill agents for Indian tasks (electricity bill / consumer complaint / PM-KISAN). | ~6 wks |
+| **13.x** | Citizen data labelling + sponsor sale + Compute network mesh workload. New revenue lines. | ~4 wks |
+| **14+** | Bharat ID / SSO — long-game positioning play. | TBD |
 
-11.8 + 11.9 ship cheap (~1 day each) and immediately move the
-investor-demo story forward. 12.0-12.2 is the substrate the
-provider-side §13B value loop actually needs.
+~22 wks of substantive work to v1 marketplace + SLM-USP feature
+parity + new revenue lines. Subject to demo + investor +
+provider-feedback re-prioritization.
+
+`memory/phase-12-13-sequencing-set.md` carries the full
+sequencing.
 
 🟡 **Proposed (design only — not yet implemented):**
 

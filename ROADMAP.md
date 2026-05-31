@@ -390,44 +390,106 @@ Resumed sequencing (~6-7 weeks total):
 - **Bundle**: main 380 → 384 KB / 116 KB gzipped (+4 KB).
 - **Next: Phase 12.x sequencing conversation** before code.
 
-### Phase 12.0 — Provider identity substrate (~1.5 wks)
+### Phase 12.x → 13.x — Locked sequencing 2026-05-31
 
-Foundation for the provider-side §13B value loop. BE + FE per
-the parity rule.
+Full conversation outputs (provider role selection, AI-powered
+marketplace ambition, escrow approach, ONDC sandbox plan, SLM
+USP priorities, new revenue lines) captured in
+`memory/phase-12-13-sequencing-set.md` + the four new direction
+memos.
 
-- [ ] `providerIdentity` schema on both stores (file + sqlite).
-  Verified KYC + role attestation + ongoing Trust Passport.
-- [ ] Linkage to root recovery (Phase 1.19) — same human can
-  hold worker + provider identities under one phone/Aadhaar
-  root.
-- [ ] KYC-heavy onboarding entry on /app/ (Aadhaar e-KYC + role
-  attestation + photo + location; fallback for offline).
-- [ ] Earner home presents two ledger cards: micro-task earnings
-  + marketplace earnings.
+#### Phase 12.0 — providerIdentity substrate (~1.5 wks)
+- [ ] `providerIdentity` schema on both stores; separate from
+  `workerIdentity`.
+- [ ] Linkage to root recovery (Phase 1.19) — same human holds
+  both under one root.
+- [ ] KYC-heavy onboarding entry (Aadhaar e-KYC + role
+  attestation + photo + location).
+- [ ] Earner home presents two ledger cards (micro-task +
+  marketplace).
 
-### Phase 12.1 — Marketplace v1, citizen side (~1.5 wks)
+#### Phase 12.1a — Marketplace substrate + baseline UX (~2 wks)
+- [ ] Real geo (provider lat/lng + service radius + city/area
+  filtering).
+- [ ] Provider profile with customizable slots + rates +
+  accepted-area polygon.
+- [ ] Citizen search → ranked list within radius (Trust
+  Passport + distance + price).
+- [ ] Tap to book → Phase 11.8 consent flow → escrow lock →
+  push notify provider.
+- [ ] **New parallel citizen-booking escrow** module
+  (`citizen-booking-escrow.mjs`). State machine:
+  `pre_authorized → in_progress → provider_marked_complete →
+  citizen_confirmed | disputed | auto_released_24h`. Reuses
+  Phase 9.1's signed-event + ledger anchoring; NOT the sponsor
+  state machine.
+- [ ] ONDC bridge against sandbox URLs (config swap to prod
+  on go-live); hidden behind empty-state CTA.
 
-- [ ] `service_booking` plan splits response into `providers`
-  (Bharat OS native) + `ondcBridge` (bootstrap density). FE
-  decides what to surface.
-- [ ] `/app/citizen/marketplace/` surface — search by service +
-  area, ranked by Trust Passport + distance + price.
-- [ ] Empty state: "No drivers near you yet — invite one"
-  referral CTA. "Also check ONDC" toggle buried under
-  `<details>`, opt-in per query, not a setting.
-- [ ] Booking flow ties into Phase 9.1 sponsor escrow pattern
-  (citizen → provider escrow → release on service confirmed).
+#### Phase 12.1b — AI-orchestration layer (~3 wks)
+- [ ] **A.** Vernacular intent → structured action (22+ Indic
+  languages). Extends `vernacular.mjs` substrate.
+- [ ] **B.** Offline-first decisioning + queued sync. Cache
+  consents, answer queries from local memory.
+- [ ] **C.** On-device dynamic onboarding forms (SLM generates
+  next field based on prior answers + reads document scans +
+  autofills). Direct fit with 12.0 KYC onboarding.
+- [ ] **D.** On-device negotiation agent for marketplace.
+  Citizen states budget + need; agent surveys catalog,
+  negotiates rates within budget, presents options.
 
-### Phase 12.2 — Provider self-serve onboarding (~2 wks)
+Pattern reuse: each is `buildPrompt + parseCompletion` shape
+from Phase 10.6 labeling-slm-hint.
 
-- [ ] Per-role tailored onboarding screens (driver / cook /
-  kirana / maid / skilled trades). Each role has its own
-  attestation requirements.
-- [ ] Real provider growth begins — seed-data replaced with
-  actual sign-ups.
+#### Phase 12.2 — Provider onboarding wave 1 (~2 wks)
+Four roles share a common physical-service onboarding flow +
+role-specific extras (founder picked "minimum onboarding load,
+maximum coverage"):
+- [ ] `cab-driver` — own commercial vehicle (taxi/auto/ride-hail).
+  Extras: vehicle docs + commercial permit.
+- [ ] `personal-driver` — chauffeur for citizen's vehicle.
+  Extras: police verification + prior employer ref.
+- [ ] `labourers` — construction / loading / factory / farm
+  daily wage. Extras: sardar/contractor attestation.
+- [ ] `household-help` — maid + cook combined. Extras: police
+  verification + references.
 
-After 12.2: the v1 marketplace arc closes. Pick from Phase 10
-polish backlog OR Phase 13+ (Bharat ID / SSO).
+#### Phase 12.3+ — Remaining provider roles (~3 wks)
+- [ ] `kirana` (shop license + GST optional).
+- [ ] `skilled-trades` (ITI cert + portfolio + Trust Passport
+  feedback loop).
+
+#### Phase 13.x — SLM USP features (~6 wks)
+- [ ] **E.** On-device document summariser (electricity bill /
+  Form 16 / T&Cs / insurance / lender docs).
+- [ ] **F.** On-device PII redactor on outgoing actions.
+- [ ] **G.** On-device personalization (preferences never leave
+  device).
+- [ ] **H.** On-device skill agents for Indian tasks
+  (electricity bill / consumer complaint / PM-KISAN scheme).
+
+#### Phase 13.x — New revenue lines (~4 wks)
+- [ ] **Citizen data labelling + sponsor sale.** Citizens
+  monetize THEIR own data (intents / conversations / document
+  interactions) via signed consent + per-data-point payouts +
+  revocation. Reuses Phase 9.1 sponsor + Phase 10.x labeling
+  substrate + Phase 11.8 per-scope consent. See
+  `memory/citizen-data-as-product-revenue.md`.
+- [ ] **Compute network mesh workload.** Add `compute_serving`
+  to `MESH_WORKLOAD_TYPES`. Worker phones serve Phi-3-mini
+  inferences to OTHER citizens for fiat-credit. See
+  `memory/compute-network-mesh-workload.md`.
+- [ ] Storage network already substrate — no FE work for v1.
+
+#### Phase 14+ — Bharat ID / SSO
+- [ ] SLM generates and signs SSO tokens for third-party
+  services without revealing the underlying identity. Bharat
+  OS as the trust anchor for India's app ecosystem.
+
+**Total: ~22 wks of substantive work to v1 marketplace +
+SLM-USP feature parity + new revenue lines + Bharat ID
+substrate.** Subject to demo / investor / provider-feedback
+re-prioritization.
 
 ### Phase 10 — v1 arc CLOSED 2026-05-31
 
