@@ -152,6 +152,50 @@ Implemented pieces:
 
 ---
 
+## 🏛️ 2026-06-01 — Phase 12.0.5 shipped: sponsor /app/sponsor/ admin surface — substrate-integration sweep arc CLOSED
+
+Fourth and final sub-phase of the substrate-integration sweep
+(12.0.2 citizen → 12.0.3 worker → 12.0.4 cross-cutting →
+12.0.5 sponsor). Every BE-complete Phase 1-12 substrate that
+any persona could plausibly use is now wired into `/app/`.
+
+- **ADR 0134** — pure FE; zero BE changes. 25 new files.
+- **Scoped by a Workflow** with 7 parallel Explore agents
+  mapping every sponsor substrate; synthesis produced a
+  600-line implementation spec.
+- **Hardened by a 2nd Workflow** with 3 parallel adversarial
+  reviewers (privacy / UX / edge case) + triage; 13
+  must/should-fix items applied before commit. Privacy
+  review: `ship_clean`.
+- Sponsor flow end-to-end on `/app/sponsor/`:
+  - **Bearer-token paste sign-in** with show/hide + clear
+    error states.
+  - **Dashboard**: escrow tiles + honest "jobs sampling" count
+    (not a wrong estimate).
+  - **Labeling jobs**: create + items upload (JSON array / JSONL
+    / single object, UTF-8 BOM strip, 10 MB cap, per-line parse
+    errors) + launch + **review queue** (Phase 10.4 — accept /
+    reject + clawback + reason ≥ 4 chars) + **signed audit
+    export** with FE Web-Crypto verification (4-bucket verdict:
+    verified / unverified / mismatch / fetch_failed).
+  - **Federated rounds**: list + create with SLM-pack picker +
+    detail + unsigned NDJSON export.
+  - **Escrow ledger** filtered to this sponsor's events.
+  - **Settings**: profile + audit-signer pubkey transparency +
+    sign-out with `cancelQueries`-before-`clear` so in-flight
+    mutations can't pollute the next sponsor's cache.
+- §15: bearer never echoed to DOM; document title scrubbed
+  (no displayName); identityHash rotation preserved;
+  `goldenAnswer` never shown to sponsor; cross-sponsor isolation
+  enforced.
+- Bundle: main 505 KB / 144 KB gzipped (+71 KB vs 12.0.4).
+
+**Next: Phase 12.1a** — marketplace substrate (real geo + new
+parallel citizen-booking escrow + ONDC sandbox bridge,
+~2 weeks). First phase outside the sweep arc.
+
+---
+
 ## 🔔 2026-06-01 — Phase 12.0.4 shipped: cross-cutting sweep — push + vault transfer + DPDP grievance + voice + flag reports
 
 Third of four substrate-integration sub-phases. Five wires

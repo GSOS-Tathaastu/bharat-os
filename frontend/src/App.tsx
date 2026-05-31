@@ -10,6 +10,7 @@ import { LabsPage } from '@/routes/Labs';
 import { LabelsPage } from '@/routes/Labels';
 import { ProviderOnboardingPage } from '@/routes/ProviderOnboarding';
 import { SettingsPage } from '@/routes/Settings';
+import { SponsorSurface } from '@/routes/sponsor/SponsorSurface';
 import { TopBar } from '@/components/TopBar';
 
 function ProtectedSurface({ children }: { children: React.ReactNode }) {
@@ -80,6 +81,8 @@ export default function App() {
             </ProtectedSurface>
           }
         />
+        {/* Phase 12.0.5 — sponsor console; auth lives inside SponsorSurface */}
+        <Route path="/sponsor/*" element={<SponsorSurface />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastRoot />

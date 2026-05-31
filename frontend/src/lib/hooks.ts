@@ -792,6 +792,460 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0.5 sponsor console -------------------------------------
+//
+// Hooks for the bearer-gated /app/sponsor/* surface. All
+// state-mutating endpoints go through `apiWithBearer` which reads
+// the token from the Zustand store at call time. The NDJSON export
+// endpoints use `fetchWithBearer` because they're text/x-ndjson
+// streams, not JSON responses.
+
+import { apiWithBearer, fetchWithBearer } from './api-sponsor';
+import { useSponsorAuthStore } from './sponsor-auth-store';
+import { verifyLabelingExportLinesAsync } from './sponsor-export-verify';
+
+export interface PublicSponsor {
+  sponsorId: string;
+  displayName: string;
+  contactEmail: string | null;
+  status: 'active' | 'suspended' | 'revoked';
+  onboardedAt: string;
+  escrowBalancePaise: number;
+  escrowLockedPaise: number;
+}
+
+export interface SponsorSelfProbeInput {
+  sponsorId: string;
+  token: string;
+}
+
+/**
+ * One-shot probe used by the entry page. Uses the token override —
+ * never reads from / writes to the store. Caller persists on
+ * success. Seeds the `['sponsor-self', sponsorId]` cache so the
+ * dashboard's first paint after sign-in is instant.
+ */
+export function useSponsorSelfProbe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sponsorId, token }: SponsorSelfProbeInput) =>
+      apiWithBearer<{ sponsor: PublicSponsor }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId)}/self`,
+        { bearerOverride: token }
+      ),
+    onSuccess: ({ sponsor }) => {
+      qc.setQueryData(['sponsor-self', sponsor.sponsorId], sponsor);
+    }
+  });
+}
+
+export function useSponsorSelf() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-self', sponsorId],
+    queryFn: () =>
+      apiWithBearer<{ sponsor: PublicSponsor }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/self`
+      ).then((r) => r.sponsor),
+    enabled: Boolean(sponsorId),
+    staleTime: 30 * 1000
+  });
+}
+
+// ─── Labeling jobs (sponsor scope) ────────────────────────────────────
+
+export interface LabelingJobFull {
+  jobId: string;
+  protocolVersion: string;
+  objectType: string;
+  sponsorId: string;
+  createdBy: string;
+  taskKind: 'preference_pair' | 'classification' | 'span_annotation' | 'transcription' | 'safety_label';
+  language: string;
+  modality: 'text' | 'voice' | 'image';
+  perLabelPaise: number;
+  bharatOsFeePaise: number;
+  itemCount: number;
+  ipTerms: 'non_exclusive' | 'exclusive' | 'cc_by_4_0';
+  consentPurposeCode: string;
+  description: string | null;
+  status: 'draft' | 'funded' | 'active' | 'paused' | 'complete' | 'cancelled';
+  createdAt: string;
+  deadlineAt: string;
+  launchedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  submissionsAccepted: number;
+  submissionsRejected: number;
+  escrowLockedPaise: number;
+  escrowDebitedPaise: number;
+  itemsUploaded: number;
+  qcGoldenItemRateBps: number;
+  qcMinWorkerScore: number;
+  qcSponsorReviewRateBps: number;
+}
+
+export function useSponsorJobs() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-jobs', sponsorId],
+    queryFn: () =>
+      apiWithBearer<{ jobs: LabelingJobFull[] }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs`
+      ).then((r) =>
+        r.jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      ),
+    enabled: Boolean(sponsorId)
+  });
+}
+
+export interface CreateSponsorJobInput {
+  taskKind: LabelingJobFull['taskKind'];
+  language: string;
+  modality?: LabelingJobFull['modality'];
+  perLabelPaise: number;
+  bharatOsFeePaise?: number;
+  itemCount: number;
+  ipTerms?: LabelingJobFull['ipTerms'];
+  consentPurposeCode: string;
+  description?: string;
+  deadlineSecondsFromNow?: number;
+  qcGoldenItemRateBps?: number;
+  qcMinWorkerScore?: number;
+  qcSponsorReviewRateBps?: number;
+}
+
+export function useCreateSponsorJob() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateSponsorJobInput) =>
+      apiWithBearer<{ ok: boolean; job: LabelingJobFull }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs`,
+        { method: 'POST', body: JSON.stringify(input) }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sponsor-jobs', sponsorId] });
+    }
+  });
+}
+
+export interface UploadSponsorJobItemsInput {
+  jobId: string;
+  items: Array<{ body: unknown; goldenAnswer?: unknown }>;
+}
+
+export function useUploadSponsorJobItems() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, items }: UploadSponsorJobItemsInput) =>
+      apiWithBearer<{ ok: boolean; job: LabelingJobFull; itemsCreated: number }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId)}/items`,
+        { method: 'POST', body: JSON.stringify({ items }) }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sponsor-jobs', sponsorId] });
+    }
+  });
+}
+
+export function useLaunchSponsorJob() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId }: { jobId: string }) =>
+      apiWithBearer<{ ok: boolean; job: LabelingJobFull; sponsor: PublicSponsor }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId)}/launch`,
+        { method: 'POST' }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sponsor-jobs', sponsorId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-self', sponsorId] });
+    }
+  });
+}
+
+export interface LabelingSubmissionSurface {
+  submissionId: string;
+  itemId: string;
+  taskKind: LabelingJobFull['taskKind'];
+  labelValue: unknown;
+  status: string;
+  submittedAt: string;
+  identityHash: string;
+  rejectionReason?: string | null;
+}
+
+export function useSponsorJobReviewQueue(
+  jobId: string | null | undefined,
+  status: string = 'pending_sponsor_review'
+) {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-job-submissions', sponsorId, jobId, status],
+    queryFn: () =>
+      apiWithBearer<{ submissions: LabelingSubmissionSurface[] }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId!)}/submissions?status=${encodeURIComponent(status)}`
+      ).then((r) => r.submissions),
+    enabled: Boolean(sponsorId && jobId),
+    refetchInterval: 30 * 1000
+  });
+}
+
+export function useAcceptSubmission() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, submissionId }: { jobId: string; submissionId: string }) =>
+      apiWithBearer<{ ok: boolean; submission: LabelingSubmissionSurface }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId)}/submissions/${encodeURIComponent(submissionId)}/accept`,
+        { method: 'POST' }
+      ),
+    onSuccess: (_data, { jobId }) => {
+      qc.invalidateQueries({ queryKey: ['sponsor-job-submissions', sponsorId, jobId] });
+    }
+  });
+}
+
+export function useRejectSubmission() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      jobId,
+      submissionId,
+      reason
+    }: {
+      jobId: string;
+      submissionId: string;
+      reason: string;
+    }) =>
+      apiWithBearer<{
+        ok: boolean;
+        submission: LabelingSubmissionSurface;
+        clawedBackPaise: number;
+      }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId)}/submissions/${encodeURIComponent(submissionId)}/reject`,
+        { method: 'POST', body: JSON.stringify({ reason }) }
+      ),
+    onSuccess: (_data, { jobId }) => {
+      qc.invalidateQueries({ queryKey: ['sponsor-job-submissions', sponsorId, jobId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-jobs', sponsorId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-self', sponsorId] });
+    }
+  });
+}
+
+// ─── Labeling job export — signed NDJSON ─────────────────────────────
+
+export interface JobExportResult {
+  lines: string[];
+  contentSha256: string | null;
+  verdict: { ok: boolean; reason?: string; submissionCount?: number } | null;
+  /** True when the audit-signer pubkey fetch failed (vs. ran-and-said-no). */
+  verifyFetchFailed: boolean;
+  signerPublicRecord: AuditSignerPublicRecord | null;
+  blob: Blob;
+  filename: string;
+}
+
+export function useSponsorJobExport() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useMutation({
+    mutationFn: async ({ jobId }: { jobId: string }): Promise<JobExportResult> => {
+      const res = await fetchWithBearer(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/labeling-jobs/${encodeURIComponent(jobId)}/export.ndjson`
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const err = new Error(`Export failed: HTTP ${res.status}`) as Error & {
+          status?: number;
+          code?: string;
+          body?: string;
+        };
+        err.status = res.status;
+        if (res.status === 401) err.code = 'invalid_token';
+        else if (res.status === 403) err.code = 'forbidden';
+        err.body = body;
+        throw err;
+      }
+      const text = await res.text();
+      const lines = text.trimEnd().split('\n').filter(Boolean);
+      // Try to fetch signer pubkey + verify. If pubkey fetch fails
+      // we distinguish that from "verifier ran and said no" by
+      // setting verifyFetchFailed=true; the UI surfaces a
+      // "fetch_failed" bucket separate from "mismatch" / "unverified".
+      let signerPublicRecord: AuditSignerPublicRecord | null = null;
+      let verdict: JobExportResult['verdict'] = null;
+      let verifyFetchFailed = false;
+      try {
+        signerPublicRecord = await api<AuditSignerPublicRecord>(
+          '/api/audit-signer/public-key'
+        );
+        verdict = await verifyLabelingExportLinesAsync(lines, signerPublicRecord);
+      } catch (_err) {
+        signerPublicRecord = null;
+        verdict = null;
+        verifyFetchFailed = true;
+      }
+      const blob = new Blob([text], { type: 'application/x-ndjson' });
+      const filename = `bharat-os-labeling-export-${jobId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.ndjson`;
+      // Best-effort: derive trailer hash for display.
+      let contentSha256: string | null = null;
+      try {
+        const trailer = JSON.parse(lines[lines.length - 1]);
+        if (trailer?.type === 'trailer' && typeof trailer.contentSha256 === 'string') {
+          contentSha256 = trailer.contentSha256;
+        }
+      } catch (_err) {
+        // ignored
+      }
+      return { lines, contentSha256, verdict, verifyFetchFailed, signerPublicRecord, blob, filename };
+    }
+  });
+}
+
+// ─── Federated rounds (sponsor scope) ────────────────────────────────
+
+export interface FederatedRoundFull {
+  roundId: string;
+  protocolVersion: string;
+  objectType: string;
+  sponsorId: string;
+  createdBy: string;
+  modelName: string;
+  baselineModelHash: string;
+  status: string;
+  aggregationMode: string;
+  maxParticipants: number;
+  payoutPaisePerUpdate: number;
+  maxEpsilon?: number;
+  deadlineAt: string;
+  openedAt?: string;
+  closedAt?: string | null;
+  updateCount?: number;
+  epsilonSpent?: number;
+  aggregatedModelHash?: string | null;
+  slmModelPackId?: string | null;
+  targetTask?: string | null;
+}
+
+export function useSponsorRounds() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-rounds', sponsorId],
+    queryFn: () =>
+      apiWithBearer<{ rounds: FederatedRoundFull[] }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/federated-rounds`
+      ).then((r) =>
+        r.rounds.sort((a, b) => String(b.openedAt ?? '').localeCompare(String(a.openedAt ?? '')))
+      ),
+    enabled: Boolean(sponsorId)
+  });
+}
+
+export interface CreateSponsorRoundInput {
+  modelName: string;
+  baselineModelHash: string;
+  maxParticipants?: number;
+  payoutPaisePerUpdate: number;
+  maxEpsilon?: number;
+  deadlineSecondsFromNow?: number;
+  aggregationMode?: 'hash_combiner' | 'fedavg';
+  slmModelPackId?: string;
+  targetTask?: string;
+  loraConfig?: unknown;
+}
+
+export function useCreateSponsorRound() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateSponsorRoundInput) =>
+      apiWithBearer<{ ok: boolean; round: FederatedRoundFull; sponsor: PublicSponsor }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/federated-rounds`,
+        { method: 'POST', body: JSON.stringify(input) }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sponsor-rounds', sponsorId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-self', sponsorId] });
+    }
+  });
+}
+
+export interface RoundExportResult {
+  lines: string[];
+  blob: Blob;
+  filename: string;
+}
+
+export function useSponsorRoundExport() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useMutation({
+    mutationFn: async ({ roundId }: { roundId: string }): Promise<RoundExportResult> => {
+      const res = await fetchWithBearer(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/federated-rounds/${encodeURIComponent(roundId)}/export`
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const err = new Error(`Round export failed: HTTP ${res.status}`);
+        (err as Error & { body?: string }).body = body;
+        throw err;
+      }
+      const text = await res.text();
+      const lines = text.trimEnd().split('\n').filter(Boolean);
+      const blob = new Blob([text], { type: 'application/x-ndjson' });
+      const filename = `bharat-os-federated-export-${roundId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.ndjson`;
+      return { lines, blob, filename };
+    }
+  });
+}
+
+// ─── Escrow ledger (sponsor scope, filtered client-side) ─────────────
+
+export interface LedgerEvent {
+  type: string;
+  at: string;
+  sponsorId?: string;
+  jobId?: string;
+  roundId?: string;
+  amountPaise?: number;
+  balancePaise?: number;
+  lockedPaise?: number;
+  contentSha256?: string;
+  signerId?: string;
+  submissionCount?: number;
+  reference?: string;
+  [key: string]: unknown;
+}
+
+export function useSponsorEscrowLedger() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-ledger', sponsorId],
+    queryFn: async () => {
+      const r = await api<{ events: LedgerEvent[] }>('/api/ledger?limit=500');
+      return r.events.filter(
+        (event) =>
+          (event.sponsorId === sponsorId &&
+            (event.type === 'sponsor_escrow.deposited' ||
+              event.type === 'sponsor_escrow.locked' ||
+              event.type === 'sponsor_escrow.debited' ||
+              event.type === 'sponsor_escrow.refunded' ||
+              event.type === 'labeling_export.signed')) ||
+          false
+      );
+    },
+    enabled: Boolean(sponsorId),
+    staleTime: 30 * 1000
+  });
+}
+
 // --- Phase 12.0.4 cross-cutting sweep ---------------------------------
 //
 // Push notifications, DPDP grievance contact, flag reports (§9A), and

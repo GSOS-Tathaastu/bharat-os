@@ -398,6 +398,33 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.0.5 — Sponsor /app/sponsor/ admin ✅ SHIPPED 2026-06-01 — SWEEP ARC CLOSED
+- **ADR 0134** — fourth and final sweep sub-phase. **All 4
+  substrate-integration sub-phases (12.0.2 → 12.0.5) done.**
+- 25 new files: Zustand store + bearer api wrappers + FE
+  Web-Crypto export-verify port + 14 routes + 9 shared components.
+- Scoped by a Workflow with 7 parallel Explore agents + a
+  synthesis pass; hardened by a 2nd Workflow with 3 adversarial
+  reviewers (privacy / UX / edge case) + triage; 13 must/should
+  items applied before commit. Privacy: ship_clean.
+- Surface covers:
+  - Bearer-token paste sign-in → dashboard.
+  - Labeling jobs: list + draft create + items upload + launch +
+    Phase 10.4 review queue (accept/reject + clawback) + Phase
+    10.5 signed audit export with FE Web-Crypto verification
+    (4-bucket verdict: verified / unverified / mismatch /
+    fetch_failed).
+  - Federated rounds: list + create with SLM-pack picker +
+    detail + unsigned NDJSON export.
+  - Escrow ledger (filtered) + settings + sign-out with
+    cancelQueries-before-clear.
+- §15: bearer never echoed; document title scrubbed;
+  identityHash rotation preserved; goldenAnswer never shown;
+  cross-sponsor isolation enforced.
+- Pure FE; zero BE changes.
+- Tests: Node 890/890 unchanged, FE Vitest 45/45 unchanged.
+- **Bundle**: main 434 → 505 KB / 144 KB gzipped (+71 KB).
+
 #### Phase 12.0.4 — Cross-cutting sweep ✅ SHIPPED 2026-06-01
 - **ADR 0133** — third of four substrate-integration sub-phases.
   Five integrations across /settings + /citizen/home.
