@@ -152,6 +152,31 @@ Implemented pieces:
 
 ---
 
+## 🧠 2026-05-31 — Phase 10.6 shipped: on-device SLM pre-labeling hint — Phase 10 v1 arc CLOSED
+
+Phase 10.6 wires the Phase 9.0c llama.cpp-wasm runtime into the
+labeling tasks. Workers with an installed SLM see a "Suggest a
+label" card above every task; tapping it lazy-loads the model,
+runs a task-kind-specific prompt, parses the completion back to
+a typed labelValue, and offers [Use this suggestion] which flows
+through the existing submit pipeline. Pure FE — zero BE changes.
+
+- **ADR 0125** — `frontend/src/lib/labeling-slm-hint.ts` (pure
+  module: 5 prompt templates + 5 parsers) +
+  `frontend/src/components/labeling/SlmHintCard.tsx` (gated on
+  installed SLM; clean degradation when not).
+- Prompt + completion never leave the device. The worker always
+  sees the suggestion before submitting.
+- Tests: FE Vitest 16 → 32 (+16 hint tests). No new Node tests.
+- Bundle: main 369 KB / 112 KB gzipped (+6 KB vs 10.5). wllama
+  lazy chunk unchanged.
+
+**Phase 10 v1 arc CLOSED.** Polish backlog (10.4.1 / 10.5.1 /
+10.5.2 / 10.5.3 / 10.6.1 / 10.1.1) ships as feedback
+prioritises. Otherwise advance to Phase 12+ (Bharat ID / SSO).
+
+---
+
 ## 🔏 2026-05-31 — Phase 10.5 shipped: signed audit export for labeling jobs
 
 Phase 10.5 closes the sponsor audit story for the labeling

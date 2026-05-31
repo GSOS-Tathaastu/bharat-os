@@ -15,6 +15,7 @@ import { ClassificationTask } from '@/components/labeling/ClassificationTask';
 import { SpanAnnotationTask } from '@/components/labeling/SpanAnnotationTask';
 import { TranscriptionTask } from '@/components/labeling/TranscriptionTask';
 import { SafetyLabelTask } from '@/components/labeling/SafetyLabelTask';
+import { SlmHintCard } from '@/components/labeling/SlmHintCard';
 import type { LabelingTaskProps } from '@/components/labeling/types';
 
 // Phase 10.2 — Labels tab on /app/worker/. Worker discovers active
@@ -295,11 +296,18 @@ function LabelingSession({ job, onClose }: LabelingSessionProps) {
       )}
 
       {!isLoading && data?.item && (
-        <TaskRenderer
-          item={data.item}
-          submitting={submit.isPending}
-          onSubmit={handleSubmit}
-        />
+        <>
+          <SlmHintCard
+            item={data.item}
+            submitting={submit.isPending}
+            onAccept={handleSubmit}
+          />
+          <TaskRenderer
+            item={data.item}
+            submitting={submit.isPending}
+            onSubmit={handleSubmit}
+          />
+        </>
       )}
     </main>
   );

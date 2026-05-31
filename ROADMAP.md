@@ -80,6 +80,24 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 10.6 — SLM pre-labeling hint ✅ SHIPPED 2026-05-31
+- **ADR 0125** — workers with an installed SLM get an on-device
+  pre-labeling suggestion. Pure FE; zero BE changes.
+- New module `frontend/src/lib/labeling-slm-hint.ts`:
+  `buildHintPrompt(taskKind, body)` + `parseHintCompletion(taskKind,
+  body, completion)` for all 5 task kinds + `HINT_MAX_TOKENS = 96`
+  + `HINT_TEMPERATURE = 0.3`.
+- New component `frontend/src/components/labeling/SlmHintCard.tsx`:
+  gated on `useInstalledSlms` (returns null when no SLM); lazy-
+  loads wllama runtime on first tap; streams via `onToken`;
+  parses to typed labelValue; [Use this suggestion] flows
+  through existing submit pipeline.
+- Wired into `Labels.tsx` above the task renderer.
+- Tests: FE Vitest 16 → 32 (+16 hint tests on builders + parsers).
+  No new Node tests (zero BE changes).
+- **Bundle**: main 363 → 369 KB / 112 KB gzipped (+6 KB).
+- **Phase 10 v1 arc CLOSED.**
+
 ### Phase 10.5 — Signed audit export ✅ SHIPPED 2026-05-31
 - **ADR 0124** — tamper-evident Ed25519-signed NDJSON audit bundle
   for any labeling job. Sponsor downstream training pipeline can
@@ -291,15 +309,15 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 10.6 — SLM pre-labeling hint (NEXT)
+### Phase 10 — v1 arc CLOSED 2026-05-31
 
-**Phase 10.0–10.5 SHIPPED.** Quality loop + signed audit story are
-both closed. Remaining sub-phase:
+**Phase 10.0–10.6 all SHIPPED.** The labeling marketplace is
+end-to-end complete: sponsor onboarding + escrow + draft +
+upload + launch + worker discovery + 5 task kinds + QC pipeline
++ signed audit export + on-device pre-labeling hint.
 
-- [ ] **10.6** — SLM pre-labeling hint: button on task UI that
-  loads worker's installed Phi-3-mini → suggests a label →
-  worker accepts/edits → submits. Cuts time-per-label ~3×.
-  Depends on Phase 9.0c (already shipped). ~1 wk.
+Next: pick from the polish backlog below, or move to **Phase 12+
+(Bharat ID / SSO)** from the explorations doc.
 
 ### Phase 10 future polish (post-MVP)
 
@@ -311,14 +329,18 @@ both closed. Remaining sub-phase:
 - **10.5.2** Sponsor console one-click download UI for export
   bundle + bulk multi-job export
 - **10.5.3** Premium-job UI gating (filter jobs by required score)
+- **10.6.1** Per-task-kind UI annotation for SLM hint (highlight
+  suggested option, pre-fill span words, pre-fill textarea) +
+  mesh-inference attribution + multi-model picker
 - **10.1.1** Job cancel + refund route (`refundLockedEscrow` hook)
 - Per-worker time-series score trend on Labels page
 - Score-driven dynamic per-label pricing (premium workers earn
   more per label)
 - Anti-fraud signals (rapid-fire submissions, bot-like timing)
 
-Remaining v1 ~1 wk. Then Phase 12+ (Bharat ID / SSO from
-explorations doc) or sponsor-feedback-driven polish.
+v1 arc complete. Polish backlog above ships as sponsor / worker
+feedback prioritises. Otherwise advance to Phase 12+ (Bharat ID
+/ SSO from explorations doc).
 
 ---
 
