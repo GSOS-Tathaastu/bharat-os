@@ -152,6 +152,28 @@ Implemented pieces:
 
 ---
 
+## 🏷 2026-05-31 — Phase 10.3 shipped: all 5 task kinds on /app/labels/
+
+Phase 10.2 shipped only preference_pair; Phase 10.3 wires in the
+four remaining: **classification** (radio cards), **span_annotation**
+(word-toggle), **transcription** (audio + textarea), **safety_label**
+(multi-select with explicit "Mark as safe"). Pure FE — zero BE
+changes because items + submissions are stored opaquely.
+
+- **ADR 0122** — 4 new components + dispatcher refactor + seed-
+  demo extension.
+- `frontend/src/components/labeling/` — five self-contained task
+  components plugged into a module-level `TASK_RENDERERS` map.
+- seed-demo now creates **5 active jobs** on fresh seed (one per
+  task kind, realistic Indic content).
+- Bundle: main 359 KB / 110 KB gzipped (+7 KB vs 10.2). wllama
+  lazy chunk unchanged.
+
+**Phase 10 progress: ~50%.** Remaining: 10.4 QC, 10.5 signed
+export, 10.6 SLM pre-labeling hint. See `ROADMAP.md`.
+
+---
+
 ## 🏷 2026-05-31 — Phase 10.1 + 10.2 shipped: labeling marketplace v1
 
 Workers can earn paise per accepted label TODAY on `/app/labels/`.

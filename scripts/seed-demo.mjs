@@ -664,6 +664,139 @@ for (const item of jobItems) {
 }
 log(`  labeling job: 1 (${launchedJob.description}) — ${jobItems.length} items at Rs ${(labelingPerLabelPaise / 100).toFixed(2)} each`);
 
+// Phase 10.3 — additional jobs to exercise the remaining task kinds.
+// One job per kind, two items each, all under the same Pragati sponsor.
+// Total additional cost = 4 jobs * 2 items * Rs 4 = Rs 32 → top up the
+// sponsor by Rs 100 so escrow is comfortable.
+const phase103PostDeposit = depositEscrow(jobLockedSponsor, 10_000);
+await store.saveSponsor(phase103PostDeposit);
+
+async function launchSeedJob({ taskKind, description, items, perLabelPaise = 400, language = 'hi', currentSponsor }) {
+  const draft = createLabelingJob({
+    sponsorId: currentSponsor.sponsorId,
+    taskKind,
+    language,
+    modality: taskKind === 'transcription' ? 'voice' : 'text',
+    perLabelPaise,
+    bharatOsFeePaise: 0,
+    itemCount: items.length,
+    ipTerms: 'non_exclusive',
+    consentPurposeCode: `bos:consent:labeling.${taskKind}`,
+    description
+  });
+  const jobItemRecords = items.map((body) =>
+    createLabelingJobItem({ jobId: draft.jobId, taskKind, body })
+  );
+  const cost = totalLaunchCostPaise(draft);
+  const locked = lockEscrow(currentSponsor, cost);
+  const launched = {
+    ...draft,
+    status: 'active',
+    itemsUploaded: jobItemRecords.length,
+    launchedAt: new Date().toISOString(),
+    escrowLockedPaise: cost
+  };
+  await store.saveSponsor(locked);
+  await store.saveLabelingJob(launched);
+  for (const item of jobItemRecords) await store.saveLabelingJobItem(item);
+  log(`  labeling job: 1 (${description}) — ${jobItemRecords.length} ${taskKind} items`);
+  return locked;
+}
+
+let runningSponsor = phase103PostDeposit;
+runningSponsor = await launchSeedJob({
+  taskKind: 'classification',
+  description: 'Classify loan-applicant intent (Hindi).',
+  currentSponsor: runningSponsor,
+  items: [
+    {
+      prompt: 'What does the applicant want?',
+      text: 'मुझे ₹1 लाख का loan चाहिए, business expand करना है।',
+      options: [
+        { value: 'business_loan', label: 'Business loan', description: 'Expand existing business' },
+        { value: 'personal_loan', label: 'Personal loan', description: 'Household / lifestyle expenses' },
+        { value: 'home_loan', label: 'Home loan', description: 'Real estate purchase' },
+        { value: 'unclear', label: 'Unclear', description: 'Insufficient information' }
+      ]
+    },
+    {
+      prompt: 'What does the applicant want?',
+      text: 'shaadi ke liye paise chahiye, around 5 lakh, 3 saal mein wapas kar dunga.',
+      options: [
+        { value: 'business_loan', label: 'Business loan' },
+        { value: 'personal_loan', label: 'Personal loan' },
+        { value: 'home_loan', label: 'Home loan' },
+        { value: 'unclear', label: 'Unclear' }
+      ]
+    }
+  ]
+});
+
+runningSponsor = await launchSeedJob({
+  taskKind: 'span_annotation',
+  description: 'Highlight the words that name the loan amount.',
+  currentSponsor: runningSponsor,
+  items: [
+    {
+      instruction: 'Tap each word that is part of the loan amount the applicant requested.',
+      text: 'मुझे एक लाख रुपये का लोन चाहिए छह महीने के लिए।',
+      labelKind: 'loan_amount'
+    },
+    {
+      instruction: 'Tap the words that name the loan amount.',
+      text: 'I need fifty thousand rupees for three months urgent.',
+      labelKind: 'loan_amount'
+    }
+  ]
+});
+
+runningSponsor = await launchSeedJob({
+  taskKind: 'transcription',
+  description: 'Transcribe the customer call in Hindi (audio not attached in demo).',
+  currentSponsor: runningSponsor,
+  items: [
+    {
+      instruction: 'Transcribe the customer call accurately. Correct the ASR pre-fill where wrong.',
+      languageHint: 'hi-IN',
+      asrPreFill: 'मुझे लोन के बारे में जानकारी चाहिए'
+    },
+    {
+      instruction: 'Transcribe accurately.',
+      languageHint: 'hi-IN',
+      asrPreFill: 'मैं अपना EMI bharna chahta hu'
+    }
+  ]
+});
+
+runningSponsor = await launchSeedJob({
+  taskKind: 'safety_label',
+  description: 'Flag harmful content (Hindi loan-chat samples).',
+  perLabelPaise: 500,
+  currentSponsor: runningSponsor,
+  items: [
+    {
+      prompt: 'Which (if any) harm categories apply to this customer message?',
+      text: 'Agent, agar tu loan nahin de raha to teri family ko dikhata hu kya hota hai.',
+      categories: [
+        { value: 'threat', label: 'Threat', description: 'Direct or implied threat of violence' },
+        { value: 'harassment', label: 'Harassment', description: 'Targeted abuse or insult' },
+        { value: 'self_harm', label: 'Self-harm', description: 'Content indicating self-harm risk' },
+        { value: 'safe', label: 'Safe', description: 'No harm applicable' }
+      ]
+    },
+    {
+      prompt: 'Which (if any) harm categories apply?',
+      text: 'Sir, agar loan approve nahin hua to main kuch kar lunga apne aap ko.',
+      categories: [
+        { value: 'threat', label: 'Threat' },
+        { value: 'harassment', label: 'Harassment' },
+        { value: 'self_harm', label: 'Self-harm' },
+        { value: 'safe', label: 'Safe' }
+      ]
+    }
+  ]
+});
+
 // ─── Bootstrap simulation report ────────────────────────────────────────────
 const bootstrap = simulateDemandBootstrap({
   nodeCount: 100,

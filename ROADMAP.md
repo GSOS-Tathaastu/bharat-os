@@ -80,6 +80,23 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 10.3 — Remaining task kinds ✅ SHIPPED 2026-05-31
+- **ADR 0122** — 4 new task components on `/app/labels/`. Pure FE,
+  zero BE changes.
+- `frontend/src/components/labeling/`:
+  - `<ClassificationTask>` — tappable radio cards
+  - `<SpanAnnotationTask>` — word-toggle (mobile-reliable)
+  - `<TranscriptionTask>` — `<audio>` + textarea with ASR pre-fill
+  - `<SafetyLabelTask>` — multi-select checkboxes with explicit
+    `[Mark as safe]` action
+- Dispatcher refactor: `Labels.tsx` uses a module-level map; each
+  task kind is a self-contained component.
+- seed-demo: 4 new active jobs (one per new kind, 2 items each)
+  under Pragati Microfinance with realistic Indic content. Fresh
+  seed now shows **5 jobs across all 5 task kinds**.
+- Bundle: main 352 → 359 KB / 110 KB gzipped (+7 KB for 4
+  components). wllama lazy chunk unchanged.
+
 ### Phase 10.1 + 10.2 — Labeling marketplace v1 ✅ SHIPPED 2026-05-31
 - **ADR 0121** — workers earn paise per accepted label TODAY.
 - `src/phase1/labeling-job.mjs` — module: 5 task kinds, 6-state
@@ -215,14 +232,11 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 10.3 + 10.4 + 10.5 + 10.6 — Labeling marketplace polish (NEXT)
+### Phase 10.4 + 10.5 + 10.6 — Labeling marketplace polish (NEXT)
 
-**Phase 10.0–10.2 SHIPPED.** Remaining sub-phases:
+**Phase 10.0–10.3 SHIPPED.** All 5 task kinds first-class. Remaining
+sub-phases:
 
-- [ ] **10.3** — other task kinds in `/app/labels/`: classification
-  (span + multi-choice category), span_annotation (tap-to-highlight
-  text or audio waveform), transcription (voice + Indic ASR pre-
-  fill), safety_label (multi-checkbox). ~2 wks.
 - [ ] **10.4** — QC pipeline: golden-set rate config per job
   (default 1-in-20), inter-annotator α threshold for accept,
   sponsor-sample queue + reject API + worker score-gating.
@@ -235,7 +249,7 @@ plus the first half of the on-device-SLM arc.
   worker accepts/edits → submits. Cuts time-per-label ~3×.
   Depends on Phase 9.0c. ~1 wk.
 
-Remaining ~6 wks. Then Phase 12+ (Bharat ID / SSO from
+Remaining ~4 wks. Then Phase 12+ (Bharat ID / SSO from
 explorations doc) or labeling-marketplace polish per sponsor
 feedback.
 

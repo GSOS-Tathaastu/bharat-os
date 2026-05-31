@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { Action, Badge, Card, Evidence, Money, Stat, useToast } from '@/components/ui';
 import {
   useActiveIdentity,
@@ -6,9 +6,14 @@ import {
   useLabelingNextItem,
   useSubmitLabel,
   useSponsorDirectory,
-  type LabelingJobSurface,
-  type LabelingJobItem
+  type LabelingJobSurface
 } from '@/lib/hooks';
+import { PreferencePairTask } from '@/components/labeling/PreferencePairTask';
+import { ClassificationTask } from '@/components/labeling/ClassificationTask';
+import { SpanAnnotationTask } from '@/components/labeling/SpanAnnotationTask';
+import { TranscriptionTask } from '@/components/labeling/TranscriptionTask';
+import { SafetyLabelTask } from '@/components/labeling/SafetyLabelTask';
+import type { LabelingTaskProps } from '@/components/labeling/types';
 
 // Phase 10.2 — Labels tab on /app/worker/. Worker discovers active
 // labeling jobs filtered to their language, picks one, taps through
@@ -209,83 +214,25 @@ function LabelingSession({ job, onClose }: LabelingSessionProps) {
   );
 }
 
-interface TaskRendererProps {
-  item: LabelingJobItem;
-  submitting: boolean;
-  onSubmit: (labelValue: unknown) => void;
-}
+const TASK_RENDERERS: Record<string, ComponentType<LabelingTaskProps>> = {
+  preference_pair: PreferencePairTask,
+  classification: ClassificationTask,
+  span_annotation: SpanAnnotationTask,
+  transcription: TranscriptionTask,
+  safety_label: SafetyLabelTask
+};
 
-function TaskRenderer({ item, submitting, onSubmit }: TaskRendererProps) {
-  if (item.taskKind === 'preference_pair') {
-    return <PreferencePairTask item={item} submitting={submitting} onSubmit={onSubmit} />;
+function TaskRenderer({ item, submitting, onSubmit }: LabelingTaskProps) {
+  const Renderer = TASK_RENDERERS[item.taskKind];
+  if (Renderer) {
+    return <Renderer item={item} submitting={submitting} onSubmit={onSubmit} />;
   }
   return (
     <Card>
       <p className="text-body text-text-muted">
-        Task kind <code>{item.taskKind}</code> not supported in /app/ v1. Use{' '}
-        /shell/ developer surface or wait for Phase 10.3.
+        Task kind <code>{item.taskKind}</code> not supported in /app/. Use the
+        /shell/ developer surface.
       </p>
     </Card>
-  );
-}
-
-function PreferencePairTask({ item, submitting, onSubmit }: TaskRendererProps) {
-  const body = item.body as { prompt?: string; a?: string; b?: string };
-  if (!body?.a || !body?.b) {
-    return (
-      <Card>
-        <p className="text-body text-error">Malformed preference_pair item: missing a/b.</p>
-      </Card>
-    );
-  }
-  return (
-    <>
-      {body.prompt && (
-        <Card>
-          <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
-            Prompt
-          </p>
-          <p className="mt-1 text-body">{body.prompt}</p>
-        </Card>
-      )}
-      <Card>
-        <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
-          Which response is better?
-        </p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => onSubmit({ choice: 'a' })}
-            className="rounded-md border-2 border-border bg-white p-3 text-left transition-colors hover:border-trust hover:bg-trust-50 disabled:opacity-50"
-          >
-            <span className="block text-caption font-semibold uppercase tracking-wide text-text-muted">
-              Option A
-            </span>
-            <span className="mt-2 block whitespace-pre-wrap text-body text-text">{body.a}</span>
-          </button>
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => onSubmit({ choice: 'b' })}
-            className="rounded-md border-2 border-border bg-white p-3 text-left transition-colors hover:border-trust hover:bg-trust-50 disabled:opacity-50"
-          >
-            <span className="block text-caption font-semibold uppercase tracking-wide text-text-muted">
-              Option B
-            </span>
-            <span className="mt-2 block whitespace-pre-wrap text-body text-text">{body.b}</span>
-          </button>
-        </div>
-        <Action
-          variant="ghost"
-          size="sm"
-          className="mt-3"
-          disabled={submitting}
-          onClick={() => onSubmit({ choice: 'skip' })}
-        >
-          Skip this item
-        </Action>
-      </Card>
-    </>
   );
 }
