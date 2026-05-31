@@ -1,7 +1,23 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Action, Card, Evidence, Tabs, useToast } from '@/components/ui';
-import { useActiveIdentity, useRecentOrchestrations, useSendIntent } from '@/lib/hooks';
+import { Action, Badge, Card, Evidence, Tabs, useToast } from '@/components/ui';
+import {
+  useActiveIdentity,
+  useRecentOrchestrations,
+  useSendIntent,
+  type Orchestration
+} from '@/lib/hooks';
+
+const ACTION_TYPE_LABEL: Record<string, string> = {
+  service_booking: 'Service booking (Bharat OS marketplace)',
+  scheme_delivery: 'Government scheme delivery',
+  regulated_onboarding: 'Regulated onboarding',
+  health_record_read: 'Health record read',
+  labor_match_post: 'Labor matching',
+  mesh_storage: 'Mesh storage',
+  trust_attestation: 'Trust Passport attestation',
+  daily_brief: 'On-device daily brief'
+};
 
 const TABS = [
   { to: '/citizen/home', label: 'Home', icon: '🏠' },
@@ -21,6 +37,7 @@ const SUGGESTIONS = [
 function CitizenIntent() {
   const identity = useActiveIdentity();
   const [text, setText] = useState('');
+  const [lastOutcome, setLastOutcome] = useState<Orchestration | null>(null);
   const sendIntent = useSendIntent();
   const { data: recent = [] } = useRecentOrchestrations(identity?.id);
   const show = useToast((s) => s.show);
@@ -33,9 +50,8 @@ function CitizenIntent() {
     sendIntent.mutate(
       { identityId: identity.id, intentText: text },
       {
-        onSuccess: () => {
-          setText('');
-          show('Intent sent for policy review.', 'success');
+        onSuccess: (data) => {
+          setLastOutcome(data.orchestration);
         },
         onError: (err: Error) => show(err.message, 'error')
       }
@@ -77,6 +93,11 @@ function CitizenIntent() {
           <Action onClick={handleSend} disabled={sendIntent.isPending}>
             {sendIntent.isPending ? 'Sending…' : 'Send'}
           </Action>
+          {lastOutcome && (
+            <Action variant="ghost" onClick={() => setLastOutcome(null)}>
+              Clear outcome
+            </Action>
+          )}
         </div>
         <Evidence title="What happens to my intent?">
           Bharat OS routes it through L4 policy → L6 skill preflight → L3 tool
@@ -84,6 +105,8 @@ function CitizenIntent() {
           third party sees the intent unless you grant explicit consent.
         </Evidence>
       </Card>
+
+      {lastOutcome && <OutcomeCard orchestration={lastOutcome} />}
 
       <Card title="Recent activity" subtitle="Latest intents on this profile">
         {recent.length === 0 ? (
@@ -103,6 +126,92 @@ function CitizenIntent() {
         )}
       </Card>
     </main>
+  );
+}
+
+function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
+  const actionType = orchestration.actionRequest?.actionType;
+  const label = (actionType && ACTION_TYPE_LABEL[actionType]) ?? 'Intent';
+  const status = orchestration.status ?? 'planned';
+  const tone =
+    status === 'completed' ? 'trust' : status === 'blocked' ? 'warning' : 'governance';
+  const badgeVariant =
+    status === 'completed' ? 'trust' : status === 'blocked' ? 'warning' : 'pending';
+  const message = orchestration.localizedResponse?.text;
+  const consentRequirement = orchestration.consentRequirement;
+  const failedPolicies = orchestration.failedPolicies ?? [];
+  const plan = orchestration.plan ?? [];
+
+  return (
+    <Card
+      tone={tone}
+      title={label}
+      actions={<Badge variant={badgeVariant}>{status}</Badge>}
+    >
+      {message && <p className="text-body">{message}</p>}
+
+      {status === 'blocked' && consentRequirement?.scopes && consentRequirement.scopes.length > 0 && (
+        <div className="mt-3 rounded-sm border border-orange-100 bg-white p-3">
+          <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Bharat OS needs your consent for
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-body text-text">
+            {consentRequirement.scopes.map((scope) => (
+              <li key={scope} className="font-mono text-caption">
+                {scope}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-caption text-text-muted">
+            Granting consent is a signed, revocable artifact. Per-scope consent
+            UI ships in Phase 11.8.
+          </p>
+        </div>
+      )}
+
+      {failedPolicies.length > 0 && (
+        <div className="mt-3">
+          <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Policy gate
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-caption text-text-muted">
+            {failedPolicies.map((p) => (
+              <li key={p} className="font-mono">
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {plan.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Plan ({plan.length} steps)
+          </summary>
+          <ol className="mt-2 space-y-1 text-caption">
+            {plan.map((step, i) => (
+              <li key={`${step.step}-${i}`} className="flex gap-2">
+                <span className="font-mono text-text-muted">
+                  {step.layer ? `${step.layer} ·` : ''}
+                </span>
+                <span className="font-mono text-text">{step.step}</span>
+                {step.status && (
+                  <span className="font-mono text-text-muted">— {step.status}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+
+      <p className="mt-3 text-caption text-text-muted">
+        Audit reference:{' '}
+        <span className="font-mono">
+          {orchestration.orchestrationId.replace(/^bos:orchestration:/, '')}
+        </span>
+      </p>
+    </Card>
   );
 }
 

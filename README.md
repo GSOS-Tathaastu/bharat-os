@@ -152,6 +152,28 @@ Implemented pieces:
 
 ---
 
+## 🪪 2026-05-31 — Phase 11.7 shipped: citizen intent flow wired end-to-end on /app/
+
+User reported "Book a cab" on /app/citizen/home silently doing
+nothing. Two stacked FE bugs: (1) the POST shape sent
+`{intent:{intentText}, actionRequest:{actorId}}` but the BE
+orchestrator reads flat keys → every intent fell back to
+`mesh_storage` and the recent-activity filter never matched;
+(2) no Outcome card so successful blocked verdicts looked silent.
+
+- **ADR 0126** — pure FE fix; zero BE changes.
+- `useSendIntent` POSTs the flat shape; JSDoc names the past
+  bug so it can't regress.
+- New `<OutcomeCard>` surfaces action-type label + status badge
+  + localised message + required consent scopes + failed policies
+  + collapsible plan + audit reference.
+- Tests: FE Vitest 32 → 33 (+1 contract pin).
+- Bundle: main 372 KB / 113 KB gzipped (+3 KB vs 10.6).
+- **Next: Phase 11.8** per-scope consent grant UI so citizens
+  can unblock intents from /app/ without bouncing to /shell/.
+
+---
+
 ## 🧠 2026-05-31 — Phase 10.6 shipped: on-device SLM pre-labeling hint — Phase 10 v1 arc CLOSED
 
 Phase 10.6 wires the Phase 9.0c llama.cpp-wasm runtime into the

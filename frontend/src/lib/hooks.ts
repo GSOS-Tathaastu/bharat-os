@@ -144,11 +144,45 @@ export function useTrustPassport(identityId: string | null | undefined) {
 }
 
 // --- Orchestrations / recent activity ---------------------------------
+export interface OrchestrationPlanStep {
+  step: string;
+  layer?: string;
+  status?: string;
+  actionType?: string;
+  skillId?: string;
+  tool?: string;
+}
+
+export interface OrchestrationDecision {
+  approved?: boolean;
+  reasons?: Array<{ code?: string; message?: string }> | string[];
+}
+
+export interface ConsentRequirement {
+  subjectId?: string;
+  granteeId?: string;
+  scopes?: string[];
+  required?: boolean;
+}
+
 export interface Orchestration {
   orchestrationId: string;
   intent: { intentText?: string };
-  actionRequest?: { actorId?: string; actionType?: string };
+  actionRequest?: { actorId?: string; actionType?: string; skillId?: string };
+  skillPreflight?: { approved?: boolean; decision?: OrchestrationDecision };
+  decision?: OrchestrationDecision;
+  execution?: { status?: string } | null;
+  plan?: OrchestrationPlanStep[];
+  status?: 'planned' | 'completed' | 'blocked';
+  failedPolicies?: string[];
+  consentRequirement?: ConsentRequirement;
+  localizedResponse?: { text?: string; locale?: string; fallbackUsed?: boolean };
   createdAt: string;
+}
+
+export interface SendIntentResponse {
+  ok: boolean;
+  orchestration: Orchestration;
 }
 
 export function useRecentOrchestrations(identityId: string | null | undefined) {
@@ -165,15 +199,27 @@ export function useRecentOrchestrations(identityId: string | null | undefined) {
   });
 }
 
+/**
+ * Phase 11.7 — citizen intent submit.
+ *
+ * The BE orchestrator reads `intentText` + `actorId` + `locale` as
+ * FLAT keys on the request body (see `buildActionRequest` in
+ * src/phase1/orchestrator.mjs). Earlier shape `{intent:{intentText},
+ * actionRequest:{actorId}}` silently fell through to the
+ * `mesh_storage` fallback and the recent-activity filter on
+ * `actionRequest.actorId` never matched — citizens typed "Book a
+ * cab" and saw nothing happen.
+ */
 export function useSendIntent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ identityId, intentText }: { identityId: string; intentText: string }) =>
-      api('/api/orchestrations', {
+      api<SendIntentResponse>('/api/orchestrations', {
         method: 'POST',
         body: JSON.stringify({
-          intent: { intentText, locale: 'en-IN' },
-          actionRequest: { actorId: identityId }
+          intentText,
+          actorId: identityId,
+          locale: 'en-IN'
         })
       }),
     onSuccess: (_data, { identityId }) => {

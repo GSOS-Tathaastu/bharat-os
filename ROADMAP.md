@@ -80,6 +80,22 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 11.7 — Citizen intent orchestration wire-up ✅ SHIPPED 2026-05-31
+- **ADR 0126** — user reported "Book a cab" silence on /app/. Two
+  stacked FE bugs: (1) POST shape `{intent:{...}, actionRequest:{...}}`
+  vs BE flat keys; (2) no Outcome surface so even successful POSTs
+  looked silent.
+- `useSendIntent` POSTs flat `{intentText, actorId, locale}`;
+  JSDoc names the past bug.
+- `<OutcomeCard>` renders below input: action-type label + status
+  badge + localised message + required consent scopes + failed
+  policies + collapsible plan + audit reference.
+- Don't clear textarea on submit; add [Clear outcome] action.
+- Tests: FE Vitest 32 → 33 (+1 contract pin). No BE changes.
+- **Bundle**: main 369 → 372 KB / 113 KB gzipped (+3 KB).
+- **Next: Phase 11.8 per-scope consent grant UI** so blocked
+  intents can be unblocked from /app/ without /shell/.
+
 ### Phase 10.6 — SLM pre-labeling hint ✅ SHIPPED 2026-05-31
 - **ADR 0125** — workers with an installed SLM get an on-device
   pre-labeling suggestion. Pure FE; zero BE changes.
@@ -309,6 +325,20 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
+### Phase 11.8 — Per-scope consent grant UI (NEXT)
+
+User-driven follow-up to Phase 11.7. The Outcome card now
+surfaces the consent requirement when an intent is blocked; next
+step is letting the citizen grant the requested scopes from /app/
+itself, then auto-re-send the intent so blocked → planned →
+completed flows in one user action without bouncing to /shell/.
+
+- [ ] Per-scope grant UI launched from Outcome card's consent
+  block. Reuses Phase 1.3 consent artifact substrate.
+- [ ] Auto-re-send after grant (the same `intentText` retried).
+- [ ] Show the granted consents in the Trust tab; per-row revoke.
+- ~1 wk.
+
 ### Phase 10 — v1 arc CLOSED 2026-05-31
 
 **Phase 10.0–10.6 all SHIPPED.** The labeling marketplace is
@@ -316,8 +346,9 @@ end-to-end complete: sponsor onboarding + escrow + draft +
 upload + launch + worker discovery + 5 task kinds + QC pipeline
 + signed audit export + on-device pre-labeling hint.
 
-Next: pick from the polish backlog below, or move to **Phase 12+
-(Bharat ID / SSO)** from the explorations doc.
+After Phase 11.8: pick from the Phase 10 polish backlog below,
+or move to **Phase 12+ (Bharat ID / SSO)** from the explorations
+doc.
 
 ### Phase 10 future polish (post-MVP)
 
