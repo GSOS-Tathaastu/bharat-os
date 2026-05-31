@@ -792,6 +792,138 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0.1 sign-up / sign-in via phone OTP ---------------------
+//
+// The BE substrate is already in place:
+//   POST /api/identities                       create a fresh identity
+//   POST /api/phone-otp/send                   send OTP for a new identity
+//   POST /api/phone-otp/verify                 verify OTP, attaches phone
+//   POST /api/recovery/start                   find identity by phone, send OTP
+//   POST /api/recovery/verify                  verify OTP, return identity
+//
+// These hooks wrap that substrate for the demo sign-up + sign-in flow.
+
+export interface SignUpStartInput {
+  displayName: string;
+  phone: string;
+}
+
+export interface OtpSendResponse {
+  ok: boolean;
+  otpId: string;
+  expiresAt: string;
+  phoneMasked: string;
+  /** Dev-only OTP reveal — only present when SMS provider is 'log'. */
+  _devOtpCode?: string;
+}
+
+/**
+ * Sign up = create identity → send OTP. We chain the two calls
+ * here so the caller hands us {displayName, phone} and gets back
+ * the identity (already created server-side) + an otpId to
+ * verify against. The phone is NOT yet attached to the identity
+ * until the verify step.
+ */
+export function useSignUpStart() {
+  return useMutation({
+    mutationFn: async ({ displayName, phone }: SignUpStartInput) => {
+      const createRes = await api<{ ok: boolean; identity: Identity }>('/api/identities', {
+        method: 'POST',
+        body: JSON.stringify({ displayName })
+      });
+      const sendRes = await api<OtpSendResponse>('/api/phone-otp/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          identityId: createRes.identity.id,
+          phone,
+          purpose: 'phone_verify'
+        })
+      });
+      return { identity: createRes.identity, otp: sendRes };
+    }
+  });
+}
+
+export interface SignUpVerifyInput {
+  otpId: string;
+  code: string;
+}
+
+export interface OtpVerifyResponse {
+  ok: boolean;
+  status: string;
+  otp: { otpId: string; status: string; attempts: number };
+  identity?: Identity;
+}
+
+export function useSignUpVerify() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ otpId, code }: SignUpVerifyInput) =>
+      api<OtpVerifyResponse>('/api/phone-otp/verify', {
+        method: 'POST',
+        body: JSON.stringify({ otpId, code })
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['identities'] });
+    }
+  });
+}
+
+export interface SignInStartInput {
+  phone: string;
+}
+
+export interface RecoveryStartResponse {
+  ok: boolean;
+  recoveryId: string;
+  otpId: string;
+  expiresAt: string;
+  phoneMasked: string;
+  note: string;
+  _devOtpCode?: string;
+}
+
+export function useSignInStart() {
+  return useMutation({
+    mutationFn: ({ phone }: SignInStartInput) =>
+      api<RecoveryStartResponse>('/api/recovery/start', {
+        method: 'POST',
+        body: JSON.stringify({ phone })
+      })
+  });
+}
+
+export interface SignInVerifyInput {
+  otpId: string;
+  code: string;
+}
+
+export interface RecoveryVerifyResponse {
+  ok: boolean;
+  status?: string;
+  recoveryBundle?: {
+    identity: Identity;
+    recoveryPhrase?: string;
+    memoryRecordRefs?: unknown[];
+  };
+  otp?: { otpId: string; status: string; attempts: number };
+}
+
+export function useSignInVerify() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ otpId, code }: SignInVerifyInput) =>
+      api<RecoveryVerifyResponse>('/api/recovery/verify', {
+        method: 'POST',
+        body: JSON.stringify({ otpId, code })
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['identities'] });
+    }
+  });
+}
+
 // --- Phase 12.0 provider identities ----------------------------------
 export type ProviderRoleKind =
   | 'cab-driver'

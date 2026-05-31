@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 🔑 2026-06-01 — Phase 12.0.1 shipped: real sign-up + sign-in on /app/
+
+Even for the demo, /app/ needed a real account flow alongside
+the seeded-persona picker. Phase 12.0.1 wires it in using the
+existing Phase 4.3 phone OTP + Phase 5.0 account recovery
+substrate.
+
+- **ADR 0130** — four new hooks + `<AuthSheet>` two-tab
+  component. Onboarding hero gains [Create an account] +
+  [Sign in with phone] CTAs.
+- BE adds a dev-only `_devOtpCode` field on
+  `/api/phone-otp/send` + matched branch of
+  `/api/recovery/start` so the investor demo doesn't need
+  anyone to read the server console. **§15 anti-enumeration
+  sentinel branch on recovery/start never includes it** —
+  test pinned.
+- Production SMS providers (Gupshup / Twilio / MSG91) never
+  see the field.
+- Tests: Node 884 → 890 (+6). FE Vitest unchanged.
+- Bundle: main 399 KB / 120 KB gzipped (+7 KB vs 12.0).
+
+**Next: Phase 12.1a** — marketplace substrate + real geo +
+citizen-booking escrow + ONDC sandbox.
+
+---
+
 ## 🪪 2026-05-31 — Phase 12.0 shipped: providerIdentity substrate — wave-1 provider tiles go LIVE
 
 Phase 11.9 surfaced the provider tiles as "Coming Phase 12.0"

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { Action, Card, Hero, Identity, Sheet, useToast } from '@/components/ui';
+import { AuthSheet } from '@/components/AuthSheet';
 import { useIdentities } from '@/lib/hooks';
 import { useIdentityStore, classifyPersona, type PersonaKind } from '@/lib/identity-store';
 import { EARN_ROLES, isComingSoonRole, type EarnRole } from '@/lib/earn-roles';
@@ -25,9 +26,17 @@ export function OnboardingPage() {
   // the earn side, a role chooser before the persona picker.
   const [chosenKind, setChosenKind] = useState<PersonaKind | null>(null);
   const [chosenRole, setChosenRole] = useState<EarnRole | null>(null);
+  // Phase 12.0.1 — real sign-up / sign-in via phone OTP.
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'sign-up' | 'sign-in'>('sign-up');
   const setActive = useIdentityStore((s) => s.setActive);
   const { data: identities = [], isLoading, error } = useIdentities();
   const show = useToast((s) => s.show);
+
+  function openAuth(mode: 'sign-up' | 'sign-in') {
+    setAuthMode(mode);
+    setAuthOpen(true);
+  }
 
   const filtered = identities.filter(
     (i) => !/(bootstrap|tenant)/i.test(i.displayName ?? '') && classifyPersona(i) === chosenKind
@@ -96,7 +105,23 @@ export function OnboardingPage() {
             </Action>
           </Card>
         }
-        footer={<span>Bharat OS is open-source. Built India-first.</span>}
+        footer={
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Action variant="default" size="sm" onClick={() => openAuth('sign-up')}>
+                Create an account
+              </Action>
+              <span className="text-text-muted">·</span>
+              <Action variant="ghost" size="sm" onClick={() => openAuth('sign-in')}>
+                Sign in with phone
+              </Action>
+            </div>
+            <p className="text-caption text-text-muted">
+              Or pick a demo persona above to explore without signing up. Bharat OS is
+              open-source. Built India-first.
+            </p>
+          </div>
+        }
       />
 
       {/* Step 1 for earner side: role chooser. */}
@@ -199,6 +224,9 @@ export function OnboardingPage() {
           ))}
         </ul>
       </Sheet>
+
+      {/* Phase 12.0.1 — real sign-up / sign-in via phone OTP. */}
+      <AuthSheet open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
 
       {/* Coming-soon detail sheet for provider roles. */}
       <Sheet

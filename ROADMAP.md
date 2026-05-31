@@ -398,6 +398,21 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.0.1 — Real sign-up / sign-in on /app/ ✅ SHIPPED 2026-06-01
+- **ADR 0130** — auth follow-up over existing Phase 4.3 phone OTP +
+  Phase 5.0 account recovery substrate.
+- BE: dev-only `_devOtpCode` field on `/api/phone-otp/send` +
+  `/api/recovery/start` (matched-branch only) when SMS provider
+  is `log`. §15 anti-enumeration sentinel branch never includes
+  it (test pinned).
+- FE: 4 new hooks (`useSignUpStart`, `useSignUpVerify`,
+  `useSignInStart`, `useSignInVerify`) + `<AuthSheet>` two-tab
+  component (sign up / sign in; phone → OTP → done flow).
+- Onboarding hero footer surfaces [Create an account] · [Sign in
+  with phone] CTAs alongside demo personas.
+- Tests: Node 884 → 890 (+6). FE Vitest unchanged.
+- **Bundle**: main 392 → 399 KB / 120 KB gzipped (+7 KB).
+
 #### Phase 12.0 — providerIdentity substrate ✅ SHIPPED 2026-05-31
 - **ADR 0129** — separate identity from workerIdentity; KYC-heavy;
   bound to a root via `rootIdentityId`; DPDP §12(3) cascade on

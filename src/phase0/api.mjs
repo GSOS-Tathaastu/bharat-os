@@ -6322,7 +6322,18 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           otpId: persisted.otpId,
           expiresAt: persisted.expiresAt,
           phoneMasked: persisted.phoneMasked,
-          providerMessageId: smsResult.providerMessageId
+          providerMessageId: smsResult.providerMessageId,
+          // Phase 12.0.1 — dev-only OTP reveal so the investor demo
+          // doesn't need anyone to read the server console. ONLY
+          // returned when the configured SMS provider is the `log`
+          // provider; production SMS providers (gupshup, twilio,
+          // msg91) NEVER carry this field. The reveal is the same
+          // information already visible in the structured log stream
+          // when BHARAT_OS_LOG_OTP_BODIES=1 — so this isn't a new
+          // leak surface, just a more demo-friendly one.
+          ...((process.env.BHARAT_OS_SMS_PROVIDER ?? 'log') === 'log'
+            ? { _devOtpCode: code }
+            : {})
         });
         return;
       }
@@ -6486,7 +6497,16 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           phoneMasked: persisted.phoneMasked,
           expiresAt: persisted.expiresAt,
           providerMessageId: sms.providerMessageId,
-          note: 'If this phone is registered with Bharat OS, a code has been sent.'
+          note: 'If this phone is registered with Bharat OS, a code has been sent.',
+          // Phase 12.0.1 — same dev-only OTP reveal as /api/phone-otp/send.
+          // The §15 anti-enumeration sentinel (returning the same
+          // shape for matched + unmatched phones) is preserved: the
+          // sentinel branch above also doesn't include _devOtpCode,
+          // so revealing the code on a real match doesn't leak the
+          // is-this-phone-registered signal.
+          ...((process.env.BHARAT_OS_SMS_PROVIDER ?? 'log') === 'log'
+            ? { _devOtpCode: code }
+            : {})
         });
         return;
       }
