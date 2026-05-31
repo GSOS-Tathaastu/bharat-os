@@ -152,6 +152,31 @@ Implemented pieces:
 
 ---
 
+## 💼 2026-05-31 — Phase 11.9 shipped: hero rebrand Earn / Use + role chooser
+
+The Phase 11 "I work" / "I live" hero was too narrow for the
+actual product motion. Phase 11.9 rebrands to **"I earn" / "I
+use"** and adds an in-flow role chooser inside Earn — surfacing
+all seven earner motions including Phase 12.0 provider
+placeholders (Drive, Cook, Kirana, Home help, Skilled trades)
+alongside the live Label data + Train AI on-device flows.
+
+- **ADR 0128** — pure FE; zero BE changes.
+- `frontend/src/lib/earn-roles.ts` data catalog is the canonical
+  earner taxonomy. Each provider role's `comingSoonNote` bakes
+  the §15 "no commission" promise into the catalog.
+- Coming-soon tiles render with an orange "Phase 12" badge +
+  an honest detail sheet explaining what Phase 12.0 onboarding
+  will look like for that role.
+- /shell/ link removed from the hero footer per the
+  /app/-grows-/shell/-retires direction.
+- Tests: FE Vitest 35 → 41 (+6 catalog invariants).
+- Bundle: main 384 KB / 116 KB gzipped (+4 KB vs 11.8).
+
+**Next: Phase 12.x sequencing conversation** before code.
+
+---
+
 ## ✅ 2026-05-31 — Phase 11.8 shipped: per-scope consent grant + auto-re-send on /app/
 
 The Phase 11.7 Outcome card surfaced blocked verdicts; Phase 11.8

@@ -369,22 +369,26 @@ Resumed sequencing (~6-7 weeks total):
 - **Bundle**: main 372 → 380 KB / 115 KB gzipped (+8 KB).
 - E2E verified via curl: blocked → grant → planned in 3 calls.
 
-### Phase 11.9 — Hero rebrand: Earn / Use (~1 day)
+### Phase 11.9 — Hero rebrand: Earn / Use ✅ SHIPPED 2026-05-31
 
-Cheap symbolic change that lets the new framing land in the
-investor demo immediately, even before the provider substrate
-exists.
-
-- [ ] Onboarding hero: "Worker" → "Earn", "Citizen" → "Use" (or
-  keep "Citizen" copy if neutral reads better).
-- [ ] In-flow role chooser inside Earn: "How do you want to
-  earn?" with tiles. Micro-task tiles (Label data / Federated
-  rounds + mesh inference) route to existing surfaces.
-  Provider tiles (Drive a cab / Cook / Run a shop / Help around
-  the house / Skilled work) render as "Coming soon — Phase 12.0"
-  placeholders.
-- [ ] Demo copy: investors should read the placeholders as
-  roadmap, not as broken UI.
+- **ADR 0128** — onboarding hero rebranded; in-flow role chooser
+  surfaces all seven earner motions; Phase 12.0 placeholders for
+  provider roles.
+- Hero copy: "I work" → "I earn"; "I live" → "I use"; CTA labels
+  follow. /shell/ link removed from footer per
+  /app/-grows-/shell/-retires direction.
+- New `frontend/src/lib/earn-roles.ts` data catalog — single
+  source of truth for earner taxonomy (live: label-data,
+  federated-mesh; Phase 12.0: drive-cab, cook, kirana, home-help,
+  skilled-trades). Each provider role's comingSoonNote bakes the
+  §15 "no commission" line into the catalog.
+- Three-step picker: split-hero → role chooser sheet (live tiles
+  trust-tinted, coming-soon tiles muted with orange Phase 12
+  badge) → persona picker (live only) OR coming-soon detail
+  sheet (Phase 12.0 placeholder roles).
+- Tests: Vitest 35 → 41 (+6 catalog invariants).
+- **Bundle**: main 380 → 384 KB / 116 KB gzipped (+4 KB).
+- **Next: Phase 12.x sequencing conversation** before code.
 
 ### Phase 12.0 — Provider identity substrate (~1.5 wks)
 
