@@ -350,18 +350,24 @@ User flagged post-Phase 11.7 that:
 
 Resumed sequencing (~6-7 weeks total):
 
-### Phase 11.8 — Per-scope consent grant UI (NEXT — ~1 day)
+### Phase 11.8 — Per-scope consent grant UI ✅ SHIPPED 2026-05-31
 
-User-driven follow-up to Phase 11.7. The Outcome card surfaces
-the consent requirement when an intent is blocked; this lets the
-citizen grant the requested scopes from /app/ itself, then
-auto-re-send the intent so blocked → planned → completed flows in
-one user action without bouncing to /shell/.
-
-- [ ] Per-scope grant UI launched from Outcome card's consent
-  block. Reuses Phase 1.3 consent artifact substrate.
-- [ ] Auto-re-send after grant (the same `intentText` retried).
-- [ ] Show the granted consents in the Trust tab; per-row revoke.
+- **ADR 0127** — citizen grants consent + auto-re-sends from
+  /app/. Pure FE; zero BE changes. Reuses Phase 1.3 substrate.
+- Three new hooks: `useConsents`, `useGrantConsent`,
+  `useRevokeConsent` — all citizen-signed
+  (`signWithIdentityId + signRole`) so server cannot fabricate.
+- `<ConsentGrantSheet>` per-scope checkboxes + plain-language
+  descriptions + TTL pills (1/7/30/90 days).
+- OutcomeCard gains `onGrantConsent` callback; consent block
+  surfaces [Review + grant consent] action.
+- CitizenIntent auto-re-fires intent after grant — Send label
+  flips to "Re-sending after consent…" during retry.
+- Trust tab rewritten: active consents with per-row Revoke +
+  history of revoked/expired.
+- Tests: Vitest 33 → 35 (+2 contract pins on signing fields).
+- **Bundle**: main 372 → 380 KB / 115 KB gzipped (+8 KB).
+- E2E verified via curl: blocked → grant → planned in 3 calls.
 
 ### Phase 11.9 — Hero rebrand: Earn / Use (~1 day)
 

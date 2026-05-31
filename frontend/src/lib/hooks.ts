@@ -199,6 +199,109 @@ export function useRecentOrchestrations(identityId: string | null | undefined) {
   });
 }
 
+// --- Generic consent grants (Phase 1.3 substrate / Phase 11.8) -------
+//
+// The orchestrator's `consentRequirement` from a blocked intent
+// names {subjectId, granteeId, scopes}. Phase 11.8 wires the
+// matching FE: list active consents, grant new ones (signed by
+// the citizen so the artifact is authentic), revoke per-row from
+// the Trust tab. Auto-re-send after grant happens at the call
+// site (CitizenIntent) — once the consent is saved, the next
+// orchestration POST sees it via the store's `listConsents`
+// pass into `orchestrateIntent`.
+export interface ConsentArtifact {
+  consentId: string;
+  subjectId: string;
+  granteeId: string;
+  scopes: string[];
+  purpose: string;
+  status: 'active' | 'revoked' | 'expired';
+  issuedAt: string;
+  expiresAt: string;
+  revokedAt?: string | null;
+  revokeReason?: string | null;
+  constraints?: Record<string, unknown>;
+  lifecycle?: { status: string; active: boolean; reason: string; expiresAt?: string };
+}
+
+export function useConsents(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['consents', identityId],
+    queryFn: () =>
+      api<{ consents: ConsentArtifact[] }>(`/api/consents?subjectId=${encodeURIComponent(identityId!)}`).then((r) =>
+        r.consents.filter((c) => c.subjectId === identityId)
+      ),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface GrantConsentInput {
+  identityId: string;
+  granteeId: string;
+  scopes: string[];
+  purpose: string;
+  ttlDays?: number;
+}
+
+/**
+ * Phase 11.8 — grant a generic Phase 1.3 consent. Signed by the
+ * citizen (subject role) so the artifact is authentic. After this
+ * resolves, the caller re-sends the original intent through
+ * `useSendIntent`; the orchestrator picks up the new consent from
+ * the store and unblocks.
+ */
+export function useGrantConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ identityId, granteeId, scopes, purpose, ttlDays = 30 }: GrantConsentInput) =>
+      api<{ ok: boolean; consent: ConsentArtifact }>('/api/consents', {
+        method: 'POST',
+        body: JSON.stringify({
+          subjectId: identityId,
+          granteeId,
+          scopes,
+          purpose,
+          ttlDays,
+          signWithIdentityId: identityId,
+          signRole: 'subject'
+        })
+      }),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['consents', identityId] });
+    }
+  });
+}
+
+export function useRevokeConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      consentId,
+      reason
+    }: {
+      identityId: string;
+      consentId: string;
+      reason?: string;
+    }) =>
+      api<{ ok: boolean; consent: ConsentArtifact }>(
+        `/api/consents/${encodeURIComponent(consentId)}/revoke`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            reason: reason ?? 'revoked_by_citizen',
+            revokedBy: identityId,
+            signWithIdentityId: identityId,
+            signRole: 'revoker'
+          })
+        }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['consents', identityId] });
+    }
+  });
+}
+
 /**
  * Phase 11.7 — citizen intent submit.
  *

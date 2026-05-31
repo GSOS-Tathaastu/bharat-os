@@ -152,6 +152,33 @@ Implemented pieces:
 
 ---
 
+## ✅ 2026-05-31 — Phase 11.8 shipped: per-scope consent grant + auto-re-send on /app/
+
+The Phase 11.7 Outcome card surfaced blocked verdicts; Phase 11.8
+lets the citizen actually grant the required consent from /app/
+itself, then auto-re-sends the original intent so "Book a cab"
+flows **blocked → grant → planned** in one user action — no
+bouncing to /shell/.
+
+- **ADR 0127** — pure FE; zero BE changes; reuses Phase 1.3
+  consent substrate.
+- Three new hooks (`useConsents`, `useGrantConsent`,
+  `useRevokeConsent`) — all citizen-signed so server cannot
+  fabricate consent.
+- New `<ConsentGrantSheet>`: per-scope checkboxes + plain-
+  language descriptions + 1/7/30/90 day TTL pills.
+- Trust tab rewritten as a real surface — active consents with
+  per-row Revoke + revoked/expired history.
+- Tests: FE Vitest 33 → 35 (+2 contract pins on signing fields).
+- Bundle: main 380 KB / 115 KB gzipped (+8 KB vs 11.7).
+- E2E verified: curl confirms blocked → grant → planned in 3
+  calls with "Looking for the best provider for you." outcome.
+
+**Next: Phase 11.9** — hero rebrand to Earn/Use + in-flow role
+chooser (label / drive / cook / kirana / maid / skilled).
+
+---
+
 ## 🪪 2026-05-31 — Phase 11.7 shipped: citizen intent flow wired end-to-end on /app/
 
 User reported "Book a cab" on /app/citizen/home silently doing

@@ -1,10 +1,15 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Action, Badge, Card, Evidence, Tabs, useToast } from '@/components/ui';
+import { ConsentGrantSheet } from '@/components/ConsentGrantSheet';
 import {
   useActiveIdentity,
+  useConsents,
+  useGrantConsent,
   useRecentOrchestrations,
+  useRevokeConsent,
   useSendIntent,
+  type ConsentArtifact,
   type Orchestration
 } from '@/lib/hooks';
 
@@ -17,6 +22,17 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
   mesh_storage: 'Mesh storage',
   trust_attestation: 'Trust Passport attestation',
   daily_brief: 'On-device daily brief'
+};
+
+const ACTION_TYPE_PURPOSE: Record<string, string> = {
+  service_booking: 'Book a service for me through the Bharat OS marketplace.',
+  scheme_delivery: 'Help me access a government scheme I am eligible for.',
+  regulated_onboarding: 'Complete a regulated onboarding flow on my behalf.',
+  health_record_read: 'Read my health record summary for this purpose.',
+  labor_match_post: 'Post a labor request and match me with workers.',
+  trust_attestation: 'Mint a selective-disclosure attestation about me.',
+  daily_brief: 'Compose my on-device daily brief.',
+  mesh_storage: 'Store this payload on my mesh node.'
 };
 
 const TABS = [
@@ -38,17 +54,20 @@ function CitizenIntent() {
   const identity = useActiveIdentity();
   const [text, setText] = useState('');
   const [lastOutcome, setLastOutcome] = useState<Orchestration | null>(null);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [autoRetrying, setAutoRetrying] = useState(false);
   const sendIntent = useSendIntent();
+  const grantConsent = useGrantConsent();
   const { data: recent = [] } = useRecentOrchestrations(identity?.id);
   const show = useToast((s) => s.show);
 
-  function handleSend() {
-    if (!identity || !text.trim()) {
+  function handleSend(intentText: string = text) {
+    if (!identity || !intentText.trim()) {
       show('Type or pick what you want to do.', 'error');
       return;
     }
     sendIntent.mutate(
-      { identityId: identity.id, intentText: text },
+      { identityId: identity.id, intentText },
       {
         onSuccess: (data) => {
           setLastOutcome(data.orchestration);
@@ -57,6 +76,36 @@ function CitizenIntent() {
       }
     );
   }
+
+  async function handleGrant(scopes: string[], ttlDays: number) {
+    if (!identity || !lastOutcome) return;
+    const requirement = lastOutcome.consentRequirement;
+    if (!requirement?.granteeId) return;
+    const actionType = lastOutcome.actionRequest?.actionType;
+    const purpose =
+      (actionType && ACTION_TYPE_PURPOSE[actionType]) ??
+      lastOutcome.intent?.intentText ??
+      'Granted from /app/citizen/home';
+    try {
+      await grantConsent.mutateAsync({
+        identityId: identity.id,
+        granteeId: requirement.granteeId,
+        scopes,
+        purpose,
+        ttlDays
+      });
+      setGrantOpen(false);
+      // Auto-re-send the same intent so the citizen sees the
+      // blocked → planned/completed transition in one motion.
+      setAutoRetrying(true);
+      handleSend(lastOutcome.intent?.intentText ?? text);
+      setAutoRetrying(false);
+    } catch (err) {
+      show((err as Error).message, 'error');
+    }
+  }
+
+  const sendBusy = sendIntent.isPending || autoRetrying;
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
@@ -90,8 +139,8 @@ function CitizenIntent() {
           ))}
         </div>
         <div className="mt-4 flex gap-2">
-          <Action onClick={handleSend} disabled={sendIntent.isPending}>
-            {sendIntent.isPending ? 'Sending…' : 'Send'}
+          <Action onClick={() => handleSend()} disabled={sendBusy}>
+            {sendIntent.isPending ? 'Sending…' : autoRetrying ? 'Re-sending after consent…' : 'Send'}
           </Action>
           {lastOutcome && (
             <Action variant="ghost" onClick={() => setLastOutcome(null)}>
@@ -106,7 +155,29 @@ function CitizenIntent() {
         </Evidence>
       </Card>
 
-      {lastOutcome && <OutcomeCard orchestration={lastOutcome} />}
+      {lastOutcome && (
+        <OutcomeCard
+          orchestration={lastOutcome}
+          onGrantConsent={() => setGrantOpen(true)}
+        />
+      )}
+
+      {lastOutcome?.consentRequirement?.scopes && lastOutcome.consentRequirement.granteeId && (
+        <ConsentGrantSheet
+          open={grantOpen}
+          onClose={() => setGrantOpen(false)}
+          scopes={lastOutcome.consentRequirement.scopes}
+          granteeId={lastOutcome.consentRequirement.granteeId}
+          purpose={
+            (lastOutcome.actionRequest?.actionType &&
+              ACTION_TYPE_PURPOSE[lastOutcome.actionRequest.actionType]) ??
+            lastOutcome.intent?.intentText ??
+            'Granted from /app/citizen/home'
+          }
+          granting={grantConsent.isPending}
+          onGrant={handleGrant}
+        />
+      )}
 
       <Card title="Recent activity" subtitle="Latest intents on this profile">
         {recent.length === 0 ? (
@@ -129,7 +200,12 @@ function CitizenIntent() {
   );
 }
 
-function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
+interface OutcomeCardProps {
+  orchestration: Orchestration;
+  onGrantConsent?: () => void;
+}
+
+function OutcomeCard({ orchestration, onGrantConsent }: OutcomeCardProps) {
   const actionType = orchestration.actionRequest?.actionType;
   const label = (actionType && ACTION_TYPE_LABEL[actionType]) ?? 'Intent';
   const status = orchestration.status ?? 'planned';
@@ -141,6 +217,8 @@ function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
   const consentRequirement = orchestration.consentRequirement;
   const failedPolicies = orchestration.failedPolicies ?? [];
   const plan = orchestration.plan ?? [];
+  const consentBlocked =
+    status === 'blocked' && Boolean(consentRequirement?.scopes?.length);
 
   return (
     <Card
@@ -150,7 +228,7 @@ function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
     >
       {message && <p className="text-body">{message}</p>}
 
-      {status === 'blocked' && consentRequirement?.scopes && consentRequirement.scopes.length > 0 && (
+      {consentBlocked && consentRequirement?.scopes && (
         <div className="mt-3 rounded-sm border border-orange-100 bg-white p-3">
           <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
             Bharat OS needs your consent for
@@ -163,9 +241,16 @@ function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
             ))}
           </ul>
           <p className="mt-2 text-caption text-text-muted">
-            Granting consent is a signed, revocable artifact. Per-scope consent
-            UI ships in Phase 11.8.
+            Granting is a signed, revocable artifact stored under your identity.
+            Revoke any time from the Trust tab.
           </p>
+          {onGrantConsent && (
+            <div className="mt-3">
+              <Action size="sm" onClick={onGrantConsent}>
+                Review + grant consent
+              </Action>
+            </div>
+          )}
         </div>
       )}
 
@@ -216,15 +301,98 @@ function OutcomeCard({ orchestration }: { orchestration: Orchestration }) {
 }
 
 function CitizenTrust() {
+  const identity = useActiveIdentity();
+  const { data: consents = [], isPending } = useConsents(identity?.id);
+  const revoke = useRevokeConsent();
+  const show = useToast((s) => s.show);
+
+  function handleRevoke(consent: ConsentArtifact) {
+    if (!identity) return;
+    revoke.mutate(
+      { identityId: identity.id, consentId: consent.consentId },
+      {
+        onSuccess: () => show('Consent revoked.', 'success'),
+        onError: (err: Error) => show(err.message, 'error')
+      }
+    );
+  }
+
+  const active = consents.filter((c) => (c.lifecycle?.active ?? c.status === 'active'));
+  const inactive = consents.filter((c) => !(c.lifecycle?.active ?? c.status === 'active'));
+
   return (
-    <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
+    <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-4">
       <h1 className="text-display font-semibold">Your data, your control</h1>
-      <Card title="Permissions you've granted">
-        <p className="text-body text-text-muted">
-          Every consent grant has an audit-ledger trail. Coming up next:
-          per-grant revoke + receipt download.
-        </p>
+      <p className="text-body text-text-muted">
+        Every consent grant is signed by you and lives in the audit ledger. Revoke
+        any active grant here.
+      </p>
+
+      <Card title={`Active consents (${active.length})`} tone="trust">
+        {isPending ? (
+          <p className="text-body text-text-muted">Loading…</p>
+        ) : active.length === 0 ? (
+          <p className="text-body text-text-muted">
+            No active consents. Granting one happens when you confirm an intent
+            from Home.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {active.map((c) => (
+              <li key={c.consentId} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-body font-semibold">{c.purpose}</p>
+                    <p className="mt-1 text-caption text-text-muted">
+                      Granted to <span className="font-mono">{c.granteeId}</span>
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {c.scopes.map((s) => (
+                        <span
+                          key={s}
+                          className="rounded-sm bg-trust-50 px-2 py-0.5 font-mono text-caption text-trust-700"
+                        >
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-caption text-text-muted">
+                      Expires {new Date(c.expiresAt).toLocaleString('en-IN')}
+                    </p>
+                  </div>
+                  <Action
+                    variant="destructive"
+                    size="sm"
+                    disabled={revoke.isPending}
+                    onClick={() => handleRevoke(c)}
+                  >
+                    Revoke
+                  </Action>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
+
+      {inactive.length > 0 && (
+        <Card title={`History (${inactive.length})`}>
+          <ul className="divide-y divide-border">
+            {inactive.map((c) => (
+              <li key={c.consentId} className="py-2 first:pt-0 last:pb-0">
+                <p className="text-body">{c.purpose}</p>
+                <p className="text-caption text-text-muted">
+                  {c.status === 'revoked'
+                    ? `Revoked${c.revokedAt ? ` ${new Date(c.revokedAt).toLocaleString('en-IN')}` : ''}${
+                        c.revokeReason ? ` — ${c.revokeReason}` : ''
+                      }`
+                    : `Expired ${new Date(c.expiresAt).toLocaleString('en-IN')}`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </main>
   );
 }
