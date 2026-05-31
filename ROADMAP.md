@@ -398,6 +398,23 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.0.2 — Citizen sweep ✅ SHIPPED 2026-06-01
+- **ADR 0131** — substrate-integration sweep, citizen side
+  (first of four sub-phases 12.0.2 → 12.0.5).
+- **Daily brief** on /app/citizen/home top — uses orchestrator
+  `daily_brief` action type; renders greeting + composed text +
+  structured signals (mesh 24h, expiring consents, recent
+  activity, open §9A flags); consent-blocked variant routes
+  through existing ConsentGrantSheet.
+- **Personal memory records** as new /app/citizen/notes tab —
+  create + list (metadata only) + consent-gated read; per-note
+  sensitivity (personal/sensitive/public).
+- Citizen bottom-nav 4 → 5 tabs (Home / Notes / Trust / Labs /
+  Settings).
+- 4 new hooks + 2 new components. Pure FE; zero BE changes.
+- Tests: Node 890/890 unchanged, FE Vitest 45/45 unchanged.
+- **Bundle**: main 399 → 411 KB / 123 KB gzipped (+12 KB).
+
 #### Phase 12.0.1 — Real sign-up / sign-in on /app/ ✅ SHIPPED 2026-06-01
 - **ADR 0130** — auth follow-up over existing Phase 4.3 phone OTP +
   Phase 5.0 account recovery substrate.

@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 📋 2026-06-01 — Phase 12.0.2 shipped: citizen home becomes a real home — daily brief + personal notes
+
+First of four substrate-integration sub-phases (12.0.2 → 12.0.5)
+addressing the founder's directive to integrate every BE-complete
+substrate into `/app/` for a complete-product showcase before
+tackling Phase 12.1a marketplace.
+
+- **ADR 0131** — pure FE; zero BE changes.
+- **Daily brief** at the top of `/app/citizen/home` — uses the
+  orchestrator's `daily_brief` action type. Personalised
+  greeting + composed brief text + structured signals
+  (24h mesh earnings, expiring consents, recent activity,
+  open §9A flags). Composed-on-device per §15.
+- **Personal memory records** as new `/app/citizen/notes` tab —
+  encrypted with the citizen's vault key on the server;
+  metadata-only on list; consent-gated reads.
+- Citizen bottom-nav goes 4 → 5 tabs.
+- 4 new hooks + 2 new components.
+- Bundle: main 411 KB / 123 KB gzipped (+12 KB vs 12.0.1).
+
+**Next: Phase 12.0.3** — worker sweep (e-Shram + scheme
+entitlements + tax summary + skill traces + trust attestation
+mint).
+
+---
+
 ## 🔑 2026-06-01 — Phase 12.0.1 shipped: real sign-up + sign-in on /app/
 
 Even for the demo, /app/ needed a real account flow alongside

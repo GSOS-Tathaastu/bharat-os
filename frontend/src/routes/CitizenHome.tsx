@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Action, Badge, Card, Evidence, Tabs, useToast } from '@/components/ui';
 import { ConsentGrantSheet } from '@/components/ConsentGrantSheet';
+import { DailyBriefCard } from '@/components/DailyBriefCard';
+import { CitizenNotes } from '@/routes/CitizenNotes';
 import {
   useActiveIdentity,
   useConsents,
+  useDailyBrief,
   useGrantConsent,
   useRecentOrchestrations,
   useRevokeConsent,
@@ -37,6 +41,7 @@ const ACTION_TYPE_PURPOSE: Record<string, string> = {
 
 const TABS = [
   { to: '/citizen/home', label: 'Home', icon: '🏠' },
+  { to: '/citizen/notes', label: 'Notes', icon: '📝' },
   { to: '/citizen/trust', label: 'Trust', icon: '🛡' },
   { to: '/labs', label: 'Labs', icon: '🧪' },
   { to: '/settings', label: 'Settings', icon: '⚙' }
@@ -52,6 +57,7 @@ const SUGGESTIONS = [
 
 function CitizenIntent() {
   const identity = useActiveIdentity();
+  const qc = useQueryClient();
   const [text, setText] = useState('');
   const [lastOutcome, setLastOutcome] = useState<Orchestration | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
@@ -59,7 +65,17 @@ function CitizenIntent() {
   const sendIntent = useSendIntent();
   const grantConsent = useGrantConsent();
   const { data: recent = [] } = useRecentOrchestrations(identity?.id);
+  const { data: briefData } = useDailyBrief(identity?.id);
   const show = useToast((s) => s.show);
+
+  // Phase 12.0.2 — when the citizen taps "Review + grant" on the
+  // daily brief card, route through the existing ConsentGrantSheet
+  // by promoting the brief's orchestration to lastOutcome.
+  function handleGrantBriefConsent() {
+    if (!briefData?.orchestration) return;
+    setLastOutcome(briefData.orchestration);
+    setGrantOpen(true);
+  }
 
   function handleSend(intentText: string = text) {
     if (!identity || !intentText.trim()) {
@@ -95,11 +111,25 @@ function CitizenIntent() {
         ttlDays
       });
       setGrantOpen(false);
+      // Phase 12.0.2 — also refresh the daily brief; granting a
+      // memory.read consent unblocks the brief composition.
+      qc.invalidateQueries({ queryKey: ['daily-brief', identity.id] });
       // Auto-re-send the same intent so the citizen sees the
       // blocked → planned/completed transition in one motion.
-      setAutoRetrying(true);
-      handleSend(lastOutcome.intent?.intentText ?? text);
-      setAutoRetrying(false);
+      // For the daily-brief flow there's no intent text to re-send;
+      // the useDailyBrief query refetches via the invalidation above.
+      const intentToRetry = lastOutcome.intent?.intentText ?? '';
+      if (intentToRetry.trim()) {
+        setAutoRetrying(true);
+        handleSend(intentToRetry);
+        setAutoRetrying(false);
+      } else {
+        // Pure consent-grant (daily brief case); clear the outcome
+        // card so the citizen sees the refreshed brief, not the
+        // stale "blocked" card.
+        setLastOutcome(null);
+        show('Consent granted. Your brief is composing.', 'success');
+      }
     } catch (err) {
       show((err as Error).message, 'error');
     }
@@ -117,6 +147,8 @@ function CitizenIntent() {
           What can Bharat OS do for you today?
         </h1>
       </section>
+
+      <DailyBriefCard onGrantConsent={handleGrantBriefConsent} />
 
       <Card>
         <textarea
@@ -403,6 +435,7 @@ export function CitizenHome() {
       <Routes>
         <Route index element={<Navigate to="home" replace />} />
         <Route path="home" element={<CitizenIntent />} />
+        <Route path="notes" element={<CitizenNotes />} />
         <Route path="trust" element={<CitizenTrust />} />
         <Route path="*" element={<CitizenIntent />} />
       </Routes>

@@ -792,6 +792,170 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0.2 daily brief (§9C vignette 16b) ----------------------
+//
+// The orchestrator's `daily_brief` action type is fully wired BE-side:
+// when POST /api/orchestrations carries {actionType: 'daily_brief',
+// actorId}, the server calls gatherDailyBriefSignals() and threads
+// the structured signals object into actionRequest.metadata.signals.
+// The signals come back even when the orchestration is blocked on
+// consent — so the FE can render the structured part of the brief
+// (mesh earnings, expiring consents, recent activity, open flags)
+// before any consent grant.
+
+export interface DailyBriefSignals {
+  protocolVersion: string;
+  horizonHours: number;
+  asOf: string;
+  recent: Array<{
+    orchestrationId: string;
+    actionType: string;
+    status: string;
+    at: string | null;
+    summary: string;
+  }>;
+  mesh: {
+    earnedPaise: number;
+    tokens: number;
+    bytes: number;
+    eventCount: number;
+  };
+  expiringConsents: Array<{
+    consentId: string;
+    purpose: string;
+    expiresAt: string;
+    scopes: string[];
+  }>;
+  openFlags: number;
+}
+
+export interface DailyBriefResult {
+  orchestration: Orchestration & {
+    actionRequest?: {
+      metadata?: { signals?: DailyBriefSignals; subjectDisplayName?: string };
+    };
+  };
+}
+
+export function useDailyBrief(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['daily-brief', identityId],
+    queryFn: async (): Promise<DailyBriefResult> => {
+      const result = await api<{ orchestration: Orchestration }>('/api/orchestrations', {
+        method: 'POST',
+        body: JSON.stringify({
+          actionType: 'daily_brief',
+          actorId: identityId,
+          execute: true
+        })
+      });
+      return result as DailyBriefResult;
+    },
+    enabled: Boolean(identityId),
+    // Refresh every 5 minutes — the signals refresh as the citizen
+    // uses the app, but they don't need to be real-time.
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 60 * 1000
+  });
+}
+
+// --- Phase 12.0.2 personal memory records (My notes) ------------------
+//
+// Encrypted-at-rest notes the citizen owns. Plaintext is encrypted
+// with the citizen's vault key on the server; reads go through the
+// consent gate (memory.read + consent.record). For the v1 demo we
+// render the summary (label + sensitivity + createdAt) in the list
+// and offer a "Read note" action that consent-grants + decrypts.
+
+export type MemorySensitivity = 'personal' | 'sensitive' | 'public';
+
+export interface MemorySummary {
+  recordId: string;
+  ownerId: string;
+  label?: string;
+  contentType?: string;
+  plaintextBytes?: number;
+  scopes?: string[];
+  source?: { type?: string };
+  tags?: string[];
+  sensitivity?: MemorySensitivity;
+  createdAt: string;
+}
+
+export function useMemoryRecords(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['memory-records', identityId],
+    queryFn: () =>
+      api<{ memory: MemorySummary[] }>(
+        `/api/memory-records?ownerId=${encodeURIComponent(identityId!)}`
+      ).then((r) =>
+        r.memory.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      ),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface CreateMemoryRecordInput {
+  identityId: string;
+  text: string;
+  label?: string;
+  sensitivity?: MemorySensitivity;
+  tags?: string[];
+}
+
+export function useCreateMemoryRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateMemoryRecordInput) =>
+      api<{ ok: boolean; memory: MemorySummary }>('/api/memory-records', {
+        method: 'POST',
+        body: JSON.stringify({
+          identityId: input.identityId,
+          text: input.text,
+          label: input.label,
+          sensitivity: input.sensitivity ?? 'personal',
+          tags: input.tags ?? [],
+          contentType: 'text/plain; charset=utf-8',
+          scopes: ['memory.read', 'consent.record']
+        })
+      }),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['memory-records', identityId] });
+    }
+  });
+}
+
+export interface ReadMemoryRecordResult {
+  ok: boolean;
+  approved?: boolean;
+  decision?: OrchestrationDecision;
+  memory?: MemorySummary;
+  plaintext?: string | null;
+}
+
+export function useReadMemoryRecord() {
+  return useMutation({
+    mutationFn: ({
+      recordId,
+      identityId
+    }: {
+      recordId: string;
+      identityId: string;
+    }) =>
+      api<ReadMemoryRecordResult>(
+        `/api/memory-records/${encodeURIComponent(recordId)}/read`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            identityId,
+            granteeId: 'bharat-os-orchestrator',
+            piiHandling: 'summary'
+          })
+        }
+      )
+  });
+}
+
 // --- Phase 12.0.1 sign-up / sign-in via phone OTP ---------------------
 //
 // The BE substrate is already in place:
