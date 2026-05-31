@@ -8,6 +8,7 @@ import {
   useRemoveSlmInstall,
   useFederatedRounds,
   useSubmitFederatedUpdate,
+  useSponsorDirectory,
   type SlmModelPack,
   type InstalledSlm,
   type FederatedRound
@@ -450,51 +451,86 @@ function FederatedRoundsCard({ installedPackIds }: FederatedRoundsCardProps) {
         </p>
       )}
       <ul className="flex flex-col gap-2">
-        {openRounds.map((round) => {
-          const isSlmRound = Boolean(round.slmModelPackId);
-          const hasPack = !isSlmRound || installedPackIds.has(round.slmModelPackId!);
-          const isJoining = joining === round.roundId;
-          return (
-            <li key={round.roundId} className="rounded-sm border border-border bg-white p-3">
-              <div className="mb-1 flex items-baseline justify-between gap-2">
-                <p className="font-semibold text-text">{round.modelName}</p>
-                <Money paise={round.payoutPaisePerUpdate} size="sm" />
-              </div>
-              <p className="text-caption text-text-muted">
-                {isSlmRound ? `SLM · ${round.targetTask ?? 'fine-tune'}` : 'classifier head'}
-                {' · '}
-                {round.updateCount}/{round.maxParticipants} workers
-                {' · ε '}
-                {round.epsilonSpent.toFixed(2)}/{round.maxEpsilon.toFixed(2)}
-              </p>
-              {isSlmRound && !hasPack && (
-                <p className="mt-1 text-caption text-error">
-                  Requires the {round.slmModelPackId} pack — install it above first.
-                </p>
-              )}
-              <Action
-                variant="trust"
-                size="sm"
-                className="mt-2"
-                disabled={!identity || !hasPack || isJoining || submit.isPending}
-                onClick={() => handleJoin(round)}
-              >
-                {isJoining ? 'Submitting…' : `Join (earn ₹${(round.payoutPaisePerUpdate / 100).toFixed(2)})`}
-              </Action>
-            </li>
-          );
-        })}
+        {openRounds.map((round) => (
+          <FederatedRoundRow
+            key={round.roundId}
+            round={round}
+            installedPackIds={installedPackIds}
+            joining={joining}
+            onJoin={() => handleJoin(round)}
+            submitting={submit.isPending}
+          />
+        ))}
       </ul>
-      <Evidence title="How federated rounds work">
+      <Evidence title="How federated rounds work (Phase 9.0d + 9.1)">
         Sponsors (banks, hospitals, govt) create rounds with a target task
-        and a per-update payout. Workers compute a small gradient locally,
+        and a per-update payout, locking the full round budget into an
+        escrow at creation time. Workers compute a small gradient locally,
         add DP-SGD privacy noise scaled to their ε budget, and submit
         the noised vector. Bharat OS aggregates updates via FedAvg or hash-
-        combiner. Raw gradients never leave the device unencrypted; only
-        the aggregate model hash is published. v1 ships with a stub
-        gradient computation — real LoRA fine-tuning needs a training-
-        capable runtime backend (future polish).
+        combiner; per-accepted-update the sponsor's escrow is debited and
+        the worker's mesh ledger is credited atomically. Raw gradients
+        never leave the device unencrypted; only the aggregate model hash
+        is published. v1 ships with a stub gradient computation — real
+        LoRA fine-tuning needs a training-capable runtime backend (future
+        polish).
       </Evidence>
     </Card>
+  );
+}
+
+interface FederatedRoundRowProps {
+  round: FederatedRound;
+  installedPackIds: Set<string>;
+  joining: string | null;
+  submitting: boolean;
+  onJoin: () => void;
+}
+
+function FederatedRoundRow({ round, installedPackIds, joining, submitting, onJoin }: FederatedRoundRowProps) {
+  const isSlmRound = Boolean(round.slmModelPackId);
+  const hasPack = !isSlmRound || installedPackIds.has(round.slmModelPackId!);
+  const isJoining = joining === round.roundId;
+  const { data: sponsor } = useSponsorDirectory(round.sponsorId);
+  const remainingPaise = (round.escrowLockedPaise ?? 0) - (round.escrowDebitedPaise ?? 0);
+
+  return (
+    <li className="rounded-sm border border-border bg-white p-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <p className="font-semibold text-text">{round.modelName}</p>
+        <Money paise={round.payoutPaisePerUpdate} size="sm" />
+      </div>
+      {round.sponsorId && (
+        <div className="mb-1 flex items-center gap-2">
+          <Badge variant="governance">Sponsored by {sponsor?.displayName ?? round.sponsorId}</Badge>
+          {remainingPaise > 0 && (
+            <span className="text-caption text-text-muted">
+              ₹{(remainingPaise / 100).toFixed(2)} remaining
+            </span>
+          )}
+        </div>
+      )}
+      <p className="text-caption text-text-muted">
+        {isSlmRound ? `SLM · ${round.targetTask ?? 'fine-tune'}` : 'classifier head'}
+        {' · '}
+        {round.updateCount}/{round.maxParticipants} workers
+        {' · ε '}
+        {round.epsilonSpent.toFixed(2)}/{round.maxEpsilon.toFixed(2)}
+      </p>
+      {isSlmRound && !hasPack && (
+        <p className="mt-1 text-caption text-error">
+          Requires the {round.slmModelPackId} pack — install it above first.
+        </p>
+      )}
+      <Action
+        variant="trust"
+        size="sm"
+        className="mt-2"
+        disabled={!hasPack || isJoining || submitting}
+        onClick={onJoin}
+      >
+        {isJoining ? 'Submitting…' : `Join (earn ₹${(round.payoutPaisePerUpdate / 100).toFixed(2)})`}
+      </Action>
+    </li>
   );
 }

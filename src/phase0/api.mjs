@@ -227,6 +227,18 @@ import {
   createInstalledSlmRecord,
   INSTALLED_SLM_STATUSES
 } from '../phase1/installed-slm.mjs';
+import {
+  createSponsor,
+  publicSponsor,
+  publicSponsorDirectory,
+  depositEscrow,
+  lockEscrow,
+  debitLockedEscrow,
+  refundLockedEscrow,
+  revokeSponsor,
+  SPONSOR_STATUSES
+} from '../phase1/sponsor.mjs';
+import { checkSponsorAuth } from './sponsor-auth.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1081,6 +1093,310 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 9.1 — sponsor onboarding (admin-gated). Admin posts
+      // body { displayName, contactEmail? }; response returns
+      // { sponsor, bearerToken }. Bearer token is shown ONCE; we
+      // store only its sha256. Operator records the token in their
+      // own secrets store + hands it to the sponsor securely.
+      if (request.method === 'POST' && url.pathname === '/api/admin/sponsors') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const body = await readRequestJson(request);
+        let result;
+        try {
+          result = createSponsor({
+            displayName: body.displayName,
+            contactEmail: body.contactEmail,
+            onboardedBy: auth.operator
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_sponsor', message: error.message }
+          });
+          return;
+        }
+        await store.saveSponsor(result.sponsor);
+        logger.info('admin_sponsor_onboarded', {
+          requestId,
+          operator: auth.operator,
+          sponsorId: result.sponsor.sponsorId,
+          displayName: result.sponsor.displayName
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          sponsor: publicSponsor(result.sponsor),
+          bearerToken: result.bearerToken,
+          warning:
+            'This bearerToken is shown ONCE. Store it securely + hand it to the sponsor. ' +
+            'Bharat OS only retains its sha256.'
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/admin/sponsors') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const sponsors = await store.listSponsors();
+        jsonResponse(response, 200, {
+          sponsors: sponsors.map(publicSponsor)
+        });
+        return;
+      }
+
+      // POST /api/admin/sponsors/:id/deposit — admin tops up sponsor
+      // escrow after confirming an off-system fiat wire / NEFT.
+      // Body: { amountPaise: number, reference?: string }
+      const sponsorDepositMatch = /^\/api\/admin\/sponsors\/([^/]+)\/deposit$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorDepositMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const sponsorId = decodeURIComponent(sponsorDepositMatch[1]);
+        const sponsor = await store.readSponsor(sponsorId).catch(() => null);
+        if (!sponsor) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_sponsor', message: 'sponsor not found.' }
+          });
+          return;
+        }
+        const body = await readRequestJson(request);
+        let updated;
+        try {
+          updated = depositEscrow(sponsor, body.amountPaise);
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_deposit', message: error.message }
+          });
+          return;
+        }
+        await store.saveSponsor(updated);
+        await store.appendLedger({
+          type: 'sponsor_escrow.deposited',
+          sponsorId,
+          amountPaise: Number(body.amountPaise),
+          reference: typeof body.reference === 'string' ? body.reference.slice(0, 120) : null,
+          operator: auth.operator,
+          balancePaise: updated.escrowBalancePaise,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          sponsor: publicSponsor(updated)
+        });
+        return;
+      }
+
+      // DELETE /api/admin/sponsors/:id — admin revokes a sponsor.
+      // Soft-delete (status: revoked) so the audit trail of past
+      // rounds stays resolvable.
+      const sponsorRevokeMatch = /^\/api\/admin\/sponsors\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'DELETE' && sponsorRevokeMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const sponsorId = decodeURIComponent(sponsorRevokeMatch[1]);
+        const sponsor = await store.readSponsor(sponsorId).catch(() => null);
+        if (!sponsor) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_sponsor', message: 'sponsor not found.' }
+          });
+          return;
+        }
+        const revoked = revokeSponsor(sponsor, { revokedBy: auth.operator });
+        await store.saveSponsor(revoked);
+        logger.info('admin_sponsor_revoked', {
+          requestId,
+          operator: auth.operator,
+          sponsorId
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          sponsor: publicSponsor(revoked)
+        });
+        return;
+      }
+
+      // Phase 9.1 — public sponsor directory lookup (no auth).
+      // Returns sponsorId + displayName + status ONLY. Used by the
+      // FE rounds card to render "Sponsored by X" badges without
+      // exposing escrow numbers or contact info. The authenticated
+      // self-view lives at /api/sponsors/:id/self.
+      const sponsorDirectoryMatch = /^\/api\/sponsors\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorDirectoryMatch) {
+        const sponsorId = decodeURIComponent(sponsorDirectoryMatch[1]);
+        const sponsor = await store.readSponsor(sponsorId).catch(() => null);
+        if (!sponsor) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_sponsor', message: 'sponsor not found.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { sponsor: publicSponsorDirectory(sponsor) });
+        return;
+      }
+
+      // GET /api/sponsors/:id/self — sponsor-authenticated self view
+      // including escrow balance. Bearer token required.
+      const sponsorSelfMatch = /^\/api\/sponsors\/([^/]+)\/self$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorSelfMatch) {
+        const sponsorId = decodeURIComponent(sponsorSelfMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        jsonResponse(response, 200, { sponsor: publicSponsor(sponsor) });
+        return;
+      }
+
+      // POST /api/sponsors/:id/federated-rounds — sponsor creates
+      // a funded round. We lock the required escrow up-front so the
+      // round can pay every accepted worker update without overrunning.
+      // Body matches POST /api/federated/rounds + we compute the
+      // total lock as maxParticipants * payoutPaisePerUpdate.
+      const sponsorRoundCreateMatch = /^\/api\/sponsors\/([^/]+)\/federated-rounds$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorRoundCreateMatch) {
+        const sponsorId = decodeURIComponent(sponsorRoundCreateMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const body = await readRequestJson(request);
+        const maxParticipants = Math.max(1, Math.min(10_000, Math.floor(Number(body.maxParticipants ?? 100))));
+        const payoutPaisePerUpdate = Math.max(0, Math.floor(Number(body.payoutPaisePerUpdate ?? 0)));
+        const escrowRequired = maxParticipants * payoutPaisePerUpdate;
+        if (escrowRequired <= 0) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_round_economics',
+              message: 'maxParticipants * payoutPaisePerUpdate must be > 0.'
+            }
+          });
+          return;
+        }
+        let lockedSponsor;
+        try {
+          lockedSponsor = lockEscrow(sponsor, escrowRequired);
+        } catch (error) {
+          jsonResponse(response, 402, {
+            error: {
+              code: 'insufficient_escrow',
+              message: error.message,
+              requiredPaise: escrowRequired,
+              availablePaise:
+                lockedSponsor === undefined
+                  ? sponsor.escrowBalancePaise - sponsor.escrowLockedPaise
+                  : undefined
+            }
+          });
+          return;
+        }
+        let round;
+        try {
+          round = openRound(
+            createFederatedRound({
+              createdBy: body.createdBy ?? sponsorId,
+              modelName: body.modelName,
+              baselineModelHash: body.baselineModelHash,
+              maxParticipants,
+              maxEpsilon: body.maxEpsilon,
+              payoutPaisePerUpdate,
+              deadlineSecondsFromNow: body.deadlineSecondsFromNow,
+              aggregationMode: body.aggregationMode,
+              contributorBudget: body.contributorBudget,
+              slmModelPackId: body.slmModelPackId,
+              targetTask: body.targetTask,
+              loraConfig: body.loraConfig,
+              sponsorId,
+              escrowLockedPaise: escrowRequired
+            })
+          );
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_round', message: error.message }
+          });
+          return;
+        }
+        await store.saveSponsor(lockedSponsor);
+        await store.saveFederatedRound(round);
+        await store.appendLedger({
+          type: 'sponsor_escrow.locked',
+          sponsorId,
+          roundId: round.roundId,
+          amountPaise: escrowRequired,
+          balancePaise: lockedSponsor.escrowBalancePaise,
+          lockedPaise: lockedSponsor.escrowLockedPaise,
+          at: new Date().toISOString()
+        });
+        logger.info('sponsor_round_created', {
+          requestId,
+          sponsorId,
+          roundId: round.roundId,
+          escrowLockedPaise: escrowRequired
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          round,
+          sponsor: publicSponsor(lockedSponsor)
+        });
+        return;
+      }
+
+      // GET /api/sponsors/:id/federated-rounds — sponsor lists own
+      // rounds.
+      const sponsorRoundsListMatch = /^\/api\/sponsors\/([^/]+)\/federated-rounds$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorRoundsListMatch) {
+        const sponsorId = decodeURIComponent(sponsorRoundsListMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const all = await store.listFederatedRounds();
+        const mine = all.filter((r) => r.sponsorId === sponsorId).map(describeRound);
+        jsonResponse(response, 200, { rounds: mine });
+        return;
+      }
+
+      // GET /api/sponsors/:id/federated-rounds/:roundId/export —
+      // signed JSONL bundle of accepted updates for sponsor audit.
+      // Pointer-not-payload: per-update record carries the gradient
+      // HASH only, not the bytes. Rotates identityHash per
+      // (round, identity) so the sponsor cannot correlate the same
+      // worker across multiple rounds.
+      const sponsorRoundExportMatch =
+        /^\/api\/sponsors\/([^/]+)\/federated-rounds\/([^/]+)\/export$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorRoundExportMatch) {
+        const sponsorId = decodeURIComponent(sponsorRoundExportMatch[1]);
+        const roundId = decodeURIComponent(sponsorRoundExportMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const round = await store.readFederatedRound(roundId).catch(() => null);
+        if (!round || round.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_round', message: 'round not found for this sponsor.' }
+          });
+          return;
+        }
+        const allUpdates = await store.listFederatedUpdates();
+        const updates = allUpdates.filter((u) => u.roundId === roundId);
+        // identityHash per-(round, identity) so sponsor cannot
+        // cross-round correlate — same as Phase 10 plan in ADR 0110.
+        const { sha256Hex } = await import('./core.mjs');
+        const lines = updates.map((u) => {
+          const identityHash = sha256Hex(`${roundId}::${u.contributorId}`);
+          return JSON.stringify({
+            updateId: u.updateId,
+            roundId,
+            sponsorId,
+            identityHash: 'sha256:' + identityHash,
+            gradientHash: u.gradientHash,
+            differentialPrivacyEpsilon: u.differentialPrivacyEpsilon,
+            sampleCount: u.sampleCount,
+            acceptedAt: u.submittedAt,
+            payoutPaise: u.payoutPaise
+          });
+        });
+        const body = lines.join('\n') + (lines.length ? '\n' : '');
+        textResponse(
+          response,
+          200,
+          body,
+          'application/x-ndjson; charset=utf-8'
+        );
+        return;
+      }
+
       if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
         response.writeHead(302, { location: '/shell/' });
         response.end();
@@ -1334,6 +1650,15 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/slm-model-packs/:modelPackId',
             'POST /api/admin/slm-model-packs',
             'DELETE /api/admin/slm-model-packs/:modelPackId',
+            'POST /api/admin/sponsors',
+            'GET /api/admin/sponsors',
+            'POST /api/admin/sponsors/:sponsorId/deposit',
+            'DELETE /api/admin/sponsors/:sponsorId',
+            'GET /api/sponsors/:sponsorId  (public directory)',
+            'GET /api/sponsors/:sponsorId/self  (bearer-gated, with escrow)',
+            'GET /api/sponsors/:sponsorId/federated-rounds  (bearer-gated)',
+            'POST /api/sponsors/:sponsorId/federated-rounds  (bearer-gated)',
+            'GET /api/sponsors/:sponsorId/federated-rounds/:roundId/export  (bearer-gated)',
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',
@@ -2906,7 +3231,51 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           publicRecords,
           allUpdates
         });
-        await store.saveFederatedRound(nextRound);
+        // Phase 9.1 — for sponsor-funded rounds, debit the
+        // round's escrow lock by the payout we're about to credit
+        // the worker. Round bookkeeping increments
+        // `escrowDebitedPaise` so the sponsor's audit export can
+        // reconcile per-round spend.
+        let debitedRound = nextRound;
+        if (
+          accepted.payoutPaise > 0 &&
+          nextRound.sponsorId &&
+          (nextRound.escrowLockedPaise ?? 0) > (nextRound.escrowDebitedPaise ?? 0)
+        ) {
+          const sponsor = await store.readSponsor(nextRound.sponsorId).catch(() => null);
+          if (sponsor) {
+            try {
+              const debited = debitLockedEscrow(sponsor, accepted.payoutPaise);
+              await store.saveSponsor(debited);
+              debitedRound = {
+                ...nextRound,
+                escrowDebitedPaise:
+                  (nextRound.escrowDebitedPaise ?? 0) + accepted.payoutPaise
+              };
+              await store.appendLedger({
+                type: 'sponsor_escrow.debited',
+                sponsorId: nextRound.sponsorId,
+                roundId: nextRound.roundId,
+                updateId: accepted.updateId,
+                amountPaise: accepted.payoutPaise,
+                balancePaise: debited.escrowBalancePaise,
+                lockedPaise: debited.escrowLockedPaise,
+                at: new Date().toISOString()
+              });
+            } catch (escrowError) {
+              // Escrow under-funded for this debit — log + carry
+              // on. The worker still earns the mesh credit (the
+              // payment is owed); reconciliation is an ops issue.
+              logger.warn('sponsor_escrow_debit_failed', {
+                requestId,
+                sponsorId: nextRound.sponsorId,
+                roundId: nextRound.roundId,
+                reason: escrowError.message
+              });
+            }
+          }
+        }
+        await store.saveFederatedRound(debitedRound);
         await store.saveFederatedUpdate(accepted);
         let meshEvent = null;
         if (accepted.payoutPaise > 0) {
@@ -2914,13 +3283,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             operatorId: accepted.contributorId,
             workloadType: FEDERATED_ROUND_WORKLOAD,
             payoutPaise: accepted.payoutPaise,
-            roundId: nextRound.roundId
+            roundId: debitedRound.roundId
           });
           await store.saveMeshContributionEvent(meshEvent);
         }
         jsonResponse(response, 201, {
           ok: true,
-          round: nextRound,
+          round: debitedRound,
           update: accepted,
           meshContributionEvent: meshEvent
         });

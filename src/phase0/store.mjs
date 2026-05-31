@@ -60,6 +60,7 @@ export class BosStore {
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
     this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
     this.installedSlmsPath = path.join(rootPath, 'installed-slms');
+    this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.federatedRoundsPath = path.join(rootPath, 'federated-rounds');
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
@@ -94,6 +95,7 @@ export class BosStore {
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
+    await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.federatedRoundsPath, { recursive: true });
     await fs.mkdir(this.federatedUpdatesPath, { recursive: true });
     await fs.mkdir(this.attestationsPath, { recursive: true });
@@ -1180,6 +1182,41 @@ export class BosStore {
     } catch (_error) {
       return false;
     }
+  }
+
+  // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token
+  // for create/deposit/revoke); sponsor-owned (per-sponsor bearer
+  // token for round creation + export). NOT per-identity, so no
+  // DPDP §12(3) cascade entry needed for the sponsor record
+  // itself. Round updates submitted by workers ARE per-identity
+  // and cascade via the existing federated_updates sweep.
+  sponsorFile(sponsorId) {
+    return path.join(this.sponsorsPath, `${safeName(sponsorId)}.json`);
+  }
+
+  async saveSponsor(sponsor) {
+    if (!sponsor?.sponsorId) {
+      throw new Error('sponsor requires sponsorId.');
+    }
+    await this.init();
+    await writeJson(this.sponsorFile(sponsor.sponsorId), sponsor);
+    await this.appendLedger({
+      type: 'sponsor.saved',
+      sponsorId: sponsor.sponsorId,
+      displayName: sponsor.displayName,
+      status: sponsor.status,
+      escrowBalancePaise: sponsor.escrowBalancePaise,
+      at: new Date().toISOString()
+    });
+    return sponsor;
+  }
+
+  async readSponsor(sponsorId) {
+    return readJson(this.sponsorFile(sponsorId));
+  }
+
+  async listSponsors() {
+    return listJson(this.sponsorsPath);
   }
 
   async computeContribution(identityId) {

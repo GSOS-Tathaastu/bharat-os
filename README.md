@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 💰 2026-05-31 — Phase 9.1 shipped: first non-investor revenue line
+
+Sponsors (banks, hospitals, govt, LLM trainers) can now pay Bharat
+OS to run privacy-preserving federated training rounds on Indian
+workers' devices. Admin onboards a sponsor (one-time bearer token);
+sponsor tops up escrow; sponsor creates rounds with escrow locked
+up-front; per-accepted-update the sponsor's escrow debits and the
+worker's mesh ledger credits atomically; sponsor downloads a
+signed-JSONL audit bundle for compliance — gradient hashes only,
+identity hashes rotated per round so they can't cross-correlate.
+
+- **ADR 0120** wires sponsor module + bearer-token auth + escrow
+  lifecycle + audit export.
+- Sponsor / admin / public-directory views are bisected — sponsor
+  can't touch other sponsors, admin can't drain sponsor escrow.
+- seed-demo adds "Pragati Microfinance" + a sponsored
+  phi-3-mini-loan-screener round so `/app/labs/` shows the
+  "Sponsored by X · ₹Y remaining" governance-badge on fresh seed.
+- Tests: **821/821 Node** (+19 sponsor tests); **16/16 Vitest**.
+- Bundle: main 345 KB / 107 KB gzipped (+1 KB vs 9.0d).
+
+**Next**: Phase 10 labeling marketplace — the sponsor + escrow
+pattern from 9.1 reuses directly. See `ROADMAP.md`.
+
+---
+
 ## 🔄 2026-05-31 — Phase 9.0d shipped: §7f federated-economy loop is real end-to-end
 
 Phase 9.0 arc CLOSED. Worker can: install an SLM → run real

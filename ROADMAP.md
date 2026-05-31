@@ -80,6 +80,32 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 9.1 — Sponsored federated rounds ✅ SHIPPED 2026-05-31
+- **ADR 0120** opens the demand side.
+- `src/phase1/sponsor.mjs` — sponsor model, bearer-token hash,
+  escrow accounting helpers (deposit / lock / debit / refund /
+  revoke), public-directory vs self vs admin view bisection.
+- `src/phase0/sponsor-auth.mjs` — bearer-token middleware mirroring
+  Phase 5.7 admin-auth pattern; two-surface bisection (admin can't
+  spend escrow; sponsor can't touch non-own resources).
+- Both backends grow a `sponsors` table/directory with
+  `sponsor.saved` ledger event.
+- Federated round schema gains `sponsorId`, `escrowLockedPaise`,
+  `escrowDebitedPaise` (additive, backwards-compatible).
+- API: admin onboard / deposit / revoke + public directory view +
+  sponsor self / list / create-round / export.
+- Sponsored round-create locks escrow up-front; sign-and-submit
+  accept debits per-update; cross-sponsor reads refused; identity-
+  hash rotated per (round, contributor) so sponsor can't cross-
+  round correlate.
+- FE: `useSponsorDirectory` hook + `<FederatedRoundRow>` shows
+  "Sponsored by X · ₹Y remaining" governance-badge.
+- seed-demo: Pragati Microfinance + a sponsored phi-3-mini-loan-
+  screener round.
+- Tests: BE 802 → 821 (+19 sponsor tests); FE 16/16 unchanged.
+- **Bundle**: main 345 KB / 107 KB gzipped (+1 KB vs 9.0d).
+- **First non-investor revenue line is real.**
+
 ### Phase 9.0d — Federated rounds + mesh-inference events ✅ SHIPPED 2026-05-31
 - **ADR 0119** closes the Phase 9.0 arc.
 - `createFederatedRound` gains `slmModelPackId` / `targetTask` /
@@ -169,30 +195,29 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 9.1 — Sponsored federated rounds (demand-side revenue, NEXT)
+### Phase 10 — Labeling marketplace (NEXT)
 
-**Unblocked by Phase 9.0d.** Phase 9.0a–9.0d shipped the supply
-side: workers can install SLMs, run inference, join rounds,
-get paid. Phase 9.1 ships the demand side: sponsor onboarding,
-escrow, commercial round creation, signed audit bundle for the
-sponsor's compliance.
+**Unblocked by Phase 9.1.** ADR 0110 sketched the demand-side
+labeling marketplace; the sponsor module + auth middleware +
+escrow pattern from Phase 9.1 directly reuse here.
 
-**Plan**:
-- [ ] Sponsor model + admin onboarding (`POST /api/sponsors`,
-      Phase 5.7-gated)
-- [ ] Sponsor bearer-token auth (same shape as Phase 10.0 plan)
-- [ ] `POST /api/sponsors/:id/federated-rounds` — sponsor-funded
-      round creation with escrow lock
-- [ ] Escrow ledger table — sponsor funds locked until aggregation
-      completes; debited per accepted worker update; refunded for
-      unaccepted units
-- [ ] Sponsor export bundle for round audit (signed JSONL of
-      accepted updates with hashes only — pointer-not-payload)
-- [ ] /app/labs/ federated rounds card surfaces sponsor name +
-      escrow status per round
-- [ ] Per FE+BE parity: shipped in one commit
+**Sub-phase plan (per ADR 0110)**:
+- [ ] **10.0** — sponsor reuses 9.1; add labeling-job schema +
+  admin onboarding (~1 wk)
+- [ ] **10.1** — job spec API + corpus upload + escrow lock on
+  launch (~1 wk)
+- [ ] **10.2** — worker discovery + new shell **🏷 Label** tab
+  (~1.5 wks)
+- [ ] **10.3** — per-task-kind UIs (preference pair /
+  classification / span / transcription) (~2 wks)
+- [ ] **10.4** — QC pipeline (golden-set + inter-annotator α +
+  sponsor sample) (~2 wks)
+- [ ] **10.5** — signed JSONL export bundle (reuses 9.1 export
+  shape) (~1 wk)
+- [ ] **10.6** — SLM pre-labeling hint (Phase 9.0c runtime hook)
+  (~1 wk)
 
-**~2-3 weeks.**
+Total ~9-10 wks; 10.0–10.2 launchable independently of 9.0c.
 
 ---
 

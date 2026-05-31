@@ -488,6 +488,31 @@ export interface FederatedRound {
   slmModelPackId?: string | null;
   targetTask?: string | null;
   loraConfig?: unknown;
+  // Phase 9.1 additions:
+  sponsorId?: string | null;
+  escrowLockedPaise?: number;
+  escrowDebitedPaise?: number;
+}
+
+export interface SponsorDirectoryEntry {
+  sponsorId: string;
+  displayName: string;
+  status: 'active' | 'suspended' | 'revoked';
+}
+
+// Phase 9.1 — public sponsor directory lookup. Returns sponsor name
+// + status only (no escrow numbers). Used by the FE rounds card to
+// render "Sponsored by X" badges.
+export function useSponsorDirectory(sponsorId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['sponsor-directory', sponsorId],
+    queryFn: () =>
+      api<{ sponsor: SponsorDirectoryEntry }>(`/api/sponsors/${encodeURIComponent(sponsorId!)}`).then(
+        (r) => r.sponsor
+      ),
+    enabled: Boolean(sponsorId),
+    staleTime: 5 * 60 * 1000 // sponsor display names don't churn
+  });
 }
 
 export function useFederatedRounds() {

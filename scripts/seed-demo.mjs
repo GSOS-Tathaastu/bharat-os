@@ -38,6 +38,7 @@ import {
   submitGradientUpdate
 } from '../src/phase1/federated-round.mjs';
 import { signTrustAttestation } from '../src/phase1/trust-attestation.mjs';
+import { createSponsor, depositEscrow, lockEscrow } from '../src/phase1/sponsor.mjs';
 
 function log(line) {
   process.stdout.write(`${line}\n`);
@@ -549,6 +550,44 @@ const slmFederatedRound = openRound(
 );
 await store.saveFederatedRound(slmFederatedRound);
 log(`  SLM federated round: 1 (${slmFederatedRound.modelName} → ${slmFederatedRound.slmModelPackId})`);
+
+// Phase 9.1 — seed a sponsor + sponsor-funded round so the /app/labs/
+// federated card shows the "Sponsored by X · ₹Y remaining" badge on
+// fresh seed. Bearer token isn't persisted; it's only meaningful in
+// the response of the onboarding endpoint. For the demo we mint a
+// sponsor + immediately top up + lock for one round.
+const { sponsor: rawSponsor } = createSponsor({
+  displayName: 'Pragati Microfinance',
+  contactEmail: 'oncall@pragati.example',
+  onboardedBy: 'seed-demo'
+});
+const fundedSponsor = depositEscrow(rawSponsor, 250_000); // ₹2,500 escrow float
+
+const sponsoredRoundPayout = 500; // ₹5 per accepted update
+const sponsoredRoundParticipants = 20;
+const sponsoredEscrowLock = sponsoredRoundPayout * sponsoredRoundParticipants; // ₹100
+const lockedSponsor = lockEscrow(fundedSponsor, sponsoredEscrowLock);
+await store.saveSponsor(lockedSponsor);
+
+const sponsoredRound = openRound(
+  createFederatedRound({
+    createdBy: lockedSponsor.sponsorId,
+    modelName: 'phi-3-mini-loan-screener',
+    baselineModelHash: 'sha256:baseline-phi-3-mini-loan-screener',
+    maxParticipants: sponsoredRoundParticipants,
+    maxEpsilon: 0.8,
+    payoutPaisePerUpdate: sponsoredRoundPayout,
+    deadlineSecondsFromNow: 30 * 24 * 60 * 60,
+    aggregationMode: 'fedavg',
+    slmModelPackId: 'bos:slm:phi-3-mini-4k-q4_k_m',
+    targetTask: 'loan-screening-empathy',
+    loraConfig: { rank: 4, target: ['q_proj'] },
+    sponsorId: lockedSponsor.sponsorId,
+    escrowLockedPaise: sponsoredEscrowLock
+  })
+);
+await store.saveFederatedRound(sponsoredRound);
+log(`  sponsor: 1 (${lockedSponsor.displayName}) — sponsored round: 1`);
 
 // ─── Bootstrap simulation report ────────────────────────────────────────────
 const bootstrap = simulateDemandBootstrap({

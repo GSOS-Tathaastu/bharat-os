@@ -400,6 +400,11 @@ const SCHEMAS = `
     json TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_installed_slms_identity ON installed_slms(identity_id);
+
+  CREATE TABLE IF NOT EXISTS sponsors (
+    sponsor_id TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+  );
 `;
 
 function parse(row) {
@@ -1835,6 +1840,39 @@ export class SqliteStore {
       });
     }
     return deleted;
+  }
+
+  // Phase 9.1 — sponsor records. Admin-curated CRUD + sponsor-bearer-
+  // gated mutations on their own resource. Not per-identity → no DPDP
+  // §12(3) cascade entry; round-update rows already cascade.
+  async saveSponsor(sponsor) {
+    if (!sponsor?.sponsorId) {
+      throw new Error('sponsor requires sponsorId.');
+    }
+    await this.init();
+    this._upsert(
+      'sponsors',
+      ['sponsor_id', 'json'],
+      [sponsor.sponsorId, JSON.stringify(sponsor)]
+    );
+    await this.appendLedger({
+      type: 'sponsor.saved',
+      sponsorId: sponsor.sponsorId,
+      displayName: sponsor.displayName,
+      status: sponsor.status,
+      escrowBalancePaise: sponsor.escrowBalancePaise
+    });
+    return sponsor;
+  }
+
+  async readSponsor(sponsorId) {
+    await this.init();
+    return this._readOne('sponsors', 'sponsor_id', sponsorId);
+  }
+
+  async listSponsors() {
+    await this.init();
+    return this._listAll('sponsors');
   }
 
   // ─── Ledger ────────────────────────────────────────────────────────────

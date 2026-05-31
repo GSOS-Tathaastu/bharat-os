@@ -119,6 +119,15 @@ export function createFederatedRound({
   slmModelPackId = null,
   targetTask = null,
   loraConfig = null,
+  // Phase 9.1 — optional sponsor reference + per-round escrow lock.
+  // When `sponsorId` is set, the round is sponsor-funded; the
+  // route handler at /api/sponsors/:id/federated-rounds verifies
+  // the bearer token + locks the sponsor's escrow before calling
+  // this. `escrowLockedPaise` should equal
+  // `maxParticipants * payoutPaisePerUpdate` so the round can pay
+  // every accepted update without overrunning the lock.
+  sponsorId = null,
+  escrowLockedPaise = 0,
   at = nowIso()
 } = {}) {
   if (!createdBy) throw new Error('createdBy identity ID is required.');
@@ -155,6 +164,11 @@ export function createFederatedRound({
     slmModelPackId: slmModelPackId == null ? null : String(slmModelPackId).slice(0, 160),
     targetTask: targetTask == null ? null : String(targetTask).slice(0, 80),
     loraConfig: loraConfig == null ? null : loraConfig,
+    // Phase 9.1 — sponsor reference + locked escrow snapshot. Null
+    // sponsorId = unsponsored (legacy / demo) round.
+    sponsorId: sponsorId == null ? null : String(sponsorId).slice(0, 160),
+    escrowLockedPaise: Math.max(0, Math.floor(Number(escrowLockedPaise ?? 0))),
+    escrowDebitedPaise: 0,
     createdAt: at,
     deadlineAt,
     openedAt: null,
@@ -596,6 +610,11 @@ export function describeRound(round) {
     // rounds + filter to packs they have installed.
     slmModelPackId: round.slmModelPackId ?? null,
     targetTask: round.targetTask ?? null,
-    loraConfig: round.loraConfig ?? null
+    loraConfig: round.loraConfig ?? null,
+    // Phase 9.1 — sponsor reference + escrow snapshot. The FE renders
+    // a "Sponsored by X · ₹Y remaining" badge for these rounds.
+    sponsorId: round.sponsorId ?? null,
+    escrowLockedPaise: round.escrowLockedPaise ?? 0,
+    escrowDebitedPaise: round.escrowDebitedPaise ?? 0
   };
 }
