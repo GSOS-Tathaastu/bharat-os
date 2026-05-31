@@ -1,4 +1,4 @@
-// Phase 11.9 — earn-role catalog invariants.
+// Phase 11.9 / 12.0 — earn-role catalog invariants.
 
 import { describe, expect, test } from 'vitest';
 import { EARN_ROLES, isComingSoonRole } from './earn-roles';
@@ -31,9 +31,13 @@ describe('EARN_ROLES catalog', () => {
     }
   });
 
-  test('catalog includes both live (label-data) and coming-soon (drive-cab) roles', () => {
+  test('catalog includes both a micro-task live role (label-data) and a provider live role (drive-cab)', () => {
     expect(EARN_ROLES.some((r) => r.id === 'label-data' && !isComingSoonRole(r))).toBe(true);
-    expect(EARN_ROLES.some((r) => r.id === 'drive-cab' && isComingSoonRole(r))).toBe(true);
+    expect(
+      EARN_ROLES.some(
+        (r) => r.id === 'drive-cab' && !isComingSoonRole(r) && r.providerRoleKind === 'cab-driver'
+      )
+    ).toBe(true);
   });
 
   test('coming-soon roles all target Phase 12.x', () => {
@@ -42,11 +46,34 @@ describe('EARN_ROLES catalog', () => {
     }
   });
 
-  test('catalog contains all five provider roles called out in the direction memo', () => {
-    const required = ['drive-cab', 'cook', 'kirana', 'home-help', 'skilled-trades'];
-    const present = new Set(EARN_ROLES.map((r) => r.id));
-    for (const id of required) {
-      expect(present.has(id), `provider role ${id} missing`).toBe(true);
+  test('Phase 12.0 wave-1 provider roles are LIVE — direction memo requires cab-driver, personal-driver, labourers, household-help', () => {
+    const wave1 = ['cab-driver', 'personal-driver', 'labourers', 'household-help'];
+    for (const kind of wave1) {
+      const role = EARN_ROLES.find((r) => r.providerRoleKind === kind);
+      expect(role, `wave-1 role ${kind} missing`).toBeTruthy();
+      expect(
+        isComingSoonRole(role!),
+        `wave-1 role ${kind} should be LIVE after Phase 12.0`
+      ).toBe(false);
+      expect(role!.targetPath).toMatch(/\/earn\/provider-onboarding\?role=/);
+    }
+  });
+
+  test('Phase 12.3 wave-2 roles (kirana, skilled-trades) remain coming-soon', () => {
+    for (const id of ['kirana', 'skilled-trades']) {
+      const role = EARN_ROLES.find((r) => r.id === id);
+      expect(role).toBeTruthy();
+      expect(isComingSoonRole(role!)).toBe(true);
+      expect(role!.comingSoonPhase).toBe('12.3');
+    }
+  });
+
+  test('every LIVE provider role embeds its providerRoleKind for the onboarding flow', () => {
+    for (const role of EARN_ROLES) {
+      if (role.targetPath?.includes('/earn/provider-onboarding')) {
+        expect(role.providerRoleKind, `${role.id} provider link needs providerRoleKind`).toBeTruthy();
+        expect(role.targetPath).toContain(`role=${role.providerRoleKind}`);
+      }
     }
   });
 });

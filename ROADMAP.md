@@ -398,15 +398,26 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
-#### Phase 12.0 — providerIdentity substrate (~1.5 wks)
-- [ ] `providerIdentity` schema on both stores; separate from
-  `workerIdentity`.
-- [ ] Linkage to root recovery (Phase 1.19) — same human holds
-  both under one root.
-- [ ] KYC-heavy onboarding entry (Aadhaar e-KYC + role
-  attestation + photo + location).
-- [ ] Earner home presents two ledger cards (micro-task +
-  marketplace).
+#### Phase 12.0 — providerIdentity substrate ✅ SHIPPED 2026-05-31
+- **ADR 0129** — separate identity from workerIdentity; KYC-heavy;
+  bound to a root via `rootIdentityId`; DPDP §12(3) cascade on
+  both stores.
+- New `src/phase1/provider-identity.mjs` pure module — role kinds,
+  KYC levels, state machine, public-record stripping.
+- Both stores grow `provider_identities` table/path with index by
+  `root_identity_id` + DPDP cascade.
+- Six HTTP endpoints (create / list / public-read / profile-edit /
+  admin kyc-attest / admin transition).
+- FE: 3 new hooks + `<ProviderOnboarding>` route + EARN_ROLES
+  wave-1 (cab-driver / personal-driver / labourers /
+  household-help) flipped from coming-soon to LIVE.
+- WorkerHome rewritten with two-ledger cards (micro-task earnings
+  live + marketplace earnings ₹0 pending 12.1a).
+- Tests: Node 865 → 884 (+19); Vitest 41 → 45 (+4 — 2 hook
+  contracts + 2 catalog invariants).
+- **Bundle**: main 384 → 392 KB / 119 KB gzipped (+8 KB).
+- E2E verified: create draft → public read strips sensitive
+  fields → admin endpoints gate correctly.
 
 #### Phase 12.1a — Marketplace substrate + baseline UX (~2 wks)
 - [ ] Real geo (provider lat/lng + service radius + city/area

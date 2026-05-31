@@ -61,6 +61,7 @@ export class BosStore {
     this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
     this.installedSlmsPath = path.join(rootPath, 'installed-slms');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
+    this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
     this.labelingJobItemsPath = path.join(rootPath, 'labeling-job-items');
     this.labelingSubmissionsPath = path.join(rootPath, 'labeling-submissions');
@@ -99,6 +100,7 @@ export class BosStore {
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
+    await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.labelingJobsPath, { recursive: true });
     await fs.mkdir(this.labelingJobItemsPath, { recursive: true });
     await fs.mkdir(this.labelingSubmissionsPath, { recursive: true });
@@ -425,6 +427,21 @@ export class BosStore {
       }
     }
     sections.labelingSubmissions = labelingRemoved;
+    // Phase 12.0 — provider identities cascade by rootIdentityId.
+    // A providerIdentity is bound to a root citizen/worker identity;
+    // when that root erases, all bound provider profiles go too.
+    // §15: no orphaned providers in the marketplace.
+    const providerIdentities = await this.listProviderIdentities({ rootIdentityId: identityId }).catch(() => []);
+    let providerRemoved = 0;
+    for (const p of providerIdentities) {
+      try {
+        await fs.unlink(this.providerIdentityFile(p.providerIdentityId));
+        providerRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.providerIdentities = providerRemoved;
     await sweep(
       'workerNotifications',
       () => this.listWorkerNotifications(),
@@ -1267,6 +1284,48 @@ export class BosStore {
       at: new Date().toISOString()
     });
     return signer;
+  }
+
+  // Phase 12.0 — provider identity table. One row per
+  // marketplace-listed provider. Bound to a root citizen/worker
+  // identity via rootIdentityId; DPDP §12(3) cascade by that field.
+  providerIdentityFile(providerIdentityId) {
+    return path.join(this.providerIdentitiesPath, `${safeName(providerIdentityId)}.json`);
+  }
+
+  async saveProviderIdentity(provider) {
+    if (!provider?.providerIdentityId) {
+      throw new Error('provider identity requires providerIdentityId.');
+    }
+    if (!provider.rootIdentityId) {
+      throw new Error('provider identity requires rootIdentityId.');
+    }
+    await this.init();
+    await writeJson(this.providerIdentityFile(provider.providerIdentityId), provider);
+    await this.appendLedger({
+      type: 'provider_identity.saved',
+      providerIdentityId: provider.providerIdentityId,
+      rootIdentityId: provider.rootIdentityId,
+      roleKind: provider.roleKind,
+      status: provider.status,
+      kycLevel: provider.kycLevel,
+      at: new Date().toISOString()
+    });
+    return provider;
+  }
+
+  async readProviderIdentity(providerIdentityId) {
+    return readJson(this.providerIdentityFile(providerIdentityId));
+  }
+
+  async listProviderIdentities({ rootIdentityId, roleKind, status } = {}) {
+    const all = await listJson(this.providerIdentitiesPath);
+    return all.filter((p) => {
+      if (rootIdentityId && p.rootIdentityId !== rootIdentityId) return false;
+      if (roleKind && p.roleKind !== roleKind) return false;
+      if (status && p.status !== status) return false;
+      return true;
+    });
   }
 
   // Phase 10.1 — labeling marketplace tables. Three resources:

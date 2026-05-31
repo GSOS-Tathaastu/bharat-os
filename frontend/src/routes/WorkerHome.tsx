@@ -1,8 +1,28 @@
 import { Tabs, Card, Stat, Money, Action, Badge, Evidence } from '@/components/ui';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useActiveIdentity, useMeshBalance, useMeshSummary, useMeshWithdrawals, useTrustPassport } from '@/lib/hooks';
+import { Routes, Route, Navigate, Link } from 'react-router-dom';
+import {
+  useActiveIdentity,
+  useMeshBalance,
+  useMeshSummary,
+  useMeshWithdrawals,
+  useProviderIdentities,
+  useTrustPassport
+} from '@/lib/hooks';
 import { WorkerEarn } from './WorkerEarn';
 import { WorkerTrust } from './WorkerTrust';
+
+// Phase 12.0 — provider role labels used in the marketplace card.
+// Kept here (not imported from earn-roles) because the role IDs
+// on a providerIdentity map 1-to-1 to the providerRoleKind values,
+// and we want a stable label even if the catalog tile copy changes.
+const PROVIDER_ROLE_SHORT_LABEL: Record<string, string> = {
+  'cab-driver': 'Cab / auto driver',
+  'personal-driver': 'Personal driver',
+  labourers: 'Daily-wage labour',
+  'household-help': 'Maid / cook',
+  kirana: 'Kirana / shop',
+  'skilled-trades': 'Skilled trade'
+};
 
 const TABS = [
   { to: '/worker/earn', label: 'Earn', icon: '💼' },
@@ -18,9 +38,11 @@ function WorkerOverview() {
   const { data: summary } = useMeshSummary(identity?.id);
   const { data: withdrawals = [] } = useMeshWithdrawals(identity?.id);
   const { data: passport } = useTrustPassport(identity?.id);
+  const { data: providerIdentities = [] } = useProviderIdentities(identity?.id);
 
   const recentWithdrawal = withdrawals[0];
   const monthTotal = summary?.totalPaise ?? 0;
+  const hasProviderProfiles = providerIdentities.length > 0;
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
@@ -33,14 +55,66 @@ function WorkerOverview() {
         </h1>
       </section>
 
-      <Card
-        tone="trust"
-        title="Earned this month"
-        actions={<Badge variant="trust">UPI</Badge>}
-      >
+      {/* Phase 12.0: two-ledger framing. Same balance underneath; the
+          cards split the framing so it's honest that one motion is
+          micro-tasks (live since Phase 10.x) and the other is the
+          marketplace (substrate live since 12.0; bookings start
+          flowing in Phase 12.1a). */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card
+          tone="trust"
+          title="Micro-task earnings"
+          actions={<Badge variant="trust">Live</Badge>}
+        >
+          <Money paise={monthTotal} size="xl" />
+          <p className="mt-2 text-caption text-text-muted">
+            Labeling, federated rounds, mesh inference, storage. Already
+            paying out to your UPI.
+          </p>
+          <div className="mt-4 flex gap-2">
+            <Link to="/labels">
+              <Action variant="trust" size="sm">Find labels</Action>
+            </Link>
+            <Link to="/labs">
+              <Action variant="secondary" size="sm">Federated + inference</Action>
+            </Link>
+          </div>
+        </Card>
+
+        <Card
+          tone={hasProviderProfiles ? 'governance' : 'default'}
+          title="Marketplace earnings"
+          actions={
+            <Badge variant={hasProviderProfiles ? 'pending' : 'neutral'}>
+              {hasProviderProfiles ? 'Drafts' : 'Not yet set up'}
+            </Badge>
+          }
+        >
+          <Money paise={0} size="xl" />
+          <p className="mt-2 text-caption text-text-muted">
+            Citizens book you direct for cab, driver, labour, household work.
+            Bookings flow in Phase 12.1a. No commission, ever.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {hasProviderProfiles ? (
+              providerIdentities.map((p) => (
+                <Badge key={p.providerIdentityId} variant="pending">
+                  {PROVIDER_ROLE_SHORT_LABEL[p.roleKind] ?? p.roleKind} · {p.status}
+                </Badge>
+              ))
+            ) : (
+              <Link to="/">
+                <Action variant="default" size="sm">Set up provider profile</Action>
+              </Link>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <Card tone="trust" title="Total earned this month" actions={<Badge variant="trust">UPI</Badge>}>
         <Money paise={monthTotal} size="xl" />
         <p className="mt-2 text-caption text-text-muted">
-          {summary?.workingDays ?? 0} working days · {summary?.eventCount ?? 0} mesh events
+          {summary?.workingDays ?? 0} working days · {summary?.eventCount ?? 0} mesh events. Across both micro-task and marketplace.
         </p>
         <div className="mt-4 flex gap-2">
           <Action variant="trust" size="md">View earnings</Action>
@@ -50,6 +124,8 @@ function WorkerOverview() {
           When your phone is plugged in and on WiFi, Bharat OS uses spare compute
           + storage for inference, storage-serve, storage-store, and federated
           training rounds (§7f). Each tick pays out in paise. Settles to your UPI.
+          Marketplace bookings (Phase 12.1a+) join the same ledger so cash-out
+          drains everything in one go.
         </Evidence>
       </Card>
 

@@ -434,6 +434,17 @@ const SCHEMAS = `
     singleton TEXT PRIMARY KEY,
     json TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS provider_identities (
+    provider_identity_id TEXT PRIMARY KEY,
+    root_identity_id TEXT NOT NULL,
+    role_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_provider_id_root ON provider_identities(root_identity_id);
+  CREATE INDEX IF NOT EXISTS idx_provider_id_role ON provider_identities(role_kind);
+  CREATE INDEX IF NOT EXISTS idx_provider_id_status ON provider_identities(status);
 `;
 
 function parse(row) {
@@ -2013,6 +2024,65 @@ export class SqliteStore {
     return rows.map((r) => JSON.parse(r.json));
   }
 
+  // ─── Phase 12.0 Provider identities ──────────────────────────────────
+
+  async saveProviderIdentity(provider) {
+    if (!provider?.providerIdentityId) {
+      throw new Error('provider identity requires providerIdentityId.');
+    }
+    if (!provider.rootIdentityId) {
+      throw new Error('provider identity requires rootIdentityId.');
+    }
+    await this.init();
+    this._upsert(
+      'provider_identities',
+      ['provider_identity_id', 'root_identity_id', 'role_kind', 'status', 'json'],
+      [
+        provider.providerIdentityId,
+        provider.rootIdentityId,
+        provider.roleKind,
+        provider.status,
+        JSON.stringify(provider)
+      ]
+    );
+    await this.appendLedger({
+      type: 'provider_identity.saved',
+      providerIdentityId: provider.providerIdentityId,
+      rootIdentityId: provider.rootIdentityId,
+      roleKind: provider.roleKind,
+      status: provider.status,
+      kycLevel: provider.kycLevel
+    });
+    return provider;
+  }
+
+  async readProviderIdentity(providerIdentityId) {
+    await this.init();
+    return this._readOne('provider_identities', 'provider_identity_id', providerIdentityId);
+  }
+
+  async listProviderIdentities({ rootIdentityId, roleKind, status } = {}) {
+    await this.init();
+    let sql = 'SELECT json FROM provider_identities';
+    const where = [];
+    const params = [];
+    if (rootIdentityId) {
+      where.push('root_identity_id = ?');
+      params.push(rootIdentityId);
+    }
+    if (roleKind) {
+      where.push('role_kind = ?');
+      params.push(roleKind);
+    }
+    if (status) {
+      where.push('status = ?');
+      params.push(status);
+    }
+    if (where.length) sql += ' WHERE ' + where.join(' AND ');
+    const rows = this.db.prepare(sql).all(...params);
+    return rows.map((r) => JSON.parse(r.json));
+  }
+
   // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────
 
   async readAuditSigner() {
@@ -2188,6 +2258,11 @@ export class SqliteStore {
       // Phase 10.1 — labeling submissions cascade by worker_id.
       // Jobs + items are sponsor-owned and stay.
       sections.labelingSubmissions = sweep('labeling_submissions', ['worker_id']);
+      // Phase 12.0 — provider identities cascade by root_identity_id.
+      // A providerIdentity is bound to a root citizen/worker identity;
+      // when that root erases, all bound provider profiles go too.
+      // §15: no orphaned providers in the marketplace.
+      sections.providerIdentities = sweep('provider_identities', ['root_identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

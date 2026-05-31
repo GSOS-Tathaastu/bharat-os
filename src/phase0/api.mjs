@@ -257,6 +257,16 @@ import {
   bundleNdjson,
   LABELING_EXPORT_PROTOCOL_VERSION
 } from '../phase1/labeling-export.mjs';
+import {
+  createProviderIdentity,
+  attestProviderKyc,
+  transitionProviderStatus,
+  updateProviderProfile,
+  publicProviderRecord,
+  PROVIDER_ROLE_KINDS,
+  PROVIDER_KYC_LEVELS,
+  PROVIDER_IDENTITY_STATUSES
+} from '../phase1/provider-identity.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1487,6 +1497,200 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 12.0 — providerIdentity routes.
+      //
+      // Auth model:
+      //   POST /api/identities/:rootId/provider-identities — caller
+      //     identifies themselves as the root via a body field; in
+      //     v1 we trust the route (FE owns the rootId from
+      //     localStorage). Phase 13+ Bharat ID will harden this
+      //     with signed requests.
+      //   GET  /api/identities/:rootId/provider-identities — same
+      //     trust model; lists provider identities bound to that root.
+      //   GET  /api/provider-identities/:id — PUBLIC. Returns the
+      //     stripped public record (no rootIdentityId, no KYC
+      //     envelope, no transition history).
+      //   POST /api/provider-identities/:id/profile — body must
+      //     carry rootIdentityId; substrate refuses if it doesn't
+      //     match the stored provider's rootIdentityId.
+      //   POST /api/admin/provider-identities/:id/kyc-attest —
+      //     admin-token-gated. Operator attests KYC level.
+      //   POST /api/admin/provider-identities/:id/transition —
+      //     admin-token-gated. Operator transitions status.
+      const provIdRootListMatch = /^\/api\/identities\/([^/]+)\/provider-identities$/.exec(url.pathname);
+      if (provIdRootListMatch) {
+        const rootIdentityId = decodeURIComponent(provIdRootListMatch[1]);
+        if (request.method === 'GET') {
+          const all = await store.listProviderIdentities({ rootIdentityId });
+          jsonResponse(response, 200, { providerIdentities: all });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readRequestJson(request);
+          // Ensure the root identity exists — better error than
+          // letting a draft float in the table without a real root.
+          const root = await store.readIdentity(rootIdentityId).catch(() => null);
+          if (!root) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_root_identity', message: 'root identity not found.' }
+            });
+            return;
+          }
+          let provider;
+          try {
+            provider = createProviderIdentity({
+              rootIdentityId,
+              roleKind: body.roleKind,
+              displayName: body.displayName,
+              serviceArea: body.serviceArea,
+              ratePaisePerHour: body.ratePaisePerHour,
+              ratePaisePerService: body.ratePaisePerService,
+              description: body.description
+            });
+          } catch (err) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_provider_identity', message: err.message }
+            });
+            return;
+          }
+          await store.saveProviderIdentity(provider);
+          jsonResponse(response, 201, { providerIdentity: provider });
+          return;
+        }
+        return methodNotAllowed(response, ['GET', 'POST']);
+      }
+
+      const provIdPublicReadMatch = /^\/api\/provider-identities\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && provIdPublicReadMatch) {
+        const providerIdentityId = decodeURIComponent(provIdPublicReadMatch[1]);
+        const p = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!p) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { providerIdentity: publicProviderRecord(p) });
+        return;
+      }
+
+      const provIdProfileMatch = /^\/api\/provider-identities\/([^/]+)\/profile$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdProfileMatch) {
+        const providerIdentityId = decodeURIComponent(provIdProfileMatch[1]);
+        const body = await readRequestJson(request);
+        const existing = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        if (!body.rootIdentityId || body.rootIdentityId !== existing.rootIdentityId) {
+          jsonResponse(response, 403, {
+            error: { code: 'not_owner', message: 'rootIdentityId mismatch — not your provider identity.' }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = updateProviderProfile(existing, {
+            displayName: body.displayName,
+            serviceArea: body.serviceArea,
+            ratePaisePerHour: body.ratePaisePerHour,
+            ratePaisePerService: body.ratePaisePerService,
+            description: body.description
+          });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_profile_update', message: err.message }
+          });
+          return;
+        }
+        await store.saveProviderIdentity(next);
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      const provIdKycMatch = /^\/api\/admin\/provider-identities\/([^/]+)\/kyc-attest$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdKycMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const operator = auth.operator;
+        const providerIdentityId = decodeURIComponent(provIdKycMatch[1]);
+        const body = await readRequestJson(request);
+        const existing = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = attestProviderKyc(existing, {
+            kycLevel: body.kycLevel,
+            operatorId: operator,
+            evidenceRefs: body.evidenceRefs,
+            notes: body.notes
+          });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_kyc_attest', message: err.message }
+          });
+          return;
+        }
+        await store.saveProviderIdentity(next);
+        await store.appendLedger({
+          type: 'provider_identity.kyc_attested',
+          providerIdentityId,
+          rootIdentityId: existing.rootIdentityId,
+          kycLevel: next.kycLevel,
+          operatorId: operator
+        });
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      const provIdTransitionMatch = /^\/api\/admin\/provider-identities\/([^/]+)\/transition$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdTransitionMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const operator = auth.operator;
+        const providerIdentityId = decodeURIComponent(provIdTransitionMatch[1]);
+        const body = await readRequestJson(request);
+        const existing = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = transitionProviderStatus(existing, body.nextStatus, {
+            operatorId: operator,
+            reason: body.reason
+          });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_transition', message: err.message }
+          });
+          return;
+        }
+        await store.saveProviderIdentity(next);
+        await store.appendLedger({
+          type: 'provider_identity.transitioned',
+          providerIdentityId,
+          rootIdentityId: existing.rootIdentityId,
+          from: existing.status,
+          to: next.status,
+          operatorId: operator,
+          reason: body.reason ?? null
+        });
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
       // Phase 10.1 — labeling-job lifecycle endpoints. Sponsor-bearer
       // gated for create/upload/launch; public for worker-side
       // discovery; worker-anchored for submissions.
@@ -2382,6 +2586,12 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/labeling-jobs  (public worker discovery)',
             'GET /api/labeling-jobs/:jobId/next-item?workerId=…  (next-item dispatch)',
             'POST /api/labeling-jobs/:jobId/submissions  (worker label submission)',
+            'GET /api/identities/:rootIdentityId/provider-identities  (Phase 12.0 — owned)',
+            'POST /api/identities/:rootIdentityId/provider-identities  (Phase 12.0 — create draft)',
+            'GET /api/provider-identities/:providerIdentityId  (public, marketplace)',
+            'POST /api/provider-identities/:providerIdentityId/profile  (root owner — edit)',
+            'POST /api/admin/provider-identities/:providerIdentityId/kyc-attest  (operator)',
+            'POST /api/admin/provider-identities/:providerIdentityId/transition  (operator status change)',
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',

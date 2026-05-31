@@ -792,6 +792,116 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0 provider identities ----------------------------------
+export type ProviderRoleKind =
+  | 'cab-driver'
+  | 'personal-driver'
+  | 'labourers'
+  | 'household-help'
+  | 'kirana'
+  | 'skilled-trades';
+
+export type ProviderIdentityStatus = 'draft' | 'submitted' | 'active' | 'suspended' | 'revoked';
+export type ProviderKycLevel = 'none' | 'basic' | 'verified';
+
+export interface ProviderIdentity {
+  providerIdentityId: string;
+  protocolVersion: string;
+  objectType: string;
+  rootIdentityId?: string; // omitted on public record
+  roleKind: ProviderRoleKind;
+  roleWave: 1 | 2;
+  displayName: string;
+  serviceArea?: Record<string, unknown> | null;
+  ratePaisePerHour: number;
+  ratePaisePerService: number;
+  description?: string | null;
+  kycLevel: ProviderKycLevel;
+  status: ProviderIdentityStatus;
+  createdAt: string;
+  submittedAt?: string | null;
+  activatedAt?: string | null;
+}
+
+export function useProviderIdentities(rootIdentityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['provider-identities', rootIdentityId],
+    queryFn: () =>
+      api<{ providerIdentities: ProviderIdentity[] }>(
+        `/api/identities/${encodeURIComponent(rootIdentityId!)}/provider-identities`
+      ).then((r) => r.providerIdentities),
+    enabled: Boolean(rootIdentityId)
+  });
+}
+
+export interface CreateProviderIdentityInput {
+  rootIdentityId: string;
+  roleKind: ProviderRoleKind;
+  displayName: string;
+  ratePaisePerHour?: number;
+  ratePaisePerService?: number;
+  serviceArea?: Record<string, unknown> | null;
+  description?: string | null;
+}
+
+export function useCreateProviderIdentity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateProviderIdentityInput) =>
+      api<{ providerIdentity: ProviderIdentity }>(
+        `/api/identities/${encodeURIComponent(input.rootIdentityId)}/provider-identities`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            roleKind: input.roleKind,
+            displayName: input.displayName,
+            ratePaisePerHour: input.ratePaisePerHour,
+            ratePaisePerService: input.ratePaisePerService,
+            serviceArea: input.serviceArea,
+            description: input.description
+          })
+        }
+      ),
+    onSuccess: (_data, { rootIdentityId }) => {
+      qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
+    }
+  });
+}
+
+export interface UpdateProviderProfileInput {
+  rootIdentityId: string;
+  providerIdentityId: string;
+  displayName?: string;
+  ratePaisePerHour?: number;
+  ratePaisePerService?: number;
+  serviceArea?: Record<string, unknown> | null;
+  description?: string | null;
+}
+
+export function useUpdateProviderProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateProviderProfileInput) =>
+      api<{ providerIdentity: ProviderIdentity }>(
+        `/api/provider-identities/${encodeURIComponent(input.providerIdentityId)}/profile`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            rootIdentityId: input.rootIdentityId,
+            displayName: input.displayName,
+            ratePaisePerHour: input.ratePaisePerHour,
+            ratePaisePerService: input.ratePaisePerService,
+            serviceArea: input.serviceArea,
+            description: input.description
+          })
+        }
+      ),
+    onSuccess: (_data, { rootIdentityId }) => {
+      qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
+    }
+  });
+}
+
 // Phase 10.5 — Audit signer public record (Ed25519 public key + id).
 // Used on the citizen Settings transparency strip so anyone can
 // inspect the key used to sign labeling-job audit bundles. Public

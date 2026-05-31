@@ -106,8 +106,9 @@ export function OnboardingPage() {
         title="How do you want to earn?"
       >
         <p className="text-body text-text-muted">
-          Pick a way to earn. Some flows are live today; provider roles
-          (driver, cook, kirana, maid, skilled trades) arrive in Phase 12.
+          Pick a way to earn. Four provider roles (cab driver, personal driver,
+          daily-wage labour, household help) are live as of Phase 12.0.
+          Kirana shops and skilled trades land in Phase 12.3.
         </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {EARN_ROLES.map((role) => (
@@ -138,7 +139,7 @@ export function OnboardingPage() {
                   {role.label}
                   {isComingSoonRole(role) && (
                     <span className="ml-2 rounded-sm bg-orange-50 px-1.5 py-0.5 font-mono text-xs text-orange-700">
-                      Phase 12
+                      Phase {role.comingSoonPhase ?? '12'}
                     </span>
                   )}
                 </p>
@@ -209,7 +210,7 @@ export function OnboardingPage() {
           <Card tone="warning">
             <p className="text-body">
               <span className="font-semibold">{chosenRole.label}</span> onboarding
-              ships in <span className="font-mono">Phase 12.0</span> —
+              ships in <span className="font-mono">Phase {chosenRole.comingSoonPhase ?? '12'}</span> —
               providerIdentity substrate with verified KYC + role attestation +
               Trust Passport.
             </p>

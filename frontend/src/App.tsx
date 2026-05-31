@@ -8,6 +8,7 @@ import { CitizenHome } from '@/routes/CitizenHome';
 import { VerifyPage } from '@/routes/Verify';
 import { LabsPage } from '@/routes/Labs';
 import { LabelsPage } from '@/routes/Labels';
+import { ProviderOnboardingPage } from '@/routes/ProviderOnboarding';
 import { SettingsPage } from '@/routes/Settings';
 import { TopBar } from '@/components/TopBar';
 
@@ -60,6 +61,14 @@ export default function App() {
           element={
             <ProtectedSurface>
               <LabelsPage />
+            </ProtectedSurface>
+          }
+        />
+        <Route
+          path="/earn/provider-onboarding"
+          element={
+            <ProtectedSurface>
+              <ProviderOnboardingPage />
             </ProtectedSurface>
           }
         />

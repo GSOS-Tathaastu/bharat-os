@@ -152,6 +152,35 @@ Implemented pieces:
 
 ---
 
+## 🪪 2026-05-31 — Phase 12.0 shipped: providerIdentity substrate — wave-1 provider tiles go LIVE
+
+Phase 11.9 surfaced the provider tiles as "Coming Phase 12.0"
+placeholders; Phase 12.0 ships the substrate that flips four of
+them to live: **cab driver, personal driver, daily-wage labour,
+household help**. Each can now create a draft profile on /app/.
+Per-role wizard (Aadhaar e-KYC + SLM dynamic form) is Phase 12.2;
+Phase 12.0 lays the foundation.
+
+- **ADR 0129** — separate `providerIdentity` from `workerIdentity`
+  (different KYC weight, different liability shape); bound to a
+  root identity; DPDP §12(3) cascade on both stores.
+- New `src/phase1/provider-identity.mjs` pure module — role
+  kinds, KYC levels, state machine, public-record stripping.
+- Six HTTP endpoints (create / list / public-read / profile-edit
+  / admin kyc-attest / admin transition).
+- FE: `<ProviderOnboarding>` route + three hooks. WorkerHome
+  rewritten with two-ledger cards (micro-task live, marketplace
+  pending 12.1a).
+- **No commission, ever** — substrate has NO field for a platform
+  commission rate, copy in onboarding makes the §15 promise loud.
+- Tests: Node 865 → 884 (+19). FE Vitest 41 → 45 (+4).
+- Bundle: main 392 KB / 119 KB gzipped (+8 KB vs 11.9).
+
+**Next: Phase 12.1a** — marketplace substrate + real geo +
+parallel citizen-booking escrow + ONDC sandbox bridge.
+
+---
+
 ## 💼 2026-05-31 — Phase 11.9 shipped: hero rebrand Earn / Use + role chooser
 
 The Phase 11 "I work" / "I live" hero was too narrow for the
