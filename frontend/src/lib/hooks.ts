@@ -643,6 +643,36 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// Phase 10.5 — Audit signer public record (Ed25519 public key + id).
+// Used on the citizen Settings transparency strip so anyone can
+// inspect the key used to sign labeling-job audit bundles. Public
+// endpoint; no auth required.
+export interface AuditSignerPublicRecord {
+  protocolVersion: string;
+  id: string;
+  displayName: string;
+  publicKeyPem: string;
+  createdAt: string;
+}
+
+export function useAuditSignerPublicKey() {
+  return useQuery({
+    queryKey: ['audit-signer-public-key'],
+    queryFn: () => api<AuditSignerPublicRecord>('/api/audit-signer/public-key'),
+    staleTime: 24 * 60 * 60 * 1000
+  });
+}
+
+// Phase 10.5 — pure URL builder for the sponsor-side signed export
+// endpoint. The FE doesn't fetch this directly (sponsors download it
+// from their own tooling using their bearer token); we expose it so
+// the sponsor console can construct the link, and so the citizen-
+// side Settings panel can quote the exact endpoint shape under the
+// transparency strip.
+export function labelingExportNdjsonUrl(sponsorId: string, jobId: string): string {
+  return `/api/sponsors/${encodeURIComponent(sponsorId)}/labeling-jobs/${encodeURIComponent(jobId)}/export.ndjson`;
+}
+
 export function useFederatedRounds() {
   return useQuery({
     queryKey: ['federated-rounds'],

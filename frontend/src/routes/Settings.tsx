@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { Action, Card, Field, Sheet, useToast } from '@/components/ui';
 import { useIdentityStore } from '@/lib/identity-store';
 import { useNavigate } from 'react-router-dom';
-import { useActiveIdentity, useDownloadMyData, useEraseIdentity } from '@/lib/hooks';
+import {
+  useActiveIdentity,
+  useAuditSignerPublicKey,
+  useDownloadMyData,
+  useEraseIdentity
+} from '@/lib/hooks';
 
 export function SettingsPage() {
   const clear = useIdentityStore((s) => s.clear);
@@ -10,6 +15,7 @@ export function SettingsPage() {
   const identity = useActiveIdentity();
   const downloadMyData = useDownloadMyData();
   const eraseIdentity = useEraseIdentity();
+  const auditSigner = useAuditSignerPublicKey();
   const show = useToast((s) => s.show);
 
   const [eraseOpen, setEraseOpen] = useState(false);
@@ -84,6 +90,36 @@ export function SettingsPage() {
           Push for recovery alerts, cash-out updates, and job alerts. Available
           via /shell/ today; moving to /app/ post-MVP.
         </p>
+      </Card>
+
+      <Card title="Audit signer (Phase 10.5)" tone="trust">
+        <p className="text-body text-text-muted mb-3">
+          Every labeling job ships sponsors a signed audit bundle. The same
+          Ed25519 key signs every bundle so sponsors can verify they got the
+          real one. Anyone can fetch the public key here.
+        </p>
+        {auditSigner.isPending ? (
+          <p className="text-caption text-text-muted">Loading…</p>
+        ) : auditSigner.error ? (
+          <p className="text-caption text-error">Could not load audit signer.</p>
+        ) : auditSigner.data ? (
+          <div className="space-y-1 text-caption text-text-muted">
+            <p>
+              <span className="font-mono text-text">id</span>:{' '}
+              <span className="font-mono break-all">{auditSigner.data.id}</span>
+            </p>
+            <p>
+              <span className="font-mono text-text">created</span>:{' '}
+              <span className="font-mono">{auditSigner.data.createdAt}</span>
+            </p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-text">Public key (Ed25519, PEM)</summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-surface-2 p-2 text-xs">
+                {auditSigner.data.publicKeyPem}
+              </pre>
+            </details>
+          </div>
+        ) : null}
       </Card>
 
       <Card title="Developer">

@@ -252,6 +252,11 @@ import {
   LABELING_MODALITIES,
   QC_REJECTED_STATUSES
 } from '../phase1/labeling-job.mjs';
+import {
+  buildLabelingExportLines,
+  bundleNdjson,
+  LABELING_EXPORT_PROTOCOL_VERSION
+} from '../phase1/labeling-export.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1410,6 +1415,78 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 10.5 — Audit signer public key endpoint. Anyone can
+      // fetch this to verify a labeling-export bundle's trailer.
+      // Lazy-bootstraps the audit signer on first hit so the system
+      // can run without a separate key-init step. Returns the public
+      // record only — the private key never leaves the server.
+      if (request.method === 'GET' && url.pathname === '/api/audit-signer/public-key') {
+        let signer = await store.readAuditSigner().catch(() => null);
+        if (!signer) {
+          const fresh = createIdentity({ displayName: 'Bharat OS audit signer' });
+          await store.saveAuditSigner(fresh);
+          signer = fresh;
+        }
+        jsonResponse(response, 200, publicIdentity(signer));
+        return;
+      }
+
+      // Phase 10.5 — Signed labeling-job audit export. Sponsor-bearer
+      // gated. Returns NDJSON: header + per-accepted-submission +
+      // trailer with content sha256 + Ed25519 signature from the
+      // audit signer. identityHash rotates per (job, worker) so the
+      // sponsor cannot cross-job correlate workers. Emits a
+      // `labeling_export.signed` ledger event with the content hash.
+      const sponsorJobExportMatch =
+        /^\/api\/sponsors\/([^/]+)\/labeling-jobs\/([^/]+)\/export\.ndjson$/.exec(
+          url.pathname
+        );
+      if (request.method === 'GET' && sponsorJobExportMatch) {
+        const sponsorId = decodeURIComponent(sponsorJobExportMatch[1]);
+        const jobId = decodeURIComponent(sponsorJobExportMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const job = await store.readLabelingJob(jobId).catch(() => null);
+        if (!job || job.sponsorId !== sponsorId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_job', message: 'job not found for this sponsor.' }
+          });
+          return;
+        }
+        let signer = await store.readAuditSigner().catch(() => null);
+        if (!signer) {
+          signer = createIdentity({ displayName: 'Bharat OS audit signer' });
+          await store.saveAuditSigner(signer);
+        }
+        const allSubs = await store.listLabelingSubmissions({ jobId });
+        const exportedAt = new Date().toISOString();
+        const lines = buildLabelingExportLines({
+          job,
+          submissions: allSubs,
+          signerIdentity: signer,
+          exportedAt
+        });
+        const body = bundleNdjson(lines);
+        const trailer = JSON.parse(lines[lines.length - 1]);
+        await store.appendLedger({
+          type: 'labeling_export.signed',
+          jobId,
+          sponsorId,
+          signerId: signer.id,
+          contentSha256: trailer.contentSha256,
+          submissionCount: lines.length - 2,
+          exportedAt,
+          protocolVersion: LABELING_EXPORT_PROTOCOL_VERSION
+        });
+        textResponse(
+          response,
+          200,
+          body,
+          'application/x-ndjson; charset=utf-8'
+        );
+        return;
+      }
+
       // Phase 10.1 — labeling-job lifecycle endpoints. Sponsor-bearer
       // gated for create/upload/launch; public for worker-side
       // discovery; worker-anchored for submissions.
@@ -2300,6 +2377,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/sponsors/:sponsorId/labeling-jobs  (bearer-gated; list own)',
             'POST /api/sponsors/:sponsorId/labeling-jobs/:jobId/items  (bearer-gated)',
             'POST /api/sponsors/:sponsorId/labeling-jobs/:jobId/launch  (bearer-gated; locks escrow)',
+            'GET /api/sponsors/:sponsorId/labeling-jobs/:jobId/export.ndjson  (bearer-gated; signed audit bundle)',
+            'GET /api/audit-signer/public-key  (public; verify export bundles)',
             'GET /api/labeling-jobs  (public worker discovery)',
             'GET /api/labeling-jobs/:jobId/next-item?workerId=…  (next-item dispatch)',
             'POST /api/labeling-jobs/:jobId/submissions  (worker label submission)',

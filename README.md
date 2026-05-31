@@ -152,6 +152,37 @@ Implemented pieces:
 
 ---
 
+## 🔏 2026-05-31 — Phase 10.5 shipped: signed audit export for labeling jobs
+
+Phase 10.5 closes the sponsor audit story for the labeling
+marketplace: a tamper-evident, Ed25519-signed NDJSON bundle that
+any verifier (sponsor, citizen, regulator) can re-hash and re-
+verify against a public-key endpoint, with the original content
+hash anchored in the server ledger.
+
+- **ADR 0124** — `src/phase1/labeling-export.mjs` (header + per-
+  submission + trailer with content SHA-256 + signature) +
+  singleton audit signer (lazy-bootstrapped, persisted in both
+  stores) + two new endpoints + `labeling_export.signed` ledger
+  event.
+- `GET /api/sponsors/:sponsorId/labeling-jobs/:jobId/export.ndjson`
+  (sponsor-bearer) — returns the signed bundle. Workers' raw
+  identity NEVER appears in the body; `identityHash =
+  sha256(jobId::workerId)` rotates per (job, worker) so sponsors
+  cannot cross-job correlate.
+- `GET /api/audit-signer/public-key` (public) — fetch the Ed25519
+  public record to verify any bundle.
+- FE Settings page gains a transparency strip showing the audit
+  signer id + creation date + collapsible Ed25519 PEM public key.
+- Tests: **865/865 Node** (+11 export tests: 7 pure
+  builder/verifier + 4 HTTP). FE 16/16 unchanged.
+- Bundle: main 363 KB / 111 KB gzipped (+1 KB vs 10.4).
+
+**Phase 10 progress: ~88%.** Remaining: 10.6 SLM pre-labeling
+hint (~1 wk). See `ROADMAP.md`.
+
+---
+
 ## 🎯 2026-05-31 — Phase 10.4 shipped: labeling marketplace converges on quality
 
 Phase 10.4 wires ADR 0110's QC plan: **golden-set scoring on

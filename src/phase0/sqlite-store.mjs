@@ -429,6 +429,11 @@ const SCHEMAS = `
   );
   CREATE INDEX IF NOT EXISTS idx_labeling_sub_job ON labeling_submissions(job_id);
   CREATE INDEX IF NOT EXISTS idx_labeling_sub_worker ON labeling_submissions(worker_id);
+
+  CREATE TABLE IF NOT EXISTS audit_signer (
+    singleton TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+  );
 `;
 
 function parse(row) {
@@ -2006,6 +2011,32 @@ export class SqliteStore {
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     const rows = this.db.prepare(sql).all(...params);
     return rows.map((r) => JSON.parse(r.json));
+  }
+
+  // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────
+
+  async readAuditSigner() {
+    await this.init();
+    const row = this.db
+      .prepare('SELECT json FROM audit_signer WHERE singleton = ?')
+      .get('audit-signer');
+    return row ? JSON.parse(row.json) : null;
+  }
+
+  async saveAuditSigner(signer) {
+    if (!signer?.id) throw new Error('audit signer requires id.');
+    await this.init();
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO audit_signer (singleton, json) VALUES (?, ?)'
+      )
+      .run('audit-signer', JSON.stringify(signer));
+    await this.appendLedger({
+      type: 'audit_signer.created',
+      signerId: signer.id,
+      createdAt: signer.createdAt
+    });
+    return signer;
   }
 
   // ─── Ledger ────────────────────────────────────────────────────────────

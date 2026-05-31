@@ -80,6 +80,36 @@ plus the first half of the on-device-SLM arc.
   No runtime yet — opt-in flow + storage + audit is real, but the
   installed pack doesn't yet execute.
 
+### Phase 10.5 — Signed audit export ✅ SHIPPED 2026-05-31
+- **ADR 0124** — tamper-evident Ed25519-signed NDJSON audit bundle
+  for any labeling job. Sponsor downstream training pipeline can
+  verify end-to-end with no Bharat OS-side trust.
+- New module `src/phase1/labeling-export.mjs`:
+  - `buildLabelingExportLines({job, submissions, signerIdentity,
+    exportedAt})` filters to accepted-only and produces header +
+    per-submission + trailer.
+  - `identityHashFor(jobId, workerId)` returns
+    `sha256(jobId::workerId)` — same rotation as Phase 10.4
+    review-list endpoint.
+  - `verifyLabelingExportLines(lines, signerPublicRecord)` runs
+    body-hash + signature checks and signerId cross-checks.
+- Audit signer is a singleton: one Ed25519 keypair lazy-bootstrapped
+  on first export request (or first public-key request) and
+  persisted to the store (`audit-signer.json` for BosStore;
+  `audit_signer` SQLite table for SqliteStore).
+- New endpoints:
+  - `GET /api/audit-signer/public-key` (public) — fetch the public
+    record for verification.
+  - `GET /api/sponsors/:sponsorId/labeling-jobs/:jobId/export.ndjson`
+    (sponsor-bearer) — returns the signed bundle; emits
+    `labeling_export.signed` ledger event with content hash.
+- FE: `useAuditSignerPublicKey()` hook + `labelingExportNdjsonUrl()`
+  URL builder + Settings page transparency strip showing the audit
+  signer id + Ed25519 PEM public key.
+- Tests: BE 854 → 865 (+11: 7 pure builder/verifier + 4 HTTP). FE
+  16/16 unchanged.
+- **Bundle**: main 362 → 363 KB / 111 KB gzipped (+1 KB).
+
 ### Phase 10.4 — QC pipeline ✅ SHIPPED 2026-05-31
 - **ADR 0123** — golden-set scoring on submit + worker score gate
   on next-item dispatch + sponsor sample-for-review with reject
@@ -261,15 +291,11 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 10.5 + 10.6 — Labeling marketplace polish (NEXT)
+### Phase 10.6 — SLM pre-labeling hint (NEXT)
 
-**Phase 10.0–10.4 SHIPPED.** Quality loop is closed. Remaining
-sub-phases:
+**Phase 10.0–10.5 SHIPPED.** Quality loop + signed audit story are
+both closed. Remaining sub-phase:
 
-- [ ] **10.5** — signed JSONL export bundle for sponsor audit
-  (reuses Phase 9.1 federated-round export pattern + the QC
-  review-list identityHash rotation; signs with Bharat OS release
-  key). ~1 wk.
 - [ ] **10.6** — SLM pre-labeling hint: button on task UI that
   loads worker's installed Phi-3-mini → suggests a label →
   worker accepts/edits → submits. Cuts time-per-label ~3×.
@@ -280,14 +306,18 @@ sub-phases:
 - **10.4.1** Inter-annotator α (Krippendorff α across N≥2 workers
   per item; needs jobs with multiple submissions per item)
 - **10.4.2** Worker appeal of golden-set fail (sponsor adjudication)
-- **10.5.1** Premium-job UI gating (filter jobs by required score)
+- **10.5.1** Audit signer key rotation (header.signerVersion field +
+  multi-key verifier lookup)
+- **10.5.2** Sponsor console one-click download UI for export
+  bundle + bulk multi-job export
+- **10.5.3** Premium-job UI gating (filter jobs by required score)
 - **10.1.1** Job cancel + refund route (`refundLockedEscrow` hook)
 - Per-worker time-series score trend on Labels page
 - Score-driven dynamic per-label pricing (premium workers earn
   more per label)
 - Anti-fraud signals (rapid-fire submissions, bot-like timing)
 
-Remaining v1 ~2 wks. Then Phase 12+ (Bharat ID / SSO from
+Remaining v1 ~1 wk. Then Phase 12+ (Bharat ID / SSO from
 explorations doc) or sponsor-feedback-driven polish.
 
 ---

@@ -1238,6 +1238,37 @@ export class BosStore {
     return listJson(this.sponsorsPath);
   }
 
+  // Phase 10.5 — audit signer (singleton). One Ed25519 keypair used to
+  // sign every labeling-job audit bundle. Persisted as a single JSON
+  // file at `rootPath/audit-signer.json`. Created lazily on first
+  // export request; never rotated in v1 (rotation is a Phase 10.5.1
+  // follow-up — would require sponsors to re-fetch the public key).
+  auditSignerFile() {
+    return path.join(this.rootPath, 'audit-signer.json');
+  }
+
+  async readAuditSigner() {
+    try {
+      return await readJson(this.auditSignerFile());
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async saveAuditSigner(signer) {
+    if (!signer?.id) throw new Error('audit signer requires id.');
+    await this.init();
+    await writeJson(this.auditSignerFile(), signer);
+    await this.appendLedger({
+      type: 'audit_signer.created',
+      signerId: signer.id,
+      createdAt: signer.createdAt,
+      at: new Date().toISOString()
+    });
+    return signer;
+  }
+
   // Phase 10.1 — labeling marketplace tables. Three resources:
   //   labeling_jobs       — one row per sponsor-created job
   //   labeling_job_items  — one row per uploaded corpus item
