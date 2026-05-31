@@ -2075,6 +2075,57 @@ code lands; do not create a separate `STATUS.md` (§16).
 
 ### Phase 1 tie-offs — status
 
+🧭 **Direction set 2026-05-31 (post-Phase 11.7 discussion — save-point for the next session):**
+
+The user, while testing /app/citizen/home post-Phase 11.7,
+flagged that "Book a cab" should land on a Bharat-OS-native
+marketplace (NOT Ola/Uber) and that the "Worker / Citizen"
+onboarding split is too narrow now that the plan includes
+drivers, cooks, maids, kirana stores, and other working-class
+provider roles. Four binding decisions captured in memory; see
+the cross-references below:
+
+1. **Service booking = Bharat OS native marketplace.** "Book a
+   cab" books Bharat-OS-onboarded providers. ONDC bridge is
+   bootstrap density only. No Ola/Uber adapter (would violate
+   §15 — Bharat OS doesn't insert itself as a rent-seeking
+   middleman). Already encoded in the orchestrator's
+   `service_booking` template; surface needs to honour it.
+   `memory/service-booking-native-not-ola-uber.md`.
+2. **Onboarding hero rebrand: "Earn" + "Use" (was
+   "Worker"/"Citizen").** Earn covers labelers + drivers +
+   cooks + maids + kiranas + skilled trades via an in-flow role
+   chooser ("How do you want to earn?"). "Business" reserved
+   for sponsor onboarding (MFI / bank / research lab) — DO NOT
+   reuse on the earner side.
+   `memory/onboarding-hero-earn-use.md`.
+3. **Provider identity ≠ worker identity.** Marketplace
+   providers (driver / cook / maid / kirana / skilled) carry
+   a separate KYC-heavy `providerIdentity` distinct from
+   micro-task `workerIdentity`. Different liability shape.
+   Same human can hold both under one root recovery (Phase 1.19).
+   Mesh balance presented as two cards (micro-task earnings vs
+   marketplace earnings). `memory/provider-vs-worker-identity-split.md`.
+4. **ONDC bridge hidden v1.** Citizens see only Bharat-OS
+   native providers. Thin supply → "be the first to invite a
+   driver" empty state (referral CTA), not ONDC fallback by
+   default. Substrate stays intact; FE chooses what to surface.
+   `memory/ondc-bridge-hidden-v1.md`.
+
+**Sequencing (~6-7 weeks total when resumed):**
+
+| Phase | Scope | Cost |
+| --- | --- | --- |
+| **11.8** | Per-scope consent grant UI launched from Outcome card + auto-re-send → closes the "Book a cab" loop end-to-end. Pure FE; reuses Phase 1.3 consent substrate. | ~1 day |
+| **11.9** | Hero rebrand to Earn / Use + in-flow role chooser (Label data / Drive / Cook / Run a shop / …). Provider tiles "coming soon" until 12.0 substrate lands. | ~1 day |
+| **12.0** | `providerIdentity` substrate — schema + KYC-heavy onboarding + linkage to root recovery. BE + FE per parity rule. | ~1.5 wks |
+| **12.1** | Marketplace v1 (citizen side). `service_booking` plan returns `{providers, ondcBridge}` split; `/app/citizen/marketplace/` surfaces native only + "invite a provider" empty state. | ~1.5 wks |
+| **12.2** | Provider self-serve onboarding per role (driver / cook / kirana / maid / skilled). KYC + role attestation + photo + location. Real provider growth begins. | ~2 wks |
+
+11.8 + 11.9 ship cheap (~1 day each) and immediately move the
+investor-demo story forward. 12.0-12.2 is the substrate the
+provider-side §13B value loop actually needs.
+
 🟡 **Proposed (design only — not yet implemented):**
 
 - **Phase 11 — ARC CLOSED 2026-05-31.** Sub-phases 11.0–11.3

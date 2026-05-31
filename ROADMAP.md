@@ -325,19 +325,99 @@ plus the first half of the on-device-SLM arc.
 
 ## 🟡 In progress / Next
 
-### Phase 11.8 — Per-scope consent grant UI (NEXT)
+### Direction set 2026-05-31 — citizen marketplace + earner rebrand (save-point)
 
-User-driven follow-up to Phase 11.7. The Outcome card now
-surfaces the consent requirement when an intent is blocked; next
-step is letting the citizen grant the requested scopes from /app/
-itself, then auto-re-send the intent so blocked → planned →
-completed flows in one user action without bouncing to /shell/.
+User flagged post-Phase 11.7 that:
+
+1. "Book a cab" must hit **Bharat-OS native marketplace**, NOT
+   Ola/Uber. ONDC bridge stays as bootstrap density only.
+   See `memory/service-booking-native-not-ola-uber.md`.
+2. Onboarding hero rebrands **"Worker" → "Earn"** (Citizen
+   stays or becomes "Use") with an in-flow role chooser inside
+   Earn — labelers + drivers + cooks + maids + kiranas + skilled
+   trades. "Business" reserved for sponsor onboarding; don't
+   reuse on earner side.
+   See `memory/onboarding-hero-earn-use.md`.
+3. **Provider identity ≠ worker identity.** Marketplace providers
+   carry a separate KYC-heavy `providerIdentity`. Same human can
+   hold both under one root recovery. Mesh balance presented as
+   two cards (micro-task earnings vs marketplace earnings).
+   See `memory/provider-vs-worker-identity-split.md`.
+4. ONDC bridge results **hidden from citizen UI v1**. Thin supply
+   → "be the first to invite a driver" referral CTA, not ONDC
+   fallback by default. Substrate stays intact.
+   See `memory/ondc-bridge-hidden-v1.md`.
+
+Resumed sequencing (~6-7 weeks total):
+
+### Phase 11.8 — Per-scope consent grant UI (NEXT — ~1 day)
+
+User-driven follow-up to Phase 11.7. The Outcome card surfaces
+the consent requirement when an intent is blocked; this lets the
+citizen grant the requested scopes from /app/ itself, then
+auto-re-send the intent so blocked → planned → completed flows in
+one user action without bouncing to /shell/.
 
 - [ ] Per-scope grant UI launched from Outcome card's consent
   block. Reuses Phase 1.3 consent artifact substrate.
 - [ ] Auto-re-send after grant (the same `intentText` retried).
 - [ ] Show the granted consents in the Trust tab; per-row revoke.
-- ~1 wk.
+
+### Phase 11.9 — Hero rebrand: Earn / Use (~1 day)
+
+Cheap symbolic change that lets the new framing land in the
+investor demo immediately, even before the provider substrate
+exists.
+
+- [ ] Onboarding hero: "Worker" → "Earn", "Citizen" → "Use" (or
+  keep "Citizen" copy if neutral reads better).
+- [ ] In-flow role chooser inside Earn: "How do you want to
+  earn?" with tiles. Micro-task tiles (Label data / Federated
+  rounds + mesh inference) route to existing surfaces.
+  Provider tiles (Drive a cab / Cook / Run a shop / Help around
+  the house / Skilled work) render as "Coming soon — Phase 12.0"
+  placeholders.
+- [ ] Demo copy: investors should read the placeholders as
+  roadmap, not as broken UI.
+
+### Phase 12.0 — Provider identity substrate (~1.5 wks)
+
+Foundation for the provider-side §13B value loop. BE + FE per
+the parity rule.
+
+- [ ] `providerIdentity` schema on both stores (file + sqlite).
+  Verified KYC + role attestation + ongoing Trust Passport.
+- [ ] Linkage to root recovery (Phase 1.19) — same human can
+  hold worker + provider identities under one phone/Aadhaar
+  root.
+- [ ] KYC-heavy onboarding entry on /app/ (Aadhaar e-KYC + role
+  attestation + photo + location; fallback for offline).
+- [ ] Earner home presents two ledger cards: micro-task earnings
+  + marketplace earnings.
+
+### Phase 12.1 — Marketplace v1, citizen side (~1.5 wks)
+
+- [ ] `service_booking` plan splits response into `providers`
+  (Bharat OS native) + `ondcBridge` (bootstrap density). FE
+  decides what to surface.
+- [ ] `/app/citizen/marketplace/` surface — search by service +
+  area, ranked by Trust Passport + distance + price.
+- [ ] Empty state: "No drivers near you yet — invite one"
+  referral CTA. "Also check ONDC" toggle buried under
+  `<details>`, opt-in per query, not a setting.
+- [ ] Booking flow ties into Phase 9.1 sponsor escrow pattern
+  (citizen → provider escrow → release on service confirmed).
+
+### Phase 12.2 — Provider self-serve onboarding (~2 wks)
+
+- [ ] Per-role tailored onboarding screens (driver / cook /
+  kirana / maid / skilled trades). Each role has its own
+  attestation requirements.
+- [ ] Real provider growth begins — seed-data replaced with
+  actual sign-ups.
+
+After 12.2: the v1 marketplace arc closes. Pick from Phase 10
+polish backlog OR Phase 13+ (Bharat ID / SSO).
 
 ### Phase 10 — v1 arc CLOSED 2026-05-31
 
