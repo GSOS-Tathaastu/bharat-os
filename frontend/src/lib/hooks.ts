@@ -792,6 +792,187 @@ export function useLabelingStats(identityId: string | null | undefined) {
   });
 }
 
+// --- Phase 12.0.3 worker sweep: e-Shram + schemes + tax + collective
+// memberships + trust attestation mint --------------------------------
+
+export interface EshramRegistration {
+  registrationId: string;
+  issuerId: string;
+  memberId: string;
+  issuerName?: string;
+  uanMasked: string;
+  occupationCategory: string;
+  occupationDetail?: string;
+  state?: string;
+  district?: string;
+  educationLevel: string;
+  monthlyIncomeBracket?: string;
+  ncoCode?: string;
+  registeredAt: string;
+  issuedAt: string;
+  expiresAt: string;
+  status: 'active' | 'revoked';
+  revokedAt?: string | null;
+}
+
+export function useEshramRegistrations(memberId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['eshram-registrations', memberId],
+    queryFn: () =>
+      api<{ registrations: EshramRegistration[] }>(
+        `/api/identities/${encodeURIComponent(memberId!)}/eshram-registrations`
+      ).then((r) =>
+        r.registrations
+          .filter((reg) => reg.status === 'active')
+          .sort((a, b) => String(b.issuedAt).localeCompare(String(a.issuedAt)))
+      ),
+    enabled: Boolean(memberId)
+  });
+}
+
+export interface SchemeEntitlement {
+  entitlementId: string;
+  issuerId: string;
+  memberId: string;
+  issuerName?: string;
+  schemeCode: string;
+  schemeName: string;
+  monetaryBenefitPaise?: number;
+  benefitFrequency?: string;
+  cycleStart?: string;
+  cycleEnd?: string;
+  eligibilityNote?: string;
+  issuedAt: string;
+  expiresAt: string;
+  status: 'active' | 'revoked';
+}
+
+export function useSchemeEntitlements(memberId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['scheme-entitlements', memberId],
+    queryFn: () =>
+      api<{ entitlements: SchemeEntitlement[] }>(
+        `/api/identities/${encodeURIComponent(memberId!)}/scheme-entitlements`
+      ).then((r) =>
+        r.entitlements
+          .filter((e) => e.status === 'active')
+          .sort((a, b) => String(b.issuedAt).localeCompare(String(a.issuedAt)))
+      ),
+    enabled: Boolean(memberId)
+  });
+}
+
+export interface TaxSummaryWindow {
+  fromIso: string;
+  toIso: string;
+}
+
+export interface TaxRegimeOption {
+  label: string;
+  taxableIncomePaise: number;
+  estimatedTaxPaise: number;
+}
+
+export interface TaxSummary {
+  protocolVersion: string;
+  financialYear: string;
+  window: TaxSummaryWindow;
+  entryCount: number;
+  grossIncomePaise: number;
+  grossIncomeRupees: number;
+  newRegime: TaxRegimeOption;
+  oldRegime: TaxRegimeOption;
+  presumptive44AD?: TaxRegimeOption;
+  gst?: { applicable: boolean; estimatedPayablePaise?: number };
+  recommendation: {
+    cheapestOption: string;
+    cheapestTaxPaise: number;
+    allOptions: TaxRegimeOption[];
+  };
+  disclaimer: string;
+}
+
+export function useTaxSummary(
+  identityId: string | null | undefined,
+  financialYear: string
+) {
+  return useQuery({
+    queryKey: ['tax-summary', identityId, financialYear],
+    queryFn: () =>
+      api<{ summary: TaxSummary }>(
+        `/api/identities/${encodeURIComponent(identityId!)}/tax/summary?financialYear=${encodeURIComponent(financialYear)}`
+      ).then((r) => r.summary),
+    enabled: Boolean(identityId && financialYear)
+  });
+}
+
+export interface CollectiveMembership {
+  membershipId: string;
+  collectiveId: string;
+  collectiveName: string;
+  memberId: string;
+  memberRole: string;
+  region?: string;
+  joinedAt?: string | null;
+  issuedAt: string;
+  expiresAt: string;
+  status: 'active' | 'revoked';
+  revokedAt?: string | null;
+  revokedReason?: string | null;
+}
+
+export function useCollectiveMemberships(memberId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['collective-memberships', memberId],
+    queryFn: () =>
+      api<{ memberships: CollectiveMembership[] }>(
+        `/api/identities/${encodeURIComponent(memberId!)}/collective-memberships?status=active`
+      ).then((r) => r.memberships),
+    enabled: Boolean(memberId)
+  });
+}
+
+/**
+ * Phase 12.0.3 — mint a Trust Passport attestation about yourself.
+ * The orchestrator's `trust_attestation` action type composes a
+ * signed, selective-disclosure attestation envelope; a sponsor /
+ * landlord / lender reads it via /verify/.
+ */
+export interface MintAttestationInput {
+  identityId: string;
+  /** Free-form what-they-want-to-verify, e.g. "rental application". */
+  reason: string;
+  /** Which Trust Passport fields to expose (bands / booleans). */
+  discloseScopes?: string[];
+}
+
+export function useMintTrustAttestation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MintAttestationInput) =>
+      api<SendIntentResponse & { attestation?: { attestationId?: string } }>(
+        '/api/orchestrations',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            actionType: 'trust_attestation',
+            actorId: input.identityId,
+            intentText: input.reason,
+            execute: true,
+            scopes: ['trust.attest', 'consent.record'],
+            metadata: {
+              discloseScopes: input.discloseScopes ?? []
+            }
+          })
+        }
+      ),
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ['trust-passport', input.identityId] });
+      qc.invalidateQueries({ queryKey: ['orchestrations', input.identityId] });
+    }
+  });
+}
+
 // --- Phase 12.0.2 daily brief (§9C vignette 16b) ----------------------
 //
 // The orchestrator's `daily_brief` action type is fully wired BE-side:

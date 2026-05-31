@@ -152,6 +152,35 @@ Implemented pieces:
 
 ---
 
+## 🏛 2026-06-01 — Phase 12.0.3 shipped: worker home wires in government benefits + tax view + Trust Passport attestation mint
+
+Second of four substrate-integration sub-phases. Five wires
+across `/worker/earn` + `/worker/trust` without growing the
+bottom-nav past 5 tabs.
+
+- **ADR 0132** — pure FE; zero BE changes.
+- `/worker/earn` gains:
+  - **Schemes card** — e-Shram registration status + active
+    scheme entitlements (PM-KISAN, PMSYM, etc.) with masked
+    UAN + scheme code/name/cycle/benefit.
+  - **Tax view (FY YYYY-YY)** — gross income + new regime tax
+    + old regime tax + "cheapest option for you" highlight +
+    the substrate's full legal disclaimer rendered verbatim.
+- `/worker/trust` gains:
+  - **Mint Trust Passport attestation** — citizen mints a
+    signed envelope a landlord / employer / lender can read
+    via `/verify/` without seeing raw values.
+  - **Collective memberships** — sangha / cooperative /
+    blessed-collective attestations issued by the collective.
+- 5 new hooks; auto-suppression keeps the new-user view clean.
+- Bundle: main 421 KB / 125 KB gzipped (+10 KB vs 12.0.2).
+
+**Next: Phase 12.0.4** — cross-cutting (push notifications +
+device pairing + vault transfer + WebAuthn + DPDP grievance +
+flag reports + voice intent).
+
+---
+
 ## 📋 2026-06-01 — Phase 12.0.2 shipped: citizen home becomes a real home — daily brief + personal notes
 
 First of four substrate-integration sub-phases (12.0.2 → 12.0.5)

@@ -398,6 +398,24 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.0.3 — Worker sweep ✅ SHIPPED 2026-06-01
+- **ADR 0132** — second of four substrate-integration sub-phases.
+  Five integrations across `/worker/earn` + `/worker/trust` (no
+  new tabs).
+- `/worker/earn` gains: (1) Schemes card — e-Shram registration
+  + active scheme entitlements (PM-KISAN, PMSYM, etc.); (2) Tax
+  view card (current FY) — gross + new/old regime + cheapest
+  + substrate's full legal disclaimer.
+- `/worker/trust` gains: (3) Mint Trust Passport attestation
+  via the orchestrator's `trust_attestation` action type; (4)
+  Collective memberships list (sangha / cooperative / blessed
+  collective).
+- 5 new hooks; auto-suppression so brand-new worker sees clean
+  Earn surface.
+- Pure FE; zero BE changes.
+- Tests: Node 890/890 unchanged, FE Vitest 45/45 unchanged.
+- **Bundle**: main 411 → 421 KB / 125 KB gzipped (+10 KB).
+
 #### Phase 12.0.2 — Citizen sweep ✅ SHIPPED 2026-06-01
 - **ADR 0131** — substrate-integration sweep, citizen side
   (first of four sub-phases 12.0.2 → 12.0.5).
