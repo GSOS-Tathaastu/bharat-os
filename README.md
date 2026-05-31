@@ -144,6 +144,14 @@ Implemented pieces:
 - Phase 2a.8 real Tesseract.js OCR for health-document capture + investor-demo
   diagnostics panel + §17 footprint accounting (Tier 1 ~50 KB shell, Tier 2
   ~7 MB lazy OCR, Tier 3 ~30 MB opt-in voice, Tier 4 1.5-4 GB opt-in SLM).
+## 📍 Where to look next
+
+- **`ROADMAP.md`** — what's done, what's next, what's deferred (canonical forward-looking view)
+- **`BHARAT_OS.md`** §17 — full closed-phase log
+- **`docs/adr/`** — design decisions per phase
+
+---
+
 ## ⚠ 2026-05-27 — FE rebuild incoming (Phase 11)
 
 The user-facing `/shell/` accumulated 4,811 lines of vanilla JS
