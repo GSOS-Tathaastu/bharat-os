@@ -398,6 +398,87 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.1a.2 — Booking + escrow + provider surface ✅ SHIPPED 2026-06-01
+- **ADR 0136** — second + final of two 12.1a sub-phases.
+  Marketplace loop closes: citizens browse, lock escrow, see
+  outcome; providers receive push, accept, complete, see payout.
+- **6-state booking machine** with monotonic `seq` for CAS:
+  `pre_authorized → in_progress → provider_marked_complete →
+  citizen_confirmed | auto_released | disputed |
+  cancelled_after_dispute | rejected_by_provider |
+  cancelled_by_citizen | expired_unaccepted`. Every transition
+  CAS-guarded so concurrent provider accepts race safely.
+- **Rate snapshot immutable** at booking-create; provider rate
+  edits do NOT propagate to existing bookings (tested).
+- **Pickup point at 4dp** on the booking record (party-only),
+  ledger events carry ONLY 1dp bubble. Ledger PII replay test
+  asserts no 4dp coord on any `booking.*` event.
+- **Lazy auto-release on read** — every list/detail endpoint
+  calls `maybeAutoRelease`; 4h pre-accept expiry, 24h
+  provider-marked-complete window. No node-cron. Operator
+  backstop at `POST /api/admin/bookings/sweep-stale`
+  (CAS-safe, idempotent).
+- **Disputed = operator-only**. `POST /api/admin/bookings/:id/
+  adjudicate` with admin token; outcomes
+  `release_to_provider | refund_to_citizen` (split deferred to
+  12.2).
+- **Provider auth = root identity + providerIdentityId**. NO
+  bearer in v1 (providers are citizens with phone-authed
+  identity). Bearer-mint for delegation (spouse / fleet) is
+  Phase 12.3.
+- **Bookkeeping-v1 funding**: admin-token-gated
+  `POST /api/admin/citizens/:id/escrow/deposit` stands in for
+  a real UPI rail until Phase 12.2+ payment adapter.
+- **CORE shared substrate extractions** per the founder
+  binding:
+  - `src/phase0/escrow-paise.mjs` — entity-agnostic paise
+    primitives. sponsor.mjs refactored to thin wrappers;
+    47 sponsor tests regression-pass.
+  - `src/phase0/provider-auth.mjs` —
+    `requireProviderOwnerAuth` / `requireBookingPartyAuth` /
+    `requireCitizenOwnerAuth`.
+  - `src/phase0/booking-push.mjs` — payload builders with
+    §15 binding-grep tests on source.
+  - `src/phase0/geo.mjs::bubbleAt1dp` — ledger-safe coarsening.
+  - FE: `frontend/src/lib/format-paise.ts` +
+    `format-distance.ts` (zero-dep Intl) +
+    `provider-context-store.ts` (Zustand persist) +
+    `components/booking/*` shared.
+- **11 new API endpoints** (booking lifecycle, citizen escrow,
+  admin adjudicate / sweep / deposit).
+- **/provider/* surface** with 5-tab bottom nav (Inbox /
+  Active / History / Profile / Settings); Inbox is default
+  landing.
+- **/citizen/services/bookings** list + detail.
+  BookingComposer at `/citizen/services/book/:providerIdentityId`
+  with geolocation pickup capture at 2dp 'medium' precision.
+  Existing provider detail gained "Book now" PRIMARY CTA
+  above the preserved "Express interest" soft-touch.
+- **Push** fires on every key transition via
+  centralised booking-push builders. Citizen pushes generic;
+  provider's own payout push may carry ₹ amount (own earnings).
+- Adversarial review identified 3 must-fix + 10 should-fix;
+  applied: PRIV-1+2 (citizen GET endpoints now owner-auth-
+  gated via `requireCitizenOwnerAuth`); ESCROW-CAS (added
+  `seq` to citizen-escrow + `casUpdateCitizenEscrow`; booking-
+  create path retries once on stale_seq, returns 409
+  `escrow_concurrent_update` on second failure); UX-1 (honest
+  rate-basis picker when only one rate); UX-2 (user-facing
+  copy, no "admin (bookkeeping-v1)" leak); UX-4 (warmer
+  ProviderInbox empty state); UX-8 (pre-accept pickup mask
+  framed as citizen safety); UX-10 (ProviderHistory tone);
+  TEST-AUTH (3 new tests covering the auth gates +
+  ESCROW-CAS race).
+- Tests: **975/975 Node** (+30 new booking tests) +
+  **66/66 vitest** (+2 new format-helper contracts). tsc clean.
+- Bundle: main 528 → 557 KB / 156 KB gzipped (+29 KB for
+  provider surface + booking components + 6 hooks + format
+  helpers). wllama lazy chunk unchanged 292 KB / 126 KB
+  gzipped.
+- **Next**: Phase 12.1b (SLM AI-orchestration) OR Phase 12.2
+  (provider onboarding wave 1 + ratings + Trust Passport
+  feedback) — TBD by founder.
+
 #### Phase 12.1a.1 — Marketplace discovery substrate + citizen browse ✅ SHIPPED 2026-06-01
 - **ADR 0135** — first of two 12.1a sub-phases (12.1a.2 booking
   + escrow + provider surface next). FE-BE parity preserved.
@@ -631,25 +712,33 @@ memos.
   `marketplace.interest_expressed` ledger event so 12.1a.2 has
   a real precedent row.
 
-##### 12.1a.2 — Booking + escrow + provider surface (~2 wks)
-- [ ] Tap to book → Phase 11.8 consent flow → escrow lock →
-  push notify provider.
-- [ ] **New parallel citizen-booking escrow** module
-  (`citizen-booking-escrow.mjs`). State machine:
-  `pre_authorized → in_progress → provider_marked_complete →
-  citizen_confirmed | disputed | auto_released_24h`. Reuses
-  Phase 9.1's signed-event + ledger anchoring; NOT the sponsor
-  state machine.
-- [ ] /app/provider/* surface (mirror of /app/sponsor/* pattern
-  but rooted on rootIdentityId + providerIdentityId context,
-  not bearer).
-- [ ] Rate snapshot at booking time (immutable in booking
-  record).
-- [ ] Dispute resolution path + operator review endpoint.
-- [ ] Upgrade `marketplace.interest_expressed` precedent rows
-  into real booking entities.
-- [ ] ONDC bridge against sandbox URLs — still hidden behind
-  empty-state CTA per `ondc-bridge-hidden-v1` binding.
+##### 12.1a.2 — Booking + escrow + provider surface ✅ SHIPPED 2026-06-01 (ADR 0136)
+- [x] Tap to book → escrow lock → push notify provider. Consent
+  flow integration deferred — booking lock now stands in as
+  the consent gate (immutable + auditable). Phase 11.8 grant
+  flow can wrap booking-create in 12.2.
+- [x] **Parallel citizen-booking module** (`src/phase1/booking.mjs`).
+  State machine `pre_authorized → in_progress →
+  provider_marked_complete → citizen_confirmed | auto_released |
+  disputed | cancelled_after_dispute | rejected_by_provider |
+  cancelled_by_citizen | expired_unaccepted`. CAS-guarded by
+  `seq`. Separate `src/phase1/citizen-escrow.mjs` envelope
+  (per-citizen escrow) — sibling to sponsor.mjs, both backed by
+  the new `src/phase0/escrow-paise.mjs` shared primitives.
+- [x] /provider/* surface — 5-tab bottom nav (Inbox / Active /
+  History / Profile / Settings). Rooted on root-identity
+  ownership; provider-context-store (Zustand persist) holds
+  active-provider hat. NO bearer in v1.
+- [x] Rate snapshot at booking-create (immutable; tested).
+- [x] Dispute resolution: either party files; escrow holds;
+  operator-token-gated adjudicate endpoint resolves to
+  release_to_provider or refund_to_citizen.
+- [x] `marketplace.interest_expressed` precedent rows remain as
+  the lightweight CTA (preserved); "Book now" PRIMARY CTA is
+  the new heavyweight path.
+- [ ] ONDC bridge against sandbox URLs — still hidden v1; native
+  marketplace remains the only flow. Deferred to a future phase
+  once native supply is non-trivial.
 
 #### Phase 12.1b — AI-orchestration layer (~3 wks)
 - [ ] **A.** Vernacular intent → structured action (22+ Indic

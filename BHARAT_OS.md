@@ -2135,7 +2135,7 @@ on top of the four earlier:
 | --- | --- | --- |
 | **12.0** | `providerIdentity` substrate (BE+FE). Schema + KYC-heavy onboarding + linkage to root recovery. Earner home: two ledger cards (micro-task + marketplace). | ~1.5 wks |
 | **12.1a.1** ✅ | **SHIPPED 2026-06-01 (ADR 0135).** Marketplace discovery substrate + citizen browse. Discriminated-union geo schema (4dp persist, 2dp public emit), shared phase0/geo.mjs + FE geo lib (reusable for booking, mesh, audits), GET /api/marketplace/providers, POST /express-interest typed precedent row, /app/citizen/services/* nested routes, ProviderOnboarding ServiceAreaPicker. ONDC suppressed. | ✅ shipped |
-| **12.1a.2** | Booking entity + parallel citizen-booking-escrow (state machine: pre_authorized → in_progress → provider_marked_complete → citizen_confirmed \| disputed \| auto_released_24h), /app/provider/* surface, push notification on incoming booking. | ~2 wks |
+| **12.1a.2** ✅ | **SHIPPED 2026-06-01 (ADR 0136).** Booking + citizen-escrow + provider surface. 6-state CAS-guarded booking machine; lazy auto-release (4h pre-accept expiry + 24h after provider-marked-complete); rate snapshot immutability; bookkeeping-v1 funding via admin escrow deposit. /provider/* 5-tab surface; /citizen/services/bookings list + detail. Push on every transition. Extracted escrow-paise + provider-auth + booking-push + bubbleAt1dp as CORE substrates. ONDC still suppressed. | ✅ shipped |
 | **12.1b** | SLM AI-orchestration layer on top. Vernacular intent → structured action (22+ Indic languages) · offline-first decisioning · on-device dynamic forms · on-device negotiation agent for marketplace. Reuses Phase 9.0c runtime + Phase 10.6 prompt/parse pattern. | ~3 wks |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
 | **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
@@ -2197,6 +2197,67 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1a.2 — SHIPPED 2026-06-01 (ADR 0136).** Booking +
+  citizen-escrow + provider surface — closes the marketplace
+  loop. Second of two 12.1a sub-phases. Booking record with 6
+  live + 4 terminal-refund states (`pre_authorized → in_progress
+  → provider_marked_complete → citizen_confirmed | auto_released
+  | disputed | cancelled_after_dispute | rejected_by_provider |
+  cancelled_by_citizen | expired_unaccepted`). Every transition
+  is CAS-guarded by a monotonic `seq` so concurrent provider
+  accepts race safely (one wins, second gets 409 `stale_seq`).
+  Rate snapshot frozen at booking-create so provider rate edits
+  do NOT propagate to existing bookings (immutability tested).
+  Pickup point persisted at 4dp on the booking record (visible
+  ONLY to the two parties after auth), ledger events carry ONLY
+  the 1dp bubble — ledger PII replay test asserts no 4dp coord
+  in any `booking.*` event. Pre-accept provider projection masks
+  pickup to bubble1dp only. **Lazy auto-release on read**: every
+  list/detail endpoint calls `maybeAutoRelease` BEFORE returning
+  — 4h pre-accept expiry refunds idle bookings, 24h
+  provider_marked_complete window auto-releases payout; no
+  node-cron. Operator backstop at `POST /api/admin/bookings/
+  sweep-stale` is CAS-safe + idempotent. Disputed bookings are
+  operator-only — `POST /api/admin/bookings/:id/adjudicate`
+  with admin token returns `release_to_provider` or
+  `refund_to_citizen` (split deferred to 12.2). **Common
+  features extracted as CORE shared substrate** per the binding:
+  `src/phase0/escrow-paise.mjs` (entity-agnostic paise primitives;
+  sponsor.mjs refactored to thin wrappers, 47 sponsor tests
+  regression-pass), `src/phase0/provider-auth.mjs`
+  (`requireProviderOwnerAuth` / `requireBookingPartyAuth` /
+  `requireCitizenOwnerAuth`), `src/phase0/booking-push.mjs`
+  (binding-grep tests forbid displayName/phone/4dp coord),
+  `src/phase0/geo.mjs::bubbleAt1dp`, FE
+  `frontend/src/lib/format-paise.ts` + `format-distance.ts` +
+  `provider-context-store.ts` + `components/booking/*`. Provider
+  auth = root identity + providerIdentityId (NO bearer in v1 —
+  providers are citizens with already-authenticated phones;
+  bearer-mint for delegation deferred to 12.3). Funding model:
+  bookkeeping-v1 (admin-token-gated citizen escrow deposit
+  endpoint stands in for a real UPI rail until Phase 12.2+
+  payment adapter; every escrow envelope carries
+  `fundingMode: 'bookkeeping-v1'` to keep it honest). 11 new
+  API endpoints. New /provider/* surface with 5-tab bottom nav
+  (Inbox / Active / History / Profile / Settings); Inbox is
+  default landing. Citizen side: `/citizen/services/book/:id`
+  BookingComposer, `/citizen/services/bookings` list +
+  `/bookings/:id` detail; existing provider detail page gained
+  "Book now" PRIMARY CTA above the preserved "Express interest"
+  soft-touch. Push notifications fire on every key transition
+  via centralised booking-push.mjs builders — citizen pushes
+  generic; provider's own payout push may carry ₹ amount
+  (own earnings). Adversarial review (3 lenses + triage)
+  identified 3 must-fix + 10 should-fix; **3 must-fix
+  (PRIV-1+2 citizen-auth gap, ESCROW-CAS race) + 6 should-fix
+  (UX-1/2/4/8/10 + TEST-AUTH) applied before commit**. Tests:
+  975/975 Node (+30 new booking tests including auth-gate +
+  ESCROW-CAS regression) + 66/66 vitest. Bundle 528 → 557 KB
+  / 156 KB gzipped (+29 KB). Next: **Phase 12.1b** (SLM
+  AI-orchestration: vernacular intent / offline-first /
+  dynamic forms / negotiation agent) OR **Phase 12.2**
+  (provider onboarding wave 1 — Aadhaar e-KYC + role-specific
+  docs + ratings + Trust Passport feedback loop).
 - **Phase 12.1a.1 — SHIPPED 2026-06-01 (ADR 0135).** Marketplace
   discovery substrate + citizen browse — first of two 12.1a
   sub-phases (12.1a.2 booking + escrow + provider surface next).

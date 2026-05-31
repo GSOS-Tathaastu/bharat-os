@@ -135,62 +135,36 @@ export function publicSponsorDirectory(sponsor) {
 }
 
 // Mutating helpers — caller persists the returned sponsor.
+//
+// Phase 12.1a.2: the math is extracted to src/phase0/escrow-paise.mjs
+// so the same primitives can power citizen-booking-escrow + future
+// payout-settlement code paths. The sponsor.* wrappers stay for
+// API stability; existing tests are the regression gate.
+import {
+  depositPaise,
+  lockPaise,
+  debitLockedPaise,
+  refundLockedPaise
+} from '../phase0/escrow-paise.mjs';
+
 export function depositEscrow(sponsor, amountPaise) {
-  const n = Number(amountPaise);
-  if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) {
-    throw new Error('amountPaise must be a positive integer.');
-  }
-  return {
-    ...sponsor,
-    escrowBalancePaise: sponsor.escrowBalancePaise + n
-  };
+  return depositPaise(sponsor, amountPaise);
 }
 
 export function lockEscrow(sponsor, amountPaise) {
-  const n = Number(amountPaise);
-  if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) {
-    throw new Error('amountPaise must be a positive integer.');
-  }
-  if (n > sponsor.escrowBalancePaise - sponsor.escrowLockedPaise) {
-    throw new Error('insufficient available escrow balance.');
-  }
-  return {
-    ...sponsor,
-    escrowLockedPaise: sponsor.escrowLockedPaise + n
-  };
+  return lockPaise(sponsor, amountPaise);
 }
 
 // Debit a previously-locked amount: balance AND locked both go down
 // by the same amount. Used per accepted worker update.
 export function debitLockedEscrow(sponsor, amountPaise) {
-  const n = Number(amountPaise);
-  if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) {
-    throw new Error('amountPaise must be a positive integer.');
-  }
-  if (n > sponsor.escrowLockedPaise) {
-    throw new Error('debit exceeds locked escrow.');
-  }
-  return {
-    ...sponsor,
-    escrowBalancePaise: sponsor.escrowBalancePaise - n,
-    escrowLockedPaise: sponsor.escrowLockedPaise - n
-  };
+  return debitLockedPaise(sponsor, amountPaise);
 }
 
 // Unlock without debiting: refund unused round budget on close /
 // expire. balance unchanged; locked goes down.
 export function refundLockedEscrow(sponsor, amountPaise) {
-  const n = Number(amountPaise);
-  if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) {
-    throw new Error('amountPaise must be a positive integer.');
-  }
-  if (n > sponsor.escrowLockedPaise) {
-    throw new Error('refund exceeds locked escrow.');
-  }
-  return {
-    ...sponsor,
-    escrowLockedPaise: sponsor.escrowLockedPaise - n
-  };
+  return refundLockedPaise(sponsor, amountPaise);
 }
 
 export function revokeSponsor(sponsor, { revokedAt = nowIso(), revokedBy = 'unattributed-operator' } = {}) {

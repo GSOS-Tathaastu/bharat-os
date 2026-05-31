@@ -6,6 +6,7 @@ import { OnboardingPage } from '@/routes/Onboarding';
 import { WorkerHome } from '@/routes/WorkerHome';
 import { CitizenHome } from '@/routes/CitizenHome';
 import { CitizenServices } from '@/routes/CitizenServices';
+import { ProviderSurface } from '@/routes/provider/ProviderSurface';
 import { VerifyPage } from '@/routes/Verify';
 import { LabsPage } from '@/routes/Labs';
 import { LabelsPage } from '@/routes/Labels';
@@ -89,6 +90,15 @@ export default function App() {
           element={
             <ProtectedSurface>
               <SettingsPage />
+            </ProtectedSurface>
+          }
+        />
+        {/* Phase 12.1a.2 — provider surface; auth via root identity + provider-context-store */}
+        <Route
+          path="/provider/*"
+          element={
+            <ProtectedSurface>
+              <ProviderSurface />
             </ProtectedSurface>
           }
         />

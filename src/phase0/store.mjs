@@ -70,6 +70,8 @@ export class BosStore {
     this.federatedUpdatesPath = path.join(rootPath, 'federated-updates');
     this.attestationsPath = path.join(rootPath, 'attestations');
     this.phoneOtpsPath = path.join(rootPath, 'phone-otps');
+    this.bookingsPath = path.join(rootPath, 'bookings');
+    this.citizenEscrowsPath = path.join(rootPath, 'citizen-escrows');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -102,6 +104,8 @@ export class BosStore {
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
+    await fs.mkdir(this.bookingsPath, { recursive: true });
+    await fs.mkdir(this.citizenEscrowsPath, { recursive: true });
     await fs.mkdir(this.labelingJobsPath, { recursive: true });
     await fs.mkdir(this.labelingJobItemsPath, { recursive: true });
     await fs.mkdir(this.labelingSubmissionsPath, { recursive: true });
@@ -443,6 +447,29 @@ export class BosStore {
       }
     }
     sections.providerIdentities = providerRemoved;
+
+    // Phase 12.1a.2 — booking + citizen-escrow cascade.
+    const bookings = await this.listBookings().catch(() => []);
+    let bookingsRemoved = 0;
+    for (const b of bookings) {
+      if (b.citizenRootIdentityId === identityId || b.providerRootIdentityId === identityId) {
+        try {
+          await fs.unlink(this.bookingFile(b.bookingId));
+          bookingsRemoved += 1;
+        } catch (_error) {
+          // best-effort
+        }
+      }
+    }
+    sections.bookings = bookingsRemoved;
+
+    try {
+      await fs.unlink(this.citizenEscrowFile(identityId));
+      sections.citizenEscrows = 1;
+    } catch (_error) {
+      sections.citizenEscrows = 0;
+    }
+
     await sweep(
       'workerNotifications',
       () => this.listWorkerNotifications(),
@@ -1330,6 +1357,81 @@ export class BosStore {
         return true;
       })
       .map(hydrateProviderIdentity);
+  }
+
+  // Phase 12.1a.2 — booking + citizen-escrow tables.
+  //
+  // Bookings carry a monotonic `seq` for CAS concurrency. The
+  // canonical write helper is casUpdateBooking(bookingId, expectedSeq,
+  // next, events) — it atomically check+writes the record AND
+  // appends ledger events, so a concurrent provider-accept race
+  // can't double-spend escrow.
+  //
+  // Citizen escrow is one record per rootIdentityId; cascade with
+  // identity erasure.
+  bookingFile(bookingId) {
+    return path.join(this.bookingsPath, `${safeName(bookingId)}.json`);
+  }
+
+  citizenEscrowFile(citizenRootIdentityId) {
+    return path.join(this.citizenEscrowsPath, `${safeName(citizenRootIdentityId)}.json`);
+  }
+
+  async saveBooking(booking) {
+    if (!booking?.bookingId) throw new Error('booking requires bookingId.');
+    await this.init();
+    await writeJson(this.bookingFile(booking.bookingId), booking);
+    return booking;
+  }
+
+  async readBooking(bookingId) {
+    return readJson(this.bookingFile(bookingId));
+  }
+
+  async listBookings({ citizenRootIdentityId, providerIdentityId, status } = {}) {
+    const all = await listJson(this.bookingsPath);
+    return all.filter((b) => {
+      if (citizenRootIdentityId && b.citizenRootIdentityId !== citizenRootIdentityId) return false;
+      if (providerIdentityId && b.providerIdentityId !== providerIdentityId) return false;
+      if (status && b.status !== status) return false;
+      return true;
+    });
+  }
+
+  // Atomic CAS write — reads the current record under the BosStore
+  // lock-free contract (FS is single-process for the MVP), asserts
+  // the seq matches, writes the next record, then appends ledger
+  // events. If seq drifts, throws a typed error so the API layer
+  // returns 409 stale_seq to the caller.
+  async casUpdateBooking(bookingId, expectedSeq, nextBooking, ledgerEvents = []) {
+    const current = await this.readBooking(bookingId).catch(() => null);
+    if (!current) {
+      const err = new Error('unknown_booking');
+      err.code = 'unknown_booking';
+      throw err;
+    }
+    if (Number(current.seq) !== Number(expectedSeq)) {
+      const err = new Error('stale_seq');
+      err.code = 'stale_seq';
+      err.currentSeq = current.seq;
+      throw err;
+    }
+    await writeJson(this.bookingFile(bookingId), nextBooking);
+    for (const event of ledgerEvents) {
+      await this.appendLedger(event);
+    }
+    return nextBooking;
+  }
+
+  async saveCitizenEscrow(escrow) {
+    if (!escrow?.citizenRootIdentityId) throw new Error('citizenEscrow requires citizenRootIdentityId.');
+    await this.init();
+    await writeJson(this.citizenEscrowFile(escrow.citizenRootIdentityId), escrow);
+    return escrow;
+  }
+
+  async readCitizenEscrow(citizenRootIdentityId) {
+    return readJson(this.citizenEscrowFile(citizenRootIdentityId));
   }
 
   // Phase 10.1 — labeling marketplace tables. Three resources:

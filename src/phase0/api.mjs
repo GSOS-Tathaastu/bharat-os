@@ -274,6 +274,47 @@ import {
   DEFAULT_QUERY_RADIUS_M,
   MAX_QUERY_RADIUS_M
 } from '../phase1/marketplace-discovery.mjs';
+import {
+  createBooking,
+  acceptBooking,
+  rejectBooking,
+  cancelBooking,
+  markBookingComplete,
+  citizenConfirmComplete,
+  fileDispute,
+  adjudicateDispute,
+  maybeAutoRelease,
+  publicBookingForCitizen,
+  publicBookingForProvider,
+  BOOKING_TERMINAL_STATUSES,
+  BOOKING_REFUND_TERMINAL_STATUSES,
+  BOOKING_PAYOUT_TERMINAL_STATUSES,
+  BOOKING_PRICING_BASES
+} from '../phase1/booking.mjs';
+import {
+  createCitizenEscrow,
+  depositCitizenEscrow,
+  lockCitizenEscrow,
+  debitLockedCitizenEscrow,
+  refundLockedCitizenEscrow,
+  publicCitizenEscrow,
+  availableCitizenEscrow
+} from '../phase1/citizen-escrow.mjs';
+import {
+  requireProviderOwnerAuth,
+  requireBookingPartyAuth,
+  requireCitizenOwnerAuth,
+  ProviderAuthError
+} from './provider-auth.mjs';
+import {
+  buildProviderNewBookingPush,
+  buildCitizenBookingAcceptedPush,
+  buildCitizenMarkedCompletePush,
+  buildProviderPayoutPush,
+  buildCitizenRefundPush,
+  buildProviderDisputeFiledPush,
+  buildCitizenDisputeFiledPush
+} from './booking-push.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1850,6 +1891,634 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // ── Phase 12.1a.2 — booking endpoints ─────────────────────────
+
+      // Helper: settlement on a citizen_confirmed / auto_released
+      // booking. Debit locked from citizen escrow, emit payout event
+      // to provider's mesh balance bookkeeping. Returns the ledger
+      // events that should be appended atomically with the booking
+      // write via casUpdateBooking.
+      async function settleBookingPayout(booking, { at }) {
+        const events = [];
+        let escrow = await store.readCitizenEscrow(booking.citizenRootIdentityId).catch(() => null);
+        if (escrow) {
+          escrow = debitLockedCitizenEscrow(escrow, booking.rateSnapshot.quotedAmountPaise, { at });
+          await store.saveCitizenEscrow(escrow);
+        }
+        events.push({
+          type: 'booking.escrow_released',
+          bookingId: booking.bookingId,
+          providerIdentityId: booking.providerIdentityId,
+          providerRootIdentityId: booking.providerRootIdentityId,
+          amountPaise: booking.rateSnapshot.quotedAmountPaise,
+          at
+        });
+        events.push({
+          type: 'booking.payout',
+          bookingId: booking.bookingId,
+          providerRootIdentityId: booking.providerRootIdentityId,
+          amountPaise: booking.rateSnapshot.quotedAmountPaise,
+          at
+        });
+        return events;
+      }
+
+      async function refundBookingEscrow(booking, { at, reason }) {
+        const events = [];
+        let escrow = await store.readCitizenEscrow(booking.citizenRootIdentityId).catch(() => null);
+        if (escrow) {
+          // refundLocked unlocks without debiting; balance restored
+          // for the citizen's next booking.
+          escrow = refundLockedCitizenEscrow(escrow, booking.rateSnapshot.quotedAmountPaise, { at });
+          await store.saveCitizenEscrow(escrow);
+        }
+        events.push({
+          type: 'booking.escrow_refunded',
+          bookingId: booking.bookingId,
+          citizenRootIdentityId: booking.citizenRootIdentityId,
+          amountPaise: booking.rateSnapshot.quotedAmountPaise,
+          reason: reason || null,
+          at
+        });
+        return events;
+      }
+
+      // Lazy auto-release / expiry sweep over a single booking.
+      // Returns the latest booking record after any auto transition
+      // has been applied + persisted. Called by every read path.
+      async function lazyAutoSweep(booking) {
+        if (!booking) return booking;
+        if (BOOKING_TERMINAL_STATUSES.has(booking.status)) return booking;
+        const { booking: next, released, expired, transitions } = maybeAutoRelease(booking, {
+          now: Date.now(),
+          nowIsoStr: new Date().toISOString()
+        });
+        if (!released && !expired) return booking;
+        const at = next.updatedAt;
+        const ledgerEvents = [];
+        if (released) {
+          ledgerEvents.push({
+            type: 'booking.auto_released',
+            bookingId: next.bookingId,
+            providerRootIdentityId: next.providerRootIdentityId,
+            at
+          });
+          ledgerEvents.push(...await settleBookingPayout(next, { at }));
+        } else if (expired) {
+          ledgerEvents.push({
+            type: 'booking.expired',
+            bookingId: next.bookingId,
+            at
+          });
+          ledgerEvents.push(...await refundBookingEscrow(next, { at, reason: 'expired_unaccepted' }));
+        }
+        try {
+          await store.casUpdateBooking(booking.bookingId, booking.seq, next, ledgerEvents);
+        } catch (err) {
+          // Concurrent sweep won the race; just re-read.
+          if (err?.code === 'stale_seq') {
+            return await store.readBooking(booking.bookingId).catch(() => booking);
+          }
+          throw err;
+        }
+        if (released) {
+          await sendPushToIdentity(
+            store,
+            next.providerRootIdentityId,
+            buildProviderPayoutPush({ booking: next, outcome: 'auto_released' }),
+            { ledgerType: 'booking.push.provider_payout', requestId }
+          ).catch(() => null);
+        } else if (expired) {
+          await sendPushToIdentity(
+            store,
+            next.citizenRootIdentityId,
+            buildCitizenRefundPush({ booking: next, reason: 'expired_unaccepted' }),
+            { ledgerType: 'booking.push.citizen_refund', requestId }
+          ).catch(() => null);
+        }
+        return next;
+      }
+
+      function bookingProjection(booking, role) {
+        return role === 'provider' ? publicBookingForProvider(booking) : publicBookingForCitizen(booking);
+      }
+
+      function staleSeqResponse(currentBooking, role) {
+        jsonResponse(response, 409, {
+          error: {
+            code: 'stale_seq',
+            message: 'booking has been updated by another party; reload and try again.',
+            currentSeq: currentBooking.seq,
+            currentStatus: currentBooking.status
+          },
+          booking: bookingProjection(currentBooking, role)
+        });
+      }
+
+      // POST /api/marketplace/bookings — citizen creates a booking,
+      // locks escrow atomically. Server re-validates expectedAmountPaise
+      // against the freshly-computed rate snapshot to catch rate drift.
+      if (request.method === 'POST' && url.pathname === '/api/marketplace/bookings') {
+        const body = await readRequestJson(request);
+        const citizenId = typeof body.citizenRootIdentityId === 'string' ? body.citizenRootIdentityId.trim() : '';
+        if (!citizenId) {
+          jsonResponse(response, 400, {
+            error: { code: 'citizen_required', message: 'citizenRootIdentityId is required.' }
+          });
+          return;
+        }
+        const citizen = await store.readIdentity(citizenId).catch(() => null);
+        if (!citizen) {
+          jsonResponse(response, 404, {
+            error: { code: 'citizen_not_found', message: 'citizenRootIdentityId does not resolve to a known identity.' }
+          });
+          return;
+        }
+        const providerIdentityId = typeof body.providerIdentityId === 'string' ? body.providerIdentityId.trim() : '';
+        const provider = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!provider) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider not found.' }
+          });
+          return;
+        }
+        let booking;
+        try {
+          booking = createBooking({
+            citizenRootIdentityId: citizenId,
+            provider,
+            pricingBasis: body.pricingBasis,
+            estimatedHours: body.estimatedHours,
+            pickup: body.pickup ?? null,
+            citizenNote: body.citizenNote ?? null,
+            expectedAmountPaise: body.expectedAmountPaise ?? null
+          });
+        } catch (err) {
+          const code = err.code || 'invalid_booking';
+          const status = code === 'rate_drift' ? 409
+            : code === 'provider_not_bookable' ? 403
+            : code === 'cannot_book_self' ? 403
+            : 400;
+          jsonResponse(response, status, {
+            error: { code, message: err.message, ...(err.currentQuotedAmountPaise ? { currentQuotedAmountPaise: err.currentQuotedAmountPaise } : {}) }
+          });
+          return;
+        }
+        // ESCROW-CAS (adversarial review) — atomic check+lock on the
+        // citizen escrow envelope. Two parallel booking-creates
+        // racing through the available-balance check are serialized
+        // by the BEGIN IMMEDIATE inside casUpdateCitizenEscrow; one
+        // wins, the other sees stale_seq and we retry once with the
+        // refreshed envelope. A second stale_seq surfaces as 409 so
+        // the FE can re-render the citizen's updated balance.
+        let escrow = await store.readCitizenEscrow(citizenId).catch(() => null);
+        let priorSeq = escrow ? Number(escrow.seq || 0) : null;
+        const tryLock = async () => {
+          if (!escrow) {
+            escrow = createCitizenEscrow(citizenId, { createdAt: booking.createdAt });
+            priorSeq = null;
+          }
+          if (availableCitizenEscrow(escrow) < booking.rateSnapshot.quotedAmountPaise) {
+            const err = new Error('insufficient available citizen escrow.');
+            err.code = 'insufficient_escrow';
+            err.availablePaise = availableCitizenEscrow(escrow);
+            throw err;
+          }
+          const nextEscrow = lockCitizenEscrow(escrow, booking.rateSnapshot.quotedAmountPaise, { at: booking.createdAt });
+          await store.casUpdateCitizenEscrow(citizenId, priorSeq, nextEscrow);
+          escrow = nextEscrow;
+        };
+        let lockOk = false;
+        try {
+          await tryLock();
+          lockOk = true;
+        } catch (err) {
+          if (err?.code === 'stale_seq') {
+            // Re-read and try once more.
+            escrow = await store.readCitizenEscrow(citizenId).catch(() => null);
+            priorSeq = escrow ? Number(escrow.seq || 0) : null;
+            try {
+              await tryLock();
+              lockOk = true;
+            } catch (err2) {
+              if (err2?.code === 'insufficient_escrow') {
+                jsonResponse(response, 402, {
+                  error: { code: 'insufficient_escrow', message: err2.message, availablePaise: err2.availablePaise ?? null, requiredPaise: booking.rateSnapshot.quotedAmountPaise }
+                });
+                return;
+              }
+              if (err2?.code === 'stale_seq') {
+                jsonResponse(response, 409, {
+                  error: { code: 'escrow_concurrent_update', message: 'citizen escrow was updated concurrently; reload and try again.' }
+                });
+                return;
+              }
+              throw err2;
+            }
+          } else if (err?.code === 'insufficient_escrow') {
+            jsonResponse(response, 402, {
+              error: { code: 'insufficient_escrow', message: err.message, availablePaise: err.availablePaise ?? null, requiredPaise: booking.rateSnapshot.quotedAmountPaise }
+            });
+            return;
+          } else {
+            throw err;
+          }
+        }
+        if (!lockOk) {
+          jsonResponse(response, 500, { error: { code: 'lock_failed', message: 'escrow lock failed.' } });
+          return;
+        }
+        await store.saveBooking(booking);
+        await store.appendLedger({
+          type: 'booking.created',
+          bookingId: booking.bookingId,
+          providerIdentityId: booking.providerIdentityId,
+          roleKind: booking.roleKind,
+          pickupBubble1dp: booking.pickupPoint ? booking.pickupPoint.bubble1dp : null,
+          at: booking.createdAt
+        });
+        await store.appendLedger({
+          type: 'booking.escrow_locked',
+          bookingId: booking.bookingId,
+          amountPaise: booking.rateSnapshot.quotedAmountPaise,
+          at: booking.createdAt
+        });
+        await sendPushToIdentity(
+          store,
+          booking.providerRootIdentityId,
+          buildProviderNewBookingPush({ booking }),
+          { ledgerType: 'booking.push.provider_new', requestId }
+        ).catch(() => null);
+        jsonResponse(response, 201, {
+          ok: true,
+          booking: publicBookingForCitizen(booking)
+        });
+        return;
+      }
+
+      // GET /api/marketplace/bookings/:bookingId — party-aware
+      // projection. Either party can read; auto-sweeps first.
+      const bookingDetailMatch = /^\/api\/marketplace\/bookings\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && bookingDetailMatch) {
+        const bookingId = decodeURIComponent(bookingDetailMatch[1]);
+        let authResult;
+        try {
+          authResult = await requireBookingPartyAuth({ store, bookingId, request, body: null, requestId });
+        } catch (err) {
+          if (err instanceof ProviderAuthError) {
+            jsonResponse(response, err.status, { error: { code: err.code, message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        const sweptBooking = await lazyAutoSweep(authResult.booking);
+        jsonResponse(response, 200, {
+          booking: bookingProjection(sweptBooking, authResult.role)
+        });
+        return;
+      }
+
+      // POST /api/marketplace/bookings/:bookingId/<action>
+      const bookingActionMatch = /^\/api\/marketplace\/bookings\/([^/]+)\/(accept|reject|cancel|mark-complete|confirm-complete|dispute)$/.exec(url.pathname);
+      if (request.method === 'POST' && bookingActionMatch) {
+        const bookingId = decodeURIComponent(bookingActionMatch[1]);
+        const action = bookingActionMatch[2];
+        const body = await readRequestJson(request);
+        let authResult;
+        try {
+          authResult = await requireBookingPartyAuth({ store, bookingId, request, body, requestId });
+        } catch (err) {
+          if (err instanceof ProviderAuthError) {
+            jsonResponse(response, err.status, { error: { code: err.code, message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        let { booking, role } = authResult;
+        // Pre-sweep so stale data doesn't cause spurious 409s.
+        booking = await lazyAutoSweep(booking);
+        const expectedSeq = Number(body.expectedSeq);
+        if (!Number.isFinite(expectedSeq) || expectedSeq !== booking.seq) {
+          staleSeqResponse(booking, role);
+          return;
+        }
+        const at = new Date().toISOString();
+        let next;
+        let ledgerEvents = [];
+        let pushTarget = null;
+        let pushPayload = null;
+        let pushLedgerType = null;
+        try {
+          if (action === 'accept') {
+            if (role !== 'provider') throw Object.assign(new Error('only the provider can accept'), { code: 'not_provider' });
+            next = acceptBooking(booking, { at });
+            ledgerEvents.push({ type: 'booking.accepted', bookingId, at });
+            pushTarget = next.citizenRootIdentityId;
+            pushPayload = buildCitizenBookingAcceptedPush({ booking: next });
+            pushLedgerType = 'booking.push.citizen_accepted';
+          } else if (action === 'reject') {
+            if (role !== 'provider') throw Object.assign(new Error('only the provider can reject'), { code: 'not_provider' });
+            next = rejectBooking(booking, { at, reason: body.reason });
+            ledgerEvents.push({ type: 'booking.rejected', bookingId, reason: next.rejectReason, at });
+            ledgerEvents.push(...await refundBookingEscrow(next, { at, reason: 'rejected_by_provider' }));
+            pushTarget = next.citizenRootIdentityId;
+            pushPayload = buildCitizenRefundPush({ booking: next, reason: 'rejected_by_provider' });
+            pushLedgerType = 'booking.push.citizen_refund';
+          } else if (action === 'cancel') {
+            if (role !== 'citizen') throw Object.assign(new Error('only the citizen can cancel'), { code: 'not_citizen' });
+            next = cancelBooking(booking, { at, reason: body.reason, by: 'citizen' });
+            ledgerEvents.push({ type: 'booking.cancelled', bookingId, reason: next.cancelReason, at });
+            ledgerEvents.push(...await refundBookingEscrow(next, { at, reason: 'cancelled_by_citizen' }));
+            pushTarget = next.providerRootIdentityId;
+            pushPayload = buildCitizenRefundPush({ booking: next, reason: 'cancelled_by_citizen' });
+            pushLedgerType = 'booking.push.provider_cancelled';
+          } else if (action === 'mark-complete') {
+            if (role !== 'provider') throw Object.assign(new Error('only the provider can mark complete'), { code: 'not_provider' });
+            next = markBookingComplete(booking, { at });
+            ledgerEvents.push({ type: 'booking.provider_marked_complete', bookingId, at });
+            pushTarget = next.citizenRootIdentityId;
+            pushPayload = buildCitizenMarkedCompletePush({ booking: next });
+            pushLedgerType = 'booking.push.citizen_marked_complete';
+          } else if (action === 'confirm-complete') {
+            if (role !== 'citizen') throw Object.assign(new Error('only the citizen can confirm complete'), { code: 'not_citizen' });
+            next = citizenConfirmComplete(booking, { at });
+            ledgerEvents.push({ type: 'booking.citizen_confirmed', bookingId, at });
+            ledgerEvents.push(...await settleBookingPayout(next, { at }));
+            pushTarget = next.providerRootIdentityId;
+            pushPayload = buildProviderPayoutPush({ booking: next, outcome: 'citizen_confirmed' });
+            pushLedgerType = 'booking.push.provider_payout';
+          } else if (action === 'dispute') {
+            next = fileDispute(booking, { filedBy: role, reason: body.reason, at });
+            ledgerEvents.push({
+              type: 'booking.disputed',
+              bookingId,
+              filedBy: role,
+              reason: next.disputeReason,
+              at
+            });
+            pushTarget = role === 'citizen' ? next.providerRootIdentityId : next.citizenRootIdentityId;
+            pushPayload = role === 'citizen'
+              ? buildProviderDisputeFiledPush({ booking: next })
+              : buildCitizenDisputeFiledPush({ booking: next });
+            pushLedgerType = 'booking.push.dispute_filed';
+          }
+        } catch (err) {
+          const code = err.code || 'invalid_transition';
+          const status = code === 'booking_status_locked' || code === 'not_provider' || code === 'not_citizen' ? 409 : 400;
+          jsonResponse(response, status, {
+            error: { code, message: err.message, ...(err.from ? { from: err.from } : {}), ...(err.to ? { to: err.to } : {}) }
+          });
+          return;
+        }
+        try {
+          await store.casUpdateBooking(bookingId, expectedSeq, next, ledgerEvents);
+        } catch (err) {
+          if (err?.code === 'stale_seq') {
+            const current = await store.readBooking(bookingId).catch(() => booking);
+            staleSeqResponse(current, role);
+            return;
+          }
+          throw err;
+        }
+        if (pushTarget && pushPayload && pushLedgerType) {
+          await sendPushToIdentity(store, pushTarget, pushPayload, { ledgerType: pushLedgerType, requestId }).catch(() => null);
+        }
+        jsonResponse(response, 200, { ok: true, booking: bookingProjection(next, role) });
+        return;
+      }
+
+      // GET /api/citizens/:rootIdentityId/bookings?status — citizen's
+      // own booking list. PRIV-1 (adversarial review) — service-layer
+      // auth via requireCitizenOwnerAuth so an attacker who guesses a
+      // citizenRootIdentityId cannot enumerate that citizen's bookings.
+      // Sweeps all returned bookings for auto-release / expiry.
+      const citizenBookingsListMatch = /^\/api\/citizens\/([^/]+)\/bookings$/.exec(url.pathname);
+      if (request.method === 'GET' && citizenBookingsListMatch) {
+        const citizenRootIdentityId = decodeURIComponent(citizenBookingsListMatch[1]);
+        try {
+          await requireCitizenOwnerAuth({ store, citizenRootIdentityId, request, body: null, requestId });
+        } catch (err) {
+          if (err instanceof ProviderAuthError) {
+            jsonResponse(response, err.status, { error: { code: err.code, message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        const status = url.searchParams.get('status') || undefined;
+        const all = await store.listBookings({ citizenRootIdentityId, status });
+        const swept = await Promise.all(all.map((b) => lazyAutoSweep(b)));
+        // Sort newest first.
+        swept.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        jsonResponse(response, 200, {
+          bookings: swept.map(publicBookingForCitizen)
+        });
+        return;
+      }
+
+      // GET /api/citizens/:rootIdentityId/escrow — owner-gated
+      // projection of the citizen's escrow envelope. PRIV-2
+      // (adversarial review) — was 'public projection'; now
+      // requires acting identity match.
+      const citizenEscrowMatch = /^\/api\/citizens\/([^/]+)\/escrow$/.exec(url.pathname);
+      if (request.method === 'GET' && citizenEscrowMatch) {
+        const citizenRootIdentityId = decodeURIComponent(citizenEscrowMatch[1]);
+        try {
+          await requireCitizenOwnerAuth({ store, citizenRootIdentityId, request, body: null, requestId });
+        } catch (err) {
+          if (err instanceof ProviderAuthError) {
+            jsonResponse(response, err.status, { error: { code: err.code, message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        const escrow = await store.readCitizenEscrow(citizenRootIdentityId).catch(() => null);
+        if (!escrow) {
+          jsonResponse(response, 200, {
+            escrow: {
+              citizenEscrowId: null,
+              fundingMode: 'bookkeeping-v1',
+              escrowBalancePaise: 0,
+              escrowLockedPaise: 0,
+              availablePaise: 0,
+              updatedAt: null
+            }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { escrow: publicCitizenEscrow(escrow) });
+        return;
+      }
+
+      // GET /api/provider-identities/:providerIdentityId/bookings
+      //   ?status&actingRootIdentityId — provider's inbox / active /
+      //   history. Owner-auth gated. Sweeps all returned bookings.
+      const providerBookingsListMatch = /^\/api\/provider-identities\/([^/]+)\/bookings$/.exec(url.pathname);
+      if (request.method === 'GET' && providerBookingsListMatch) {
+        const providerIdentityId = decodeURIComponent(providerBookingsListMatch[1]);
+        try {
+          await requireProviderOwnerAuth({ store, providerIdentityId, request, body: null, requestId });
+        } catch (err) {
+          if (err instanceof ProviderAuthError) {
+            jsonResponse(response, err.status, { error: { code: err.code, message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        const status = url.searchParams.get('status') || undefined;
+        const all = await store.listBookings({ providerIdentityId, status });
+        const swept = await Promise.all(all.map((b) => lazyAutoSweep(b)));
+        swept.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        jsonResponse(response, 200, {
+          bookings: swept.map(publicBookingForProvider)
+        });
+        return;
+      }
+
+      // POST /api/admin/citizens/:rootIdentityId/escrow/deposit
+      //   Admin-token gated. Bookkeeping-v1: stands in for a real
+      //   PSP-verified UPI credit until Phase 12.2+ payment rail.
+      const citizenDepositMatch = /^\/api\/admin\/citizens\/([^/]+)\/escrow\/deposit$/.exec(url.pathname);
+      if (request.method === 'POST' && citizenDepositMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const citizenRootIdentityId = decodeURIComponent(citizenDepositMatch[1]);
+        const body = await readRequestJson(request);
+        const amount = Number(body.amountPaise);
+        if (!Number.isFinite(amount) || amount <= 0 || Math.floor(amount) !== amount) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_amount', message: 'amountPaise must be a positive integer.' }
+          });
+          return;
+        }
+        const citizen = await store.readIdentity(citizenRootIdentityId).catch(() => null);
+        if (!citizen) {
+          jsonResponse(response, 404, {
+            error: { code: 'citizen_not_found', message: 'unknown citizen.' }
+          });
+          return;
+        }
+        let escrow = await store.readCitizenEscrow(citizenRootIdentityId).catch(() => null);
+        if (!escrow) escrow = createCitizenEscrow(citizenRootIdentityId);
+        escrow = depositCitizenEscrow(escrow, amount);
+        await store.saveCitizenEscrow(escrow);
+        await store.appendLedger({
+          type: 'citizen_escrow.deposited',
+          citizenRootIdentityId,
+          amountPaise: amount,
+          operatorId: auth.operator,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, { ok: true, escrow: publicCitizenEscrow(escrow) });
+        return;
+      }
+
+      // GET /api/admin/bookings?status=disputed — operator queue.
+      if (request.method === 'GET' && url.pathname === '/api/admin/bookings') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const status = url.searchParams.get('status') || 'disputed';
+        const all = await store.listBookings({ status });
+        jsonResponse(response, 200, {
+          bookings: all.map((b) => ({
+            ...publicBookingForCitizen(b),
+            citizenRootIdentityId: b.citizenRootIdentityId,
+            providerRootIdentityId: b.providerRootIdentityId
+          }))
+        });
+        return;
+      }
+
+      // POST /api/admin/bookings/:bookingId/adjudicate — operator
+      //   adjudicates a disputed booking. Two outcomes for v1.
+      const adjudicateMatch = /^\/api\/admin\/bookings\/([^/]+)\/adjudicate$/.exec(url.pathname);
+      if (request.method === 'POST' && adjudicateMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const bookingId = decodeURIComponent(adjudicateMatch[1]);
+        const body = await readRequestJson(request);
+        const booking = await store.readBooking(bookingId).catch(() => null);
+        if (!booking) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_booking', message: 'booking not found.' }
+          });
+          return;
+        }
+        const expectedSeq = Number(body.expectedSeq);
+        if (!Number.isFinite(expectedSeq) || expectedSeq !== booking.seq) {
+          jsonResponse(response, 409, {
+            error: { code: 'stale_seq', message: 'booking has been updated; reload and try again.', currentSeq: booking.seq }
+          });
+          return;
+        }
+        const at = new Date().toISOString();
+        let next;
+        try {
+          next = adjudicateDispute(booking, { outcome: body.outcome, operatorId: auth.operator, at });
+        } catch (err) {
+          const code = err.code || 'invalid_adjudication';
+          jsonResponse(response, code === 'booking_status_locked' ? 409 : 400, {
+            error: { code, message: err.message }
+          });
+          return;
+        }
+        const ledgerEvents = [{
+          type: 'booking.adjudicated',
+          bookingId,
+          outcome: body.outcome,
+          operatorId: auth.operator,
+          at
+        }];
+        if (next.status === 'citizen_confirmed') {
+          ledgerEvents.push(...await settleBookingPayout(next, { at }));
+        } else if (next.status === 'cancelled_after_dispute') {
+          ledgerEvents.push(...await refundBookingEscrow(next, { at, reason: 'dispute_refund' }));
+        }
+        try {
+          await store.casUpdateBooking(bookingId, expectedSeq, next, ledgerEvents);
+        } catch (err) {
+          if (err?.code === 'stale_seq') {
+            jsonResponse(response, 409, { error: { code: 'stale_seq', message: err.message } });
+            return;
+          }
+          throw err;
+        }
+        // Notify both parties.
+        if (next.status === 'citizen_confirmed') {
+          await sendPushToIdentity(store, next.providerRootIdentityId, buildProviderPayoutPush({ booking: next, outcome: 'citizen_confirmed' }), { ledgerType: 'booking.push.provider_payout', requestId }).catch(() => null);
+        } else {
+          await sendPushToIdentity(store, next.citizenRootIdentityId, buildCitizenRefundPush({ booking: next, reason: 'dispute_refund' }), { ledgerType: 'booking.push.citizen_refund', requestId }).catch(() => null);
+        }
+        jsonResponse(response, 200, { ok: true, booking: publicBookingForCitizen(next) });
+        return;
+      }
+
+      // POST /api/admin/bookings/sweep-stale — operator backstop.
+      //   Runs lazyAutoSweep over every non-terminal booking. Safe
+      //   to call on a cron; CAS makes it idempotent.
+      if (request.method === 'POST' && url.pathname === '/api/admin/bookings/sweep-stale') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const all = await store.listBookings();
+        const nonTerminal = all.filter((b) => !BOOKING_TERMINAL_STATUSES.has(b.status));
+        let released = 0;
+        let expired = 0;
+        for (const b of nonTerminal) {
+          const before = b.status;
+          const after = await lazyAutoSweep(b);
+          if (after.status !== before) {
+            if (after.status === 'auto_released') released += 1;
+            if (after.status === 'expired_unaccepted') expired += 1;
+          }
+        }
+        jsonResponse(response, 200, {
+          ok: true,
+          examined: nonTerminal.length,
+          autoReleased: released,
+          expired
+        });
+        return;
+      }
+
       // Phase 10.1 — labeling-job lifecycle endpoints. Sponsor-bearer
       // gated for create/upload/launch; public for worker-side
       // discovery; worker-anchored for submissions.
@@ -2753,6 +3422,16 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/admin/provider-identities/:providerIdentityId/transition  (operator status change)',
             'GET /api/marketplace/providers?lat&lng&radiusMeters&role&limit  (Phase 12.1a.1 — discovery)',
             'POST /api/marketplace/providers/:providerIdentityId/express-interest  (Phase 12.1a.1 — booking stub)',
+            'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',
+            'GET /api/marketplace/bookings/:bookingId  (Phase 12.1a.2 — party-aware projection)',
+            'POST /api/marketplace/bookings/:bookingId/accept|reject|cancel|mark-complete|confirm-complete|dispute  (Phase 12.1a.2 — CAS+expectedSeq)',
+            'GET /api/citizens/:rootIdentityId/bookings?status  (Phase 12.1a.2 — citizen booking list)',
+            'GET /api/citizens/:rootIdentityId/escrow  (Phase 12.1a.2 — citizen escrow projection)',
+            'GET /api/provider-identities/:providerIdentityId/bookings?status  (Phase 12.1a.2 — provider inbox; owner-auth)',
+            'POST /api/admin/citizens/:rootIdentityId/escrow/deposit  (Phase 12.1a.2 — bookkeeping-v1 funding)',
+            'GET /api/admin/bookings?status  (Phase 12.1a.2 — operator queue)',
+            'POST /api/admin/bookings/:bookingId/adjudicate  (Phase 12.1a.2 — operator dispute resolution)',
+            'POST /api/admin/bookings/sweep-stale  (Phase 12.1a.2 — operator backstop)',
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',

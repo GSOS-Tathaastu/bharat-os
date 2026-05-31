@@ -152,6 +152,74 @@ Implemented pieces:
 
 ---
 
+## 🛒 2026-06-01 — Phase 12.1a.2 shipped: booking + escrow + provider surface — marketplace LOOP CLOSES
+
+Second + final 12.1a sub-phase. Citizens lock escrow against a
+Bharat-OS-native provider; providers receive push, accept, mark
+complete; payout settles on citizen confirm OR after a 24h
+auto-release. The full marketplace loop is live end-to-end.
+
+- **ADR 0136** — both BE + FE.
+- **6-state booking machine** with CAS-guarded transitions
+  (monotonic `seq` per write). Concurrent provider accepts
+  race safely: one wins, second gets 409 `stale_seq`. CAS
+  also covers the citizen escrow envelope so two parallel
+  booking-creates cannot both lock past available balance.
+- **Rate snapshot frozen** at booking-create. Provider rate
+  edits do NOT propagate to existing bookings (tested).
+- **Asymmetric pickup privacy** preserved from 12.1a.1: 4dp
+  persist on the booking record (party-only), 1dp bubble on
+  the ledger. Provider sees ONLY bubble1dp before accept; full
+  pickup unlocks after accept. Ledger PII replay test asserts
+  no 4dp coord on any `booking.*` event.
+- **Lazy auto-release on read** — every list/detail endpoint
+  calls `maybeAutoRelease` before returning. 4h pre-accept
+  expiry refunds idle bookings; 24h provider_marked_complete
+  window auto-releases payout. No node-cron. Operator backstop
+  at `POST /api/admin/bookings/sweep-stale` (CAS-safe).
+- **Disputed = operator-only**. `POST /api/admin/bookings/:id/
+  adjudicate` returns `release_to_provider | refund_to_citizen`.
+- **Provider auth = root identity** (NO bearer in v1). Providers
+  are citizens with already-phone-authed identity. Bearer-mint
+  for delegation (spouse / dispatcher / fleet) is Phase 12.3.
+- **Bookkeeping-v1 funding**: admin-token-gated citizen escrow
+  deposit stands in for a real UPI rail until Phase 12.2+.
+- **CORE shared substrates** per the founder binding:
+  - `src/phase0/escrow-paise.mjs` — entity-agnostic paise
+    primitives. sponsor.mjs is a thin wrapper; 47 sponsor tests
+    pass as the regression gate.
+  - `src/phase0/provider-auth.mjs` — `requireProviderOwnerAuth`
+    + `requireBookingPartyAuth` + `requireCitizenOwnerAuth`.
+  - `src/phase0/booking-push.mjs` — §15-redacted payload
+    builders with binding-grep tests.
+  - `src/phase0/geo.mjs::bubbleAt1dp` — ledger-safe coarsening.
+  - FE: `lib/format-paise.ts` + `format-distance.ts` +
+    `provider-context-store.ts` + `components/booking/*`.
+- **11 new API endpoints** + **/provider/* surface** with 5-tab
+  bottom nav + **/citizen/services/bookings** list + detail.
+  "Book now" PRIMARY CTA added to citizen provider-detail
+  alongside the preserved "Express interest" soft-touch.
+- **Push** fires on every key transition. Citizen pushes generic;
+  provider's own payout push may carry ₹ amount (own earnings).
+- **Adversarial review** (3 lenses + triage): 3 must-fix + 10
+  should-fix identified. **All 3 must-fix + 6 should-fix
+  applied** before commit:
+  - PRIV-1+2: citizen GETs were unauthenticated. Fixed via new
+    `requireCitizenOwnerAuth` helper + acting-identity header.
+  - ESCROW-CAS: race on `availableCitizenEscrow` check before
+    lock. Fixed via `seq` + `casUpdateCitizenEscrow`.
+  - UX-1 (rate basis when one rate), UX-2 (no impl-detail copy),
+    UX-4 / UX-10 (warmer empty states), UX-8 (citizen-safety
+    framing for pre-accept mask), TEST-AUTH (3 new gate tests).
+- Tests: **975/975 Node** + **66/66 vitest**. tsc clean. Bundle
+  528 → 557 KB / 156 KB gzipped.
+
+**Next: Phase 12.1b** (SLM AI-orchestration) OR **Phase 12.2**
+(provider onboarding wave 1 + Aadhaar e-KYC + ratings + Trust
+Passport feedback loop) — TBD by founder.
+
+---
+
 ## 🗺️ 2026-06-01 — Phase 12.1a.1 shipped: marketplace discovery substrate + citizen browse
 
 First of two 12.1a sub-phases. Citizens can now browse Bharat-OS-

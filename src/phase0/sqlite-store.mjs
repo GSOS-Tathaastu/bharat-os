@@ -446,6 +446,26 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_provider_id_root ON provider_identities(root_identity_id);
   CREATE INDEX IF NOT EXISTS idx_provider_id_role ON provider_identities(role_kind);
   CREATE INDEX IF NOT EXISTS idx_provider_id_status ON provider_identities(status);
+
+  CREATE TABLE IF NOT EXISTS bookings (
+    booking_id TEXT PRIMARY KEY,
+    citizen_root_identity_id TEXT NOT NULL,
+    provider_identity_id TEXT NOT NULL,
+    provider_root_identity_id TEXT NOT NULL,
+    role_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_booking_citizen ON bookings(citizen_root_identity_id);
+  CREATE INDEX IF NOT EXISTS idx_booking_provider ON bookings(provider_identity_id);
+  CREATE INDEX IF NOT EXISTS idx_booking_provider_root ON bookings(provider_root_identity_id);
+  CREATE INDEX IF NOT EXISTS idx_booking_status ON bookings(status);
+
+  CREATE TABLE IF NOT EXISTS citizen_escrows (
+    citizen_root_identity_id TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+  );
 `;
 
 function parse(row) {
@@ -2085,6 +2105,181 @@ export class SqliteStore {
     return rows.map((r) => hydrateProviderIdentity(JSON.parse(r.json)));
   }
 
+  // ─── Phase 12.1a.2 — Bookings + citizen escrow ────────────────────────
+
+  async saveBooking(booking) {
+    if (!booking?.bookingId) throw new Error('booking requires bookingId.');
+    await this.init();
+    this._upsert(
+      'bookings',
+      ['booking_id', 'citizen_root_identity_id', 'provider_identity_id', 'provider_root_identity_id', 'role_kind', 'status', 'seq', 'json'],
+      [
+        booking.bookingId,
+        booking.citizenRootIdentityId,
+        booking.providerIdentityId,
+        booking.providerRootIdentityId,
+        booking.roleKind,
+        booking.status,
+        booking.seq,
+        JSON.stringify(booking)
+      ]
+    );
+    return booking;
+  }
+
+  async readBooking(bookingId) {
+    await this.init();
+    return this._readOne('bookings', 'booking_id', bookingId);
+  }
+
+  async listBookings({ citizenRootIdentityId, providerIdentityId, status } = {}) {
+    await this.init();
+    let sql = 'SELECT json FROM bookings';
+    const where = [];
+    const params = [];
+    if (citizenRootIdentityId) {
+      where.push('citizen_root_identity_id = ?');
+      params.push(citizenRootIdentityId);
+    }
+    if (providerIdentityId) {
+      where.push('provider_identity_id = ?');
+      params.push(providerIdentityId);
+    }
+    if (status) {
+      where.push('status = ?');
+      params.push(status);
+    }
+    if (where.length) sql += ' WHERE ' + where.join(' AND ');
+    sql += ' ORDER BY booking_id';
+    const rows = this.db.prepare(sql).all(...params);
+    return rows.map((r) => JSON.parse(r.json));
+  }
+
+  // Atomic CAS write. UPDATE ... WHERE seq=? + ledger appends within
+  // a SQLite transaction. Second concurrent caller observes
+  // rowsAffected === 0 and gets a typed stale_seq.
+  //
+  // node:sqlite does NOT expose better-sqlite3's db.transaction()
+  // helper, so we run BEGIN IMMEDIATE / COMMIT manually. BEGIN
+  // IMMEDIATE acquires a RESERVED lock so the second concurrent
+  // CAS waits — when it reads back the seq, it sees the post-write
+  // value and gets `stale_seq` correctly.
+  async casUpdateBooking(bookingId, expectedSeq, nextBooking, ledgerEvents = []) {
+    await this.init();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.db
+        .prepare(
+          'UPDATE bookings SET status = ?, seq = ?, json = ? WHERE booking_id = ? AND seq = ?'
+        )
+        .run(nextBooking.status, nextBooking.seq, JSON.stringify(nextBooking), bookingId, expectedSeq);
+      if (result.changes !== 1) {
+        const current = this.db.prepare('SELECT seq FROM bookings WHERE booking_id = ?').get(bookingId);
+        this.db.exec('ROLLBACK');
+        if (!current) {
+          const err = new Error('unknown_booking');
+          err.code = 'unknown_booking';
+          throw err;
+        }
+        const err = new Error('stale_seq');
+        err.code = 'stale_seq';
+        err.currentSeq = current.seq;
+        throw err;
+      }
+      for (const event of ledgerEvents) {
+        this.db
+          .prepare(
+            'INSERT INTO ledger (type, at, identity_id, subject_id, actor_id, operator_id, json) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            event.type,
+            event.at || new Date().toISOString(),
+            event.identityId || null,
+            event.subjectId || null,
+            event.actorId || null,
+            event.operatorId || null,
+            JSON.stringify(event)
+          );
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (err?.code !== 'stale_seq' && err?.code !== 'unknown_booking') {
+        try { this.db.exec('ROLLBACK'); } catch (_) { /* already rolled back */ }
+      }
+      throw err;
+    }
+    return nextBooking;
+  }
+
+  async saveCitizenEscrow(escrow) {
+    if (!escrow?.citizenRootIdentityId) throw new Error('citizenEscrow requires citizenRootIdentityId.');
+    await this.init();
+    this._upsert(
+      'citizen_escrows',
+      ['citizen_root_identity_id', 'json'],
+      [escrow.citizenRootIdentityId, JSON.stringify(escrow)]
+    );
+    return escrow;
+  }
+
+  // Phase 12.1a.2 ESCROW-CAS — atomic check+write on citizen escrow.
+  // Mirrors casUpdateBooking semantics: only succeeds if the stored
+  // seq matches expectedSeq, otherwise throws { code: 'stale_seq' }
+  // so the caller can re-read + retry. Used by the booking-create
+  // path so two parallel citizen booking-creates can't both pass
+  // the available-balance check.
+  async casUpdateCitizenEscrow(citizenRootIdentityId, expectedSeq, nextEscrow) {
+    await this.init();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.db.prepare('SELECT json FROM citizen_escrows WHERE citizen_root_identity_id = ?').get(citizenRootIdentityId);
+      if (!row) {
+        // No prior record; this is a first-write — only allowed when
+        // expectedSeq is null (caller signals "no prior expected").
+        if (expectedSeq != null) {
+          this.db.exec('ROLLBACK');
+          const err = new Error('stale_seq');
+          err.code = 'stale_seq';
+          err.currentSeq = null;
+          throw err;
+        }
+        this._upsert(
+          'citizen_escrows',
+          ['citizen_root_identity_id', 'json'],
+          [citizenRootIdentityId, JSON.stringify(nextEscrow)]
+        );
+        this.db.exec('COMMIT');
+        return nextEscrow;
+      }
+      const current = JSON.parse(row.json);
+      const currentSeq = Number(current.seq || 0);
+      if (Number(expectedSeq) !== currentSeq) {
+        this.db.exec('ROLLBACK');
+        const err = new Error('stale_seq');
+        err.code = 'stale_seq';
+        err.currentSeq = currentSeq;
+        throw err;
+      }
+      this._upsert(
+        'citizen_escrows',
+        ['citizen_root_identity_id', 'json'],
+        [citizenRootIdentityId, JSON.stringify(nextEscrow)]
+      );
+      this.db.exec('COMMIT');
+    } catch (err) {
+      if (err?.code !== 'stale_seq') {
+        try { this.db.exec('ROLLBACK'); } catch (_) { /* ignore */ }
+      }
+      throw err;
+    }
+    return nextEscrow;
+  }
+
+  async readCitizenEscrow(citizenRootIdentityId) {
+    await this.init();
+    return this._readOne('citizen_escrows', 'citizen_root_identity_id', citizenRootIdentityId);
+  }
+
   // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────
 
   async readAuditSigner() {
@@ -2265,6 +2460,13 @@ export class SqliteStore {
       // when that root erases, all bound provider profiles go too.
       // §15: no orphaned providers in the marketplace.
       sections.providerIdentities = sweep('provider_identities', ['root_identity_id']);
+      // Phase 12.1a.2 — bookings cascade if either party's root
+      // identity is erased. Citizen erasure removes their booking
+      // history; provider-root erasure removes bookings the provider
+      // was a party to. Either path satisfies DPDP §12(3).
+      sections.bookings = sweep('bookings', ['citizen_root_identity_id', 'provider_root_identity_id']);
+      // Citizen-escrow envelope cascades on citizen erasure.
+      sections.citizenEscrows = sweep('citizen_escrows', ['citizen_root_identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

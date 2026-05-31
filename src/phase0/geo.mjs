@@ -140,3 +140,18 @@ export function bubblesOverlap({ origin, target, queryRadiusMeters, targetRadius
   const targetR = Math.max(0, Number(targetRadiusMeters) || 0);
   return d <= queryR + targetR;
 }
+
+// Phase 12.1a.2 — ledger-safe coarsening of a lat/lng pair to a
+// 1-decimal (~11 km) bubble key. Used by booking + escrow ledger
+// events: the pickup point is persisted at 4dp on the booking
+// record (party-only read), but ledger events carry ONLY the 1dp
+// bubble so even a full ledger replay cannot reconstruct citizen
+// movement. Returns 'NaN,NaN' for invalid input so the caller can
+// emit-or-skip rather than crash; in practice the booking module
+// requires a finite point before ledger emit.
+export function bubbleAt1dp(lat, lng) {
+  const a = round1(lat);
+  const b = round1(lng);
+  if (a == null || b == null) return 'NaN,NaN';
+  return `${a},${b}`;
+}

@@ -2113,6 +2113,253 @@ export function useExpressInterest() {
   });
 }
 
+// ─── Phase 12.1a.2 — booking + citizen escrow ──────────────────────
+
+export type BookingStatus =
+  | 'pre_authorized'
+  | 'in_progress'
+  | 'provider_marked_complete'
+  | 'citizen_confirmed'
+  | 'auto_released'
+  | 'disputed'
+  | 'cancelled_after_dispute'
+  | 'rejected_by_provider'
+  | 'cancelled_by_citizen'
+  | 'expired_unaccepted';
+
+export type BookingPricingBasis = 'per-service' | 'per-hour';
+
+export interface BookingRateSnapshot {
+  pricingBasis: BookingPricingBasis;
+  ratePaisePerHour: number;
+  ratePaisePerService: number;
+  estimatedHours: number | null;
+  quotedAmountPaise: number;
+  capturedFromProviderProtocol: string | null;
+  snapshotAt: string;
+}
+
+export interface BookingPickupPoint {
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+  capturedAt: string | null;
+  bubble1dp: string | null;
+}
+
+export interface PublicBooking {
+  bookingId: string;
+  protocolVersion: string;
+  objectType: string;
+  providerIdentityId: string;
+  roleKind: ProviderRoleKind;
+  status: BookingStatus;
+  seq: number;
+  rateSnapshot: BookingRateSnapshot;
+  pickupPoint: BookingPickupPoint | null;
+  distanceMetersAtBooking: number | null;
+  citizenNote: string | null;
+  createdAt: string;
+  acceptedAt: string | null;
+  providerCompletedAt: string | null;
+  citizenConfirmedAt: string | null;
+  autoReleasedAt: string | null;
+  disputedAt: string | null;
+  disputeFiledBy: 'citizen' | 'provider' | null;
+  disputeReason: string | null;
+  disputeOutcome: 'release_to_provider' | 'refund_to_citizen' | null;
+  rejectedAt: string | null;
+  rejectReason: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  expiredAt: string | null;
+  updatedAt: string;
+}
+
+export interface PublicCitizenEscrow {
+  citizenEscrowId: string | null;
+  fundingMode: string;
+  escrowBalancePaise: number;
+  escrowLockedPaise: number;
+  availablePaise: number;
+  updatedAt: string | null;
+}
+
+export function useCitizenEscrow(rootIdentityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['citizen-escrow', rootIdentityId],
+    queryFn: () =>
+      api<{ escrow: PublicCitizenEscrow }>(
+        `/api/citizens/${encodeURIComponent(rootIdentityId!)}/escrow`,
+        // PRIV-2 (adversarial review) — citizen escrow is now
+        // owner-auth-gated; FE must send the acting identity.
+        { headers: { 'X-Bharat-Os-Acting-Identity': rootIdentityId! } }
+      ).then((r) => r.escrow),
+    enabled: Boolean(rootIdentityId)
+  });
+}
+
+export function useCitizenBookings(rootIdentityId: string | null | undefined, status?: BookingStatus) {
+  return useQuery({
+    queryKey: ['citizen-bookings', rootIdentityId, status ?? 'all'],
+    queryFn: () => {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+      return api<{ bookings: PublicBooking[] }>(
+        `/api/citizens/${encodeURIComponent(rootIdentityId!)}/bookings${qs}`,
+        // PRIV-1 (adversarial review) — citizen bookings list is now
+        // owner-auth-gated; FE must send the acting identity.
+        { headers: { 'X-Bharat-Os-Acting-Identity': rootIdentityId! } }
+      ).then((r) => r.bookings);
+    },
+    enabled: Boolean(rootIdentityId),
+    refetchInterval: 30_000
+  });
+}
+
+export function useBooking(bookingId: string | null | undefined, actingRootIdentityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['booking', bookingId, actingRootIdentityId],
+    queryFn: () =>
+      api<{ booking: PublicBooking }>(
+        `/api/marketplace/bookings/${encodeURIComponent(bookingId!)}`,
+        {
+          headers: actingRootIdentityId
+            ? { 'X-Bharat-Os-Acting-Identity': actingRootIdentityId }
+            : undefined
+        }
+      ).then((r) => r.booking),
+    enabled: Boolean(bookingId && actingRootIdentityId),
+    refetchInterval: (q) => {
+      const data = q.state.data as PublicBooking | undefined;
+      if (!data) return false;
+      // Poll while non-terminal so the citizen sees the provider's
+      // accept/mark-complete without a manual refresh.
+      const terminal = new Set<BookingStatus>([
+        'citizen_confirmed',
+        'auto_released',
+        'cancelled_after_dispute',
+        'rejected_by_provider',
+        'cancelled_by_citizen',
+        'expired_unaccepted'
+      ]);
+      return terminal.has(data.status) ? false : 10_000;
+    }
+  });
+}
+
+export function useProviderInbox(
+  providerIdentityId: string | null | undefined,
+  actingRootIdentityId: string | null | undefined,
+  status?: BookingStatus
+) {
+  return useQuery({
+    queryKey: ['provider-inbox', providerIdentityId, status ?? 'all'],
+    queryFn: () => {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+      return api<{ bookings: PublicBooking[] }>(
+        `/api/provider-identities/${encodeURIComponent(providerIdentityId!)}/bookings${qs}`,
+        {
+          headers: actingRootIdentityId
+            ? { 'X-Bharat-Os-Acting-Identity': actingRootIdentityId }
+            : undefined
+        }
+      ).then((r) => r.bookings);
+    },
+    enabled: Boolean(providerIdentityId && actingRootIdentityId),
+    refetchInterval: 20_000
+  });
+}
+
+export interface CreateBookingInput {
+  citizenRootIdentityId: string;
+  providerIdentityId: string;
+  pricingBasis: BookingPricingBasis;
+  estimatedHours?: number | null;
+  pickup?: { lat: number; lng: number; address?: string | null } | null;
+  citizenNote?: string | null;
+  expectedAmountPaise: number;
+}
+
+export function useCreateBooking() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateBookingInput) =>
+      api<{ booking: PublicBooking }>(`/api/marketplace/bookings`, {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }),
+    onSuccess: (_data, { citizenRootIdentityId }) => {
+      qc.invalidateQueries({ queryKey: ['citizen-escrow', citizenRootIdentityId] });
+      qc.invalidateQueries({ queryKey: ['citizen-bookings', citizenRootIdentityId] });
+    }
+  });
+}
+
+export type BookingAction =
+  | 'accept'
+  | 'reject'
+  | 'cancel'
+  | 'mark-complete'
+  | 'confirm-complete'
+  | 'dispute';
+
+export interface BookingTransitionInput {
+  bookingId: string;
+  action: BookingAction;
+  actingRootIdentityId: string;
+  expectedSeq: number;
+  reason?: string | null;
+}
+
+interface BookingTransitionResult {
+  ok: true;
+  booking: PublicBooking;
+}
+
+// Mutation with single retry on 409 stale_seq. The API returns the
+// current booking on 409 so we can re-issue the transition with
+// the updated expectedSeq.
+export function useBookingTransition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BookingTransitionInput): Promise<BookingTransitionResult> => {
+      const url = `/api/marketplace/bookings/${encodeURIComponent(input.bookingId)}/${input.action}`;
+      try {
+        return await api<BookingTransitionResult>(url, {
+          method: 'POST',
+          body: JSON.stringify({
+            actingRootIdentityId: input.actingRootIdentityId,
+            expectedSeq: input.expectedSeq,
+            reason: input.reason ?? null
+          })
+        });
+      } catch (err: unknown) {
+        const e = err as { status?: number; code?: string; body?: { booking?: PublicBooking; error?: { currentSeq?: number; code?: string } } };
+        if (e.status === 409 && e.body?.error?.code === 'stale_seq' && typeof e.body?.error?.currentSeq === 'number') {
+          // Single retry with refreshed seq.
+          return await api<BookingTransitionResult>(url, {
+            method: 'POST',
+            body: JSON.stringify({
+              actingRootIdentityId: input.actingRootIdentityId,
+              expectedSeq: e.body.error.currentSeq,
+              reason: input.reason ?? null
+            })
+          });
+        }
+        throw err;
+      }
+    },
+    onSuccess: (data, input) => {
+      qc.invalidateQueries({ queryKey: ['booking', input.bookingId] });
+      qc.invalidateQueries({ queryKey: ['citizen-bookings'] });
+      qc.invalidateQueries({ queryKey: ['provider-inbox'] });
+      qc.invalidateQueries({ queryKey: ['citizen-escrow'] });
+      void data;
+    }
+  });
+}
+
 // Phase 10.5 — Audit signer public record (Ed25519 public key + id).
 // Used on the citizen Settings transparency strip so anyone can
 // inspect the key used to sign labeling-job audit bundles. Public
