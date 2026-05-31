@@ -126,17 +126,168 @@ function assertNonNegativeInteger(value, label) {
   return n;
 }
 
-// Service-area is intentionally opaque in this module — Phase
-// 12.1a marketplace uses lat/lng + radius OR a polygon (TBD).
-// The substrate stores whatever shape the caller passes and only
-// asserts it's an object. Phase 12.1a + 12.2 will tighten the
-// schema once geo semantics land.
-function normalizeServiceArea(area) {
+// Service-area schema (Phase 12.1a.1 — marketplace discovery).
+//
+// We accept exactly two shapes for forward-compat:
+//
+//   point-radius  — { kind:'point-radius', center:{lat,lng},
+//                     radiusMeters, summary?, source, capturedAt }
+//                   centroid persisted at 4 decimals (~11m grid)
+//                   for forward-compat with a future booking flow;
+//                   PUBLIC reads emit 2 decimals (~1.1km) via
+//                   toPublicServiceArea() — this prevents
+//                   reverse-doxing a household-help worker's
+//                   home address from a sorted discovery list.
+//
+//   legacy-summary — { kind:'legacy-summary', summary } — a
+//                    Phase 12.0 free-text record. Excluded from
+//                    /api/marketplace/providers ranking because
+//                    there's no geo to rank against. Owners are
+//                    nudged to re-save with structured geo via
+//                    the Phase 12.1a.1 ProviderOnboarding flow.
+//
+// Any other discriminator (e.g. 'polygon') is REJECTED loudly so
+// a future Phase 12.2 polygon shape can't silently slip through
+// an unknown-kind path. The discoverable predicate is hasDiscoverableGeo.
+export const SERVICE_AREA_KINDS = ['point-radius', 'legacy-summary'];
+
+const MIN_SERVICE_RADIUS_M = 500;       // 0.5 km
+const MAX_SERVICE_RADIUS_M = 50000;     // 50 km
+const SERVICE_AREA_SOURCES = ['geolocation', 'manual', 'city-default'];
+
+function round4(n) {
+  return Math.round(Number(n) * 10000) / 10000;
+}
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function assertLatLng(lat, lng) {
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw new Error('serviceArea.center.lat must be a finite number in [-90, 90].');
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new Error('serviceArea.center.lng must be a finite number in [-180, 180].');
+  }
+}
+
+function normalizeServiceArea(area, { at = null } = {}) {
   if (area == null) return null;
   if (typeof area !== 'object') {
     throw new Error('serviceArea must be an object.');
   }
-  return area;
+  // Forward-compat: a future Phase 12.2 may add 'polygon'. Reject
+  // anything not in SERVICE_AREA_KINDS so we never silently store
+  // a kind we can't rank.
+  if (area.kind === 'polygon') {
+    const err = new Error('service_area_polygon_not_yet_supported');
+    err.code = 'service_area_polygon_not_yet_supported';
+    throw err;
+  }
+  // Phase 12.0 callers that don't set `kind` but have a free-text
+  // `summary` are coerced to legacy-summary so existing draft rows
+  // don't fail validation when the owner saves again before
+  // upgrading to point-radius.
+  if (!area.kind && typeof area.summary === 'string') {
+    return {
+      kind: 'legacy-summary',
+      summary: String(area.summary).slice(0, 120)
+    };
+  }
+  if (!SERVICE_AREA_KINDS.includes(area.kind)) {
+    throw new Error(
+      `serviceArea.kind must be one of: ${SERVICE_AREA_KINDS.join(', ')}.`
+    );
+  }
+  if (area.kind === 'legacy-summary') {
+    const summary = area.summary == null ? '' : String(area.summary).slice(0, 120);
+    return { kind: 'legacy-summary', summary };
+  }
+  // point-radius
+  if (!area.center || typeof area.center !== 'object') {
+    throw new Error('serviceArea.center is required for kind=point-radius.');
+  }
+  const lat = Number(area.center.lat);
+  const lng = Number(area.center.lng);
+  assertLatLng(lat, lng);
+  const radiusMeters = Math.trunc(Number(area.radiusMeters));
+  if (!Number.isFinite(radiusMeters) || radiusMeters < MIN_SERVICE_RADIUS_M || radiusMeters > MAX_SERVICE_RADIUS_M) {
+    throw new Error(
+      `serviceArea.radiusMeters must be an integer in [${MIN_SERVICE_RADIUS_M}, ${MAX_SERVICE_RADIUS_M}].`
+    );
+  }
+  const source = area.source == null ? 'manual' : String(area.source);
+  if (!SERVICE_AREA_SOURCES.includes(source)) {
+    throw new Error(
+      `serviceArea.source must be one of: ${SERVICE_AREA_SOURCES.join(', ')}.`
+    );
+  }
+  const summary = area.summary == null ? null : String(area.summary).slice(0, 120);
+  const capturedAt = area.capturedAt == null ? (at || nowIso()) : String(area.capturedAt);
+  return {
+    kind: 'point-radius',
+    center: { lat: round4(lat), lng: round4(lng) },
+    radiusMeters,
+    summary,
+    source,
+    capturedAt
+  };
+}
+
+// Read-time hydration — accepts any older record shape and produces
+// the discriminated-union variant the rest of the substrate can
+// reason about. Used by store hydration so existing rows survive.
+export function coerceServiceAreaShape(area) {
+  if (area == null) return null;
+  if (typeof area !== 'object') return null;
+  if (area.kind && SERVICE_AREA_KINDS.includes(area.kind)) return area;
+  if (typeof area.summary === 'string') {
+    return { kind: 'legacy-summary', summary: area.summary.slice(0, 120) };
+  }
+  // Unknown legacy shape — preserve as legacy-summary with empty
+  // summary so it's excluded from discovery (not lost).
+  return { kind: 'legacy-summary', summary: '' };
+}
+
+// Public projection for serviceArea — used by publicProviderRecord
+// to coarsen provider centroid to 2 decimals (~1.1km) before
+// citizens / discovery see it. This prevents reverse-doxing a
+// provider's home address from a sorted nearby list.
+export function toPublicServiceArea(area) {
+  if (area == null) return null;
+  const shape = coerceServiceAreaShape(area);
+  if (!shape) return null;
+  if (shape.kind === 'legacy-summary') {
+    return { kind: 'legacy-summary', summary: shape.summary };
+  }
+  // point-radius
+  return {
+    kind: 'point-radius',
+    center: { lat: round2(shape.center.lat), lng: round2(shape.center.lng) },
+    radiusMeters: shape.radiusMeters,
+    summary: shape.summary,
+    // source + capturedAt are operational metadata; not exposed.
+  };
+}
+
+// Does this serviceArea support marketplace discovery ranking?
+// True only for point-radius with finite center.
+export function hasDiscoverableGeo(area) {
+  if (!area || typeof area !== 'object') return false;
+  if (area.kind !== 'point-radius') return false;
+  if (!area.center) return false;
+  return Number.isFinite(area.center.lat) && Number.isFinite(area.center.lng);
+}
+
+// Store hydration — accepts a raw row (or null) and coerces
+// serviceArea into the discriminated-union shape so older rows
+// authored before Phase 12.1a.1 (free-text summary) still work.
+// Returns null for null input.
+export function hydrateProviderIdentity(p) {
+  if (!p) return null;
+  if (!p.serviceArea) return p;
+  return { ...p, serviceArea: coerceServiceAreaShape(p.serviceArea) };
 }
 
 export function createProviderIdentity({
@@ -156,7 +307,7 @@ export function createProviderIdentity({
   const name = assertNonEmptyString(displayName, 'displayName', 120);
   const hourly = assertNonNegativeInteger(ratePaisePerHour, 'ratePaisePerHour');
   const perService = assertNonNegativeInteger(ratePaisePerService, 'ratePaisePerService');
-  const area = normalizeServiceArea(serviceArea);
+  const area = normalizeServiceArea(serviceArea, { at: createdAt });
   const desc = description == null ? null : String(description).slice(0, 600);
   const wave = PROVIDER_ROLE_KINDS_WAVE_1.includes(roleKind) ? 1 : 2;
 
@@ -218,8 +369,18 @@ export function attestProviderKyc(provider, {
   };
 
   // KYC attestation moves draft -> submitted if not yet there.
-  // Activation is a separate operator action (Phase 12.2).
-  const nextStatus = provider.status === 'draft' ? 'submitted' : provider.status;
+  // Activation is a separate operator action (Phase 12.2). Phase
+  // 12.1a.1 — same submitted-state geo guard as transitionProviderStatus:
+  // a provider cannot enter the submitted state without a discoverable
+  // point-radius serviceArea, regardless of which code path triggers
+  // the transition.
+  const willSubmit = provider.status === 'draft';
+  if (willSubmit && !hasDiscoverableGeo(provider.serviceArea)) {
+    const err = new Error('cannot submit provider without point-radius serviceArea.');
+    err.code = 'service_area_required';
+    throw err;
+  }
+  const nextStatus = willSubmit ? 'submitted' : provider.status;
   const nextSubmittedAt = nextStatus === 'submitted' && !provider.submittedAt ? attestedAt : provider.submittedAt;
 
   return {
@@ -252,6 +413,16 @@ export function transitionProviderStatus(provider, nextStatus, {
   // §15: cannot activate without KYC attestation.
   if (nextStatus === 'active' && provider.kycLevel === 'none') {
     throw new Error('cannot activate provider without KYC attestation.');
+  }
+  // Phase 12.1a.1: cannot submit a draft without a discoverable
+  // serviceArea (point-radius with finite center). Forces existing
+  // legacy {summary} drafts through a one-time geo capture before
+  // KYC review — otherwise they'd silently be excluded from
+  // marketplace discovery after activation.
+  if (nextStatus === 'submitted' && !hasDiscoverableGeo(provider.serviceArea)) {
+    const err = new Error('cannot submit provider without point-radius serviceArea.');
+    err.code = 'service_area_required';
+    throw err;
   }
   const op = assertNonEmptyString(operatorId, 'operatorId', 160);
   const reasonTrim = reason == null ? null : String(reason).slice(0, 400);
@@ -295,7 +466,17 @@ export function updateProviderProfile(provider, {
     updates.displayName = assertNonEmptyString(displayName, 'displayName', 120);
   }
   if (serviceArea !== undefined) {
-    updates.serviceArea = normalizeServiceArea(serviceArea);
+    // EC-1 (adversarial review) — once a provider is submitted /
+    // active, the marketplace assumes they have a discoverable
+    // geo. Nulling serviceArea would silently delist them while
+    // status stays active. Refuse the mutation; provider must
+    // first transition to draft if they want to reset their pin.
+    if ((provider.status === 'active' || provider.status === 'submitted') && serviceArea === null) {
+      const err = new Error('cannot clear serviceArea while provider is submitted or active.');
+      err.code = 'service_area_required';
+      throw err;
+    }
+    updates.serviceArea = normalizeServiceArea(serviceArea, { at });
   }
   if (ratePaisePerHour !== undefined) {
     updates.ratePaisePerHour = assertNonNegativeInteger(ratePaisePerHour, 'ratePaisePerHour');
@@ -313,6 +494,13 @@ export function updateProviderProfile(provider, {
 // or the marketplace. Citizens see what they need to book; they
 // MUST NOT see rootIdentityId, kycAttestation envelope, or
 // operator transition history.
+//
+// Phase 12.1a.1 — the serviceArea centroid is coarsened to 2
+// decimals (~1.1km) via toPublicServiceArea so a sorted "nearby
+// providers" list cannot pinpoint a household-help worker's home.
+// The 4-decimal centroid stays in the substrate for forward-compat
+// with a future booking flow that needs higher precision for
+// pickup-confirmation; that access is gated behind owner identity.
 export function publicProviderRecord(provider) {
   return {
     providerIdentityId: provider.providerIdentityId,
@@ -321,7 +509,7 @@ export function publicProviderRecord(provider) {
     roleKind: provider.roleKind,
     roleWave: provider.roleWave,
     displayName: provider.displayName,
-    serviceArea: provider.serviceArea,
+    serviceArea: toPublicServiceArea(provider.serviceArea),
     ratePaisePerHour: provider.ratePaisePerHour,
     ratePaisePerService: provider.ratePaisePerService,
     description: provider.description,

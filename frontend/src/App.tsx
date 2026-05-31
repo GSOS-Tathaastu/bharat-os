@@ -5,6 +5,7 @@ import { ToastRoot } from '@/components/ui';
 import { OnboardingPage } from '@/routes/Onboarding';
 import { WorkerHome } from '@/routes/WorkerHome';
 import { CitizenHome } from '@/routes/CitizenHome';
+import { CitizenServices } from '@/routes/CitizenServices';
 import { VerifyPage } from '@/routes/Verify';
 import { LabsPage } from '@/routes/Labs';
 import { LabelsPage } from '@/routes/Labels';
@@ -36,6 +37,16 @@ export default function App() {
           element={
             <ProtectedSurface>
               <WorkerHome />
+            </ProtectedSurface>
+          }
+        />
+        {/* Phase 12.1a.1 — citizen marketplace browse. Must come
+            BEFORE /citizen/* so the more-specific path wins. */}
+        <Route
+          path="/citizen/services/*"
+          element={
+            <ProtectedSurface>
+              <CitizenServices />
             </ProtectedSurface>
           }
         />

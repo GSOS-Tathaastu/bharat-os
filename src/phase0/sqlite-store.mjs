@@ -34,6 +34,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
+import { hydrateProviderIdentity } from '../phase1/provider-identity.mjs';
 
 export const SQLITE_STORE_PROTOCOL_VERSION = 'bos.phase0.sqlite-store.v0';
 
@@ -2058,7 +2059,8 @@ export class SqliteStore {
 
   async readProviderIdentity(providerIdentityId) {
     await this.init();
-    return this._readOne('provider_identities', 'provider_identity_id', providerIdentityId);
+    const p = await this._readOne('provider_identities', 'provider_identity_id', providerIdentityId);
+    return hydrateProviderIdentity(p);
   }
 
   async listProviderIdentities({ rootIdentityId, roleKind, status } = {}) {
@@ -2080,7 +2082,7 @@ export class SqliteStore {
     }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     const rows = this.db.prepare(sql).all(...params);
-    return rows.map((r) => JSON.parse(r.json));
+    return rows.map((r) => hydrateProviderIdentity(JSON.parse(r.json)));
   }
 
   // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────

@@ -152,6 +152,71 @@ Implemented pieces:
 
 ---
 
+## 🗺️ 2026-06-01 — Phase 12.1a.1 shipped: marketplace discovery substrate + citizen browse
+
+First of two 12.1a sub-phases. Citizens can now browse Bharat-OS-
+native providers on a real geo-aware nearby list; providers can
+publish a structured pinned area; an "Express interest" stub
+emits a typed precedent ledger row that 12.1a.2 will upgrade to a
+real booking + escrow.
+
+- **ADR 0135** — both BE + FE (FE-BE parity binding).
+- **Geo extracted as a CORE SHARED MODULE** (founder directive
+  2026-05-31): `src/phase0/geo.mjs` + `frontend/src/lib/geo.ts`
+  + `frontend/src/lib/geolocation.ts` + `frontend/src/components/geo/*`.
+  Reusable for Phase 12.1a.2 pickup-point, 12.2 provider
+  tracking, mesh node locality, regulator audit bucketing —
+  not just marketplace.
+- **Asymmetric privacy.** Provider centroid persisted at 4dp
+  (~11 m, forward-compat for future booking-pickup precision)
+  but emitted to citizens at 2dp (~1.1 km) via new
+  `toPublicServiceArea` helper — closes the asymmetric
+  household-help-worker home-doxing risk that 4dp-everywhere
+  would have created.
+- **GET /api/marketplace/providers** — public, rate-limited,
+  defensively re-rounds query lat/lng to 1dp, returns
+  `distanceBand` pill (NEVER precise metres), emits
+  **anonymous** `marketplace.searched` ledger event with NO
+  citizen identity even when session present.
+- **POST /api/marketplace/providers/:id/express-interest** —
+  citizen-existence check via `store.readIdentity`; typed
+  `marketplace.interest_expressed` ledger row carries
+  `(providerIdentityId, citizenRootIdentityId, roleKind, note,
+  at)` for 12.1a.2 upgrade.
+- **Citizen surface** at `/app/citizen/services/*` — three
+  nested routes (index + by-role + provider detail). NO 6th
+  bottom-nav tab. CitizenHome intercepts "Book a cab" + "Hire
+  household help" suggestions to deep-link directly.
+- **ProviderOnboarding upgrade.** Free-text `areaSummary`
+  replaced with `<ServiceAreaPicker/>` (Use my current location
+  4dp / Pick a city / radius slider + legacy-summary migration
+  banner at top).
+- **ONDC suppressed** by construction —
+  `marketplace-discovery.mjs` never imports `tools.mjs`
+  (binding test asserts via source grep). NO commission /
+  takeRate / platformFee field anywhere on this code path.
+  Empty state matches `ondc-bridge-hidden-v1` binding verbatim.
+- **Scoped by a Workflow** with 7 parallel Explore agents
+  (providerIdentity / booking-escrow / geo / ONDC / citizen
+  surface / provider surface / roadmap-ADRs) + synthesis pass.
+- **Designed by a 2nd Workflow** with 3 lenses × 2 judges
+  (privacy-first / supply-density / citizen-UX) →
+  synthesis-with-overrides spec.
+- **Hardened by a 3rd Workflow** with 3 lenses (privacy / UX /
+  edge-case) + triage. **2 must-fix + 7 should-fix** applied
+  before commit (PRIV-1 citizen spoofing, EC-2 CRLF/BOM, EC-1
+  null-clear on active, EC-3 default-radius, UX-1 stale card,
+  UX-2 legacy warning placement, UX-5 retry, UX-11 KYC tone,
+  UX-12 service-only rates, PRIV-5 opt-out).
+- Tests: 945/945 Node + 58/58 vitest. tsc clean.
+- Bundle: main 505 → 528 KB / 150 KB gzipped (+23 KB).
+
+**Next: Phase 12.1a.2** — booking entity + parallel
+citizen-booking escrow + `/app/provider/*` surface + push
+notification on incoming booking, ~2 weeks.
+
+---
+
 ## 🏛️ 2026-06-01 — Phase 12.0.5 shipped: sponsor /app/sponsor/ admin surface — substrate-integration sweep arc CLOSED
 
 Fourth and final sub-phase of the substrate-integration sweep

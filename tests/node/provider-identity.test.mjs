@@ -129,7 +129,13 @@ test('attestProviderKyc moves draft → submitted and records the envelope', () 
   const p = createProviderIdentity({
     rootIdentityId: 'bos:person:abc',
     roleKind: 'cab-driver',
-    displayName: 'Ravi'
+    displayName: 'Ravi',
+    serviceArea: {
+      kind: 'point-radius',
+      center: { lat: 18.5204, lng: 73.8567 },
+      radiusMeters: 5000,
+      source: 'manual'
+    }
   });
   const attested = attestProviderKyc(p, {
     kycLevel: 'basic',
@@ -158,7 +164,15 @@ test('transitionProviderStatus enforces valid transitions', () => {
   let p = createProviderIdentity({
     rootIdentityId: 'bos:person:abc',
     roleKind: 'cab-driver',
-    displayName: 'Ravi'
+    displayName: 'Ravi',
+    // Phase 12.1a.1 — submitted state machine guard requires
+    // a discoverable point-radius serviceArea.
+    serviceArea: {
+      kind: 'point-radius',
+      center: { lat: 18.5204, lng: 73.8567 },
+      radiusMeters: 5000,
+      source: 'manual'
+    }
   });
   // draft → active without KYC fails
   assert.throws(
@@ -192,7 +206,13 @@ test('publicProviderRecord strips rootIdentityId + kycAttestation + lastTransiti
     rootIdentityId: 'bos:person:secret',
     roleKind: 'cab-driver',
     displayName: 'Ravi',
-    description: 'Auto driver in Pune'
+    description: 'Auto driver in Pune',
+    serviceArea: {
+      kind: 'point-radius',
+      center: { lat: 18.5204, lng: 73.8567 },
+      radiusMeters: 5000,
+      source: 'manual'
+    }
   });
   p = attestProviderKyc(p, {
     kycLevel: 'verified',
@@ -424,7 +444,7 @@ test('POST .../profile gates on rootIdentityId match', async () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi' })
+        body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi', serviceArea: { kind: 'point-radius', center: { lat: 18.5204, lng: 73.8567 }, radiusMeters: 5000, source: 'manual' } })
       }
     );
     const { providerIdentity } = await create.json();
@@ -472,7 +492,7 @@ test('admin KYC attest + transition: draft → submitted → active', async () =
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi' })
+          body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi', serviceArea: { kind: 'point-radius', center: { lat: 18.5204, lng: 73.8567 }, radiusMeters: 5000, source: 'manual' } })
         }
       );
       const { providerIdentity } = await create.json();
@@ -536,7 +556,7 @@ test('admin transition refuses skipping KYC', async () => {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi' })
+          body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi', serviceArea: { kind: 'point-radius', center: { lat: 18.5204, lng: 73.8567 }, radiusMeters: 5000, source: 'manual' } })
         }
       );
       const { providerIdentity } = await create.json();

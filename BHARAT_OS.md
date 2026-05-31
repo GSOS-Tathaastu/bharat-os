@@ -2134,7 +2134,8 @@ on top of the four earlier:
 | Phase | Scope | Cost |
 | --- | --- | --- |
 | **12.0** | `providerIdentity` substrate (BE+FE). Schema + KYC-heavy onboarding + linkage to root recovery. Earner home: two ledger cards (micro-task + marketplace). | ~1.5 wks |
-| **12.1a** | Marketplace substrate + baseline UX. Real geo (provider lat/lng + service radius), provider profiles, ranked citizen search, ONDC sandbox bridge hidden behind empty-state, **new parallel citizen-booking escrow** (state machine: pre_authorized → in_progress → provider_marked_complete → citizen_confirmed \| disputed \| auto_released_24h). | ~2 wks |
+| **12.1a.1** ✅ | **SHIPPED 2026-06-01 (ADR 0135).** Marketplace discovery substrate + citizen browse. Discriminated-union geo schema (4dp persist, 2dp public emit), shared phase0/geo.mjs + FE geo lib (reusable for booking, mesh, audits), GET /api/marketplace/providers, POST /express-interest typed precedent row, /app/citizen/services/* nested routes, ProviderOnboarding ServiceAreaPicker. ONDC suppressed. | ✅ shipped |
+| **12.1a.2** | Booking entity + parallel citizen-booking-escrow (state machine: pre_authorized → in_progress → provider_marked_complete → citizen_confirmed \| disputed \| auto_released_24h), /app/provider/* surface, push notification on incoming booking. | ~2 wks |
 | **12.1b** | SLM AI-orchestration layer on top. Vernacular intent → structured action (22+ Indic languages) · offline-first decisioning · on-device dynamic forms · on-device negotiation agent for marketplace. Reuses Phase 9.0c runtime + Phase 10.6 prompt/parse pattern. | ~3 wks |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
 | **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
@@ -2196,6 +2197,50 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1a.1 — SHIPPED 2026-06-01 (ADR 0135).** Marketplace
+  discovery substrate + citizen browse — first of two 12.1a
+  sub-phases (12.1a.2 booking + escrow + provider surface next).
+  Discriminated-union geo schema on providerIdentity (point-radius
+  with 4dp centroid persist, 2dp public emit via new
+  `toPublicServiceArea` — closes asymmetric privacy gap where
+  4dp could pinpoint a household-help worker's home).
+  Polygon kind rejected loudly (forward-compat). Legacy `{summary}`
+  read-coerced and excluded from discovery. State-machine guard:
+  draft → submitted refused without point-radius geo
+  (transitionProviderStatus AND attestProviderKyc both enforce).
+  **Geo extracted as a CORE SHARED MODULE**, not marketplace-
+  specific: `src/phase0/geo.mjs` (haversine, distanceBand,
+  bubblesOverlap, round1/2/4, INDIA_BBOX) reused across
+  marketplace + future Phase 12.1a.2 pickup-point + mesh node
+  locality + regulator audit bucketing. Frontend mirror at
+  `frontend/src/lib/geo.ts` + `frontend/src/lib/geolocation.ts`
+  (useGeolocationCapture with precision 'coarse'/'medium'/'fine')
+  + `frontend/src/components/geo/{LocationConsentSheet,
+  CityPickerSheet, ServiceAreaPicker}`. New API: GET
+  /api/marketplace/providers (rate-limited, defensively re-rounds
+  lat/lng to 1dp, returns distanceBand pill NEVER precise metres,
+  emits ANONYMOUS marketplace.searched ledger event — no citizen
+  identity attached even when session present). POST
+  /api/marketplace/providers/:id/express-interest (citizen
+  existence check via store.readIdentity gate, typed
+  marketplace.interest_expressed ledger event so 12.1a.2
+  booking has a real precedent row to upgrade). Citizen surface
+  at `/app/citizen/services` with three nested routes (index +
+  by-role + provider detail) — NO 6th bottom-nav tab. CitizenHome
+  intercepts "Book a cab" + "Hire household help" suggestions to
+  deep-link directly. ProviderOnboarding upgraded:
+  free-text areaSummary replaced with ServiceAreaPicker (live
+  location 4dp / city centroid / 30 India cities). ONDC
+  SUPPRESSED by construction — `marketplace-discovery.mjs` never
+  imports tools.mjs (binding test). NO commission / takeRate /
+  platformFee field. Scoped by 7-Explore-agent Workflow; designed
+  by 3-lens × 2-judge proposal Workflow; hardened by 3-lens
+  adversarial review Workflow — 2 must-fix (PRIV-1 citizen
+  spoofing, EC-2 CRLF/BOM in note) + 7 should-fix applied before
+  commit. Privacy verdict: ship_with_fixes → ship_clean post-fix.
+  Tests: 945/945 Node (+4 new) + 58/58 vitest. Bundle 505 → 528
+  KB / 150 KB gzipped (+23 KB for browse routes + geo lib +
+  geolocation hook + city centroids + hooks).
 - **Phase 12.0.5 — SHIPPED 2026-06-01 (ADR 0134).** Sponsor
   `/app/sponsor/` admin surface — fourth and final sweep
   sub-phase. **Substrate-integration arc CLOSED.** 25 new files

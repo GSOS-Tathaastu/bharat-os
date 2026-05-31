@@ -1898,6 +1898,27 @@ export type ProviderRoleKind =
 export type ProviderIdentityStatus = 'draft' | 'submitted' | 'active' | 'suspended' | 'revoked';
 export type ProviderKycLevel = 'none' | 'basic' | 'verified';
 
+// Phase 12.1a.1 — service-area discriminated union. The substrate
+// accepts exactly these two shapes; the FE never widens to
+// `Record<string, unknown>` so a stale legacy row can't be
+// silently re-serialised as a polygon. publicProviderRecord
+// coarsens point-radius centroid to 2dp before serving.
+export type ServiceArea =
+  | {
+      kind: 'point-radius';
+      center: { lat: number; lng: number };
+      radiusMeters: number;
+      summary?: string | null;
+      // 'source' and 'capturedAt' are operational metadata; only
+      // present on owner-side reads, never on publicProviderRecord.
+      source?: 'geolocation' | 'manual' | 'city-default';
+      capturedAt?: string;
+    }
+  | {
+      kind: 'legacy-summary';
+      summary: string;
+    };
+
 export interface ProviderIdentity {
   providerIdentityId: string;
   protocolVersion: string;
@@ -1906,7 +1927,7 @@ export interface ProviderIdentity {
   roleKind: ProviderRoleKind;
   roleWave: 1 | 2;
   displayName: string;
-  serviceArea?: Record<string, unknown> | null;
+  serviceArea?: ServiceArea | null;
   ratePaisePerHour: number;
   ratePaisePerService: number;
   description?: string | null;
@@ -1934,7 +1955,7 @@ export interface CreateProviderIdentityInput {
   displayName: string;
   ratePaisePerHour?: number;
   ratePaisePerService?: number;
-  serviceArea?: Record<string, unknown> | null;
+  serviceArea?: ServiceArea | null;
   description?: string | null;
 }
 
@@ -1968,7 +1989,7 @@ export interface UpdateProviderProfileInput {
   displayName?: string;
   ratePaisePerHour?: number;
   ratePaisePerService?: number;
-  serviceArea?: Record<string, unknown> | null;
+  serviceArea?: ServiceArea | null;
   description?: string | null;
 }
 
@@ -1993,6 +2014,102 @@ export function useUpdateProviderProfile() {
     onSuccess: (_data, { rootIdentityId }) => {
       qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
     }
+  });
+}
+
+// ─── Phase 12.1a.1 — marketplace discovery ─────────────────────────
+
+export type DistanceBand = '<1km' | '1-3km' | '3-5km' | '5-10km' | '10-25km' | '25km+';
+
+export interface NearbyProvider extends ProviderIdentity {
+  distanceBand: DistanceBand;
+  withinServiceRadius: boolean;
+}
+
+export interface NearbyProvidersResponse {
+  query: {
+    latBucket: number;
+    lngBucket: number;
+    radiusMeters: number;
+    role: ProviderRoleKind | null;
+    limit: number;
+  };
+  results: NearbyProvider[];
+}
+
+interface UseNearbyProvidersOptions {
+  lat: number | null;
+  lng: number | null;
+  radiusMeters?: number;
+  role?: ProviderRoleKind | null;
+  limit?: number;
+  enabled?: boolean;
+}
+
+// Required: lat + lng MUST already be rounded to 1 decimal (~11 km)
+// by the caller (use round1() from @/lib/geo). We pass them through
+// to the URL as-is; the server defensively re-rounds.
+export function useNearbyProviders({
+  lat,
+  lng,
+  radiusMeters = 5000,
+  role = null,
+  limit = 30,
+  enabled = true
+}: UseNearbyProvidersOptions) {
+  return useQuery({
+    queryKey: ['marketplace', 'nearby', lat, lng, radiusMeters, role, limit],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set('lat', String(lat));
+      params.set('lng', String(lng));
+      params.set('radiusMeters', String(radiusMeters));
+      if (role) params.set('role', role);
+      params.set('limit', String(limit));
+      return api<NearbyProvidersResponse>(`/api/marketplace/providers?${params.toString()}`);
+    },
+    enabled: enabled && lat != null && lng != null,
+    staleTime: 30_000
+  });
+}
+
+export function usePublicProvider(providerIdentityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['public-provider', providerIdentityId],
+    queryFn: () =>
+      api<{ providerIdentity: ProviderIdentity }>(
+        `/api/provider-identities/${encodeURIComponent(providerIdentityId!)}`
+      ).then((r) => r.providerIdentity),
+    enabled: Boolean(providerIdentityId)
+  });
+}
+
+export interface ExpressInterestInput {
+  providerIdentityId: string;
+  citizenRootIdentityId: string;
+  note?: string | null;
+}
+
+export interface ExpressInterestResult {
+  ok: true;
+  providerIdentityId: string;
+  roleKind: ProviderRoleKind;
+  at: string;
+}
+
+export function useExpressInterest() {
+  return useMutation({
+    mutationFn: (input: ExpressInterestInput) =>
+      api<ExpressInterestResult>(
+        `/api/marketplace/providers/${encodeURIComponent(input.providerIdentityId)}/express-interest`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            citizenRootIdentityId: input.citizenRootIdentityId,
+            note: input.note ?? null
+          })
+        }
+      )
   });
 }
 

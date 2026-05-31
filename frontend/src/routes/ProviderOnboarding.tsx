@@ -5,9 +5,11 @@ import {
   useActiveIdentity,
   useCreateProviderIdentity,
   useProviderIdentities,
-  type ProviderRoleKind
+  type ProviderRoleKind,
+  type ServiceArea
 } from '@/lib/hooks';
 import { EARN_ROLES } from '@/lib/earn-roles';
+import { ServiceAreaPicker } from '@/components/geo';
 
 // Phase 12.0 — generic provider-onboarding flow. Per-role wizard
 // ships in Phase 12.2 (Aadhaar e-KYC + role-specific docs +
@@ -52,7 +54,7 @@ export function ProviderOnboardingPage() {
   const create = useCreateProviderIdentity();
 
   const [displayName, setDisplayName] = useState('');
-  const [areaSummary, setAreaSummary] = useState('');
+  const [serviceArea, setServiceArea] = useState<ServiceArea | null>(null);
   const [hourlyRupees, setHourlyRupees] = useState('');
   const [perServiceRupees, setPerServiceRupees] = useState('');
   const [description, setDescription] = useState('');
@@ -103,6 +105,10 @@ export function ProviderOnboardingPage() {
       show('Set at least one rate so citizens know what to expect.', 'error');
       return;
     }
+    if (!serviceArea || serviceArea.kind !== 'point-radius') {
+      show('Set your service area — citizens nearby cannot find you without a pin.', 'error');
+      return;
+    }
     create.mutate(
       {
         rootIdentityId: identity!.id,
@@ -110,9 +116,7 @@ export function ProviderOnboardingPage() {
         displayName: displayName.trim(),
         ratePaisePerHour: hourly,
         ratePaisePerService: perService,
-        serviceArea: areaSummary.trim()
-          ? { summary: areaSummary.trim() }
-          : null,
+        serviceArea,
         description: description.trim() || null
       },
       {
@@ -166,13 +170,6 @@ export function ProviderOnboardingPage() {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="What citizens will see"
           />
-          <Field
-            label="Service area (in your own words)"
-            value={areaSummary}
-            onChange={(e) => setAreaSummary(e.target.value)}
-            placeholder="Eg: Pune Camp & Kothrud, within 10 km of station"
-            helper="Phase 12.1a will replace this free text with a proper geo polygon."
-          />
           {rateLabels.hourly && (
             <Field
               label={rateLabels.hourly}
@@ -200,6 +197,8 @@ export function ProviderOnboardingPage() {
           />
         </div>
       </Card>
+
+      <ServiceAreaPicker value={serviceArea} onChange={setServiceArea} />
 
       <Card tone="governance">
         <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">

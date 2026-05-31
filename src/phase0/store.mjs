@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { netContributionScore } from './core.mjs';
+import { hydrateProviderIdentity } from '../phase1/provider-identity.mjs';
 
 function safeName(id) {
   return id.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -1315,17 +1316,20 @@ export class BosStore {
   }
 
   async readProviderIdentity(providerIdentityId) {
-    return readJson(this.providerIdentityFile(providerIdentityId));
+    const p = await readJson(this.providerIdentityFile(providerIdentityId));
+    return hydrateProviderIdentity(p);
   }
 
   async listProviderIdentities({ rootIdentityId, roleKind, status } = {}) {
     const all = await listJson(this.providerIdentitiesPath);
-    return all.filter((p) => {
-      if (rootIdentityId && p.rootIdentityId !== rootIdentityId) return false;
-      if (roleKind && p.roleKind !== roleKind) return false;
-      if (status && p.status !== status) return false;
-      return true;
-    });
+    return all
+      .filter((p) => {
+        if (rootIdentityId && p.rootIdentityId !== rootIdentityId) return false;
+        if (roleKind && p.roleKind !== roleKind) return false;
+        if (status && p.status !== status) return false;
+        return true;
+      })
+      .map(hydrateProviderIdentity);
   }
 
   // Phase 10.1 — labeling marketplace tables. Three resources:

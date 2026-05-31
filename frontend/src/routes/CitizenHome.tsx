@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Action, Badge, Card, Evidence, Field, Sheet, Tabs, useToast } from '@/components/ui';
 import { ConsentGrantSheet } from '@/components/ConsentGrantSheet';
@@ -49,17 +49,25 @@ const TABS = [
   { to: '/settings', label: 'Settings', icon: '⚙' }
 ];
 
-const SUGGESTIONS = [
-  'Book a cab',
-  'Apply for a small loan',
-  'Find a doctor near me',
-  'Pay my electricity bill',
-  'Share my health record with Lakshmi clinic'
+// Phase 12.1a.1 — some suggestions are now first-party marketplace
+// shortcuts. Tapping them routes to /citizen/services/role/<role>
+// directly, not into the intent textarea — because the marketplace
+// substrate can answer immediately without going through the
+// orchestrator's intent-parse path. Suggestions WITHOUT a target
+// path still populate the textarea (existing behaviour).
+const SUGGESTIONS: Array<{ text: string; target?: string }> = [
+  { text: 'Book a cab', target: '/citizen/services/role/cab-driver' },
+  { text: 'Hire household help', target: '/citizen/services/role/household-help' },
+  { text: 'Apply for a small loan' },
+  { text: 'Find a doctor near me' },
+  { text: 'Pay my electricity bill' },
+  { text: 'Share my health record with Lakshmi clinic' }
 ];
 
 function CitizenIntent() {
   const identity = useActiveIdentity();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [text, setText] = useState('');
   const [lastOutcome, setLastOutcome] = useState<Orchestration | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
@@ -273,12 +281,13 @@ function CitizenIntent() {
         <div className="mt-3 flex flex-wrap gap-2">
           {SUGGESTIONS.map((s) => (
             <button
-              key={s}
+              key={s.text}
               type="button"
-              onClick={() => setText(s)}
+              onClick={() => (s.target ? navigate(s.target) : setText(s.text))}
               className="rounded-sm border border-border bg-white px-3 py-1 text-caption text-text-muted transition-colors hover:border-primary hover:text-primary"
             >
-              {s}
+              {s.text}
+              {s.target && <span aria-hidden className="ml-1">→</span>}
             </button>
           ))}
         </div>
@@ -297,6 +306,22 @@ function CitizenIntent() {
           execution. Every step is signed and added to your audit ledger. No
           third party sees the intent unless you grant explicit consent.
         </Evidence>
+      </Card>
+
+      {/* Phase 12.1a.1 — Marketplace discovery shortcut. */}
+      <Card>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-heading font-semibold text-text">Browse providers near you</h2>
+            <p className="mt-1 text-caption text-text-muted">
+              Cabs · cooks · maids · daily-wage labour. Direct contact,
+              no Bharat OS commission.
+            </p>
+          </div>
+          <Action variant="ghost" onClick={() => navigate('/citizen/services')}>
+            Browse →
+          </Action>
+        </div>
       </Card>
 
       {lastOutcome && (

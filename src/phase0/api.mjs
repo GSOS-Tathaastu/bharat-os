@@ -267,6 +267,13 @@ import {
   PROVIDER_KYC_LEVELS,
   PROVIDER_IDENTITY_STATUSES
 } from '../phase1/provider-identity.mjs';
+import {
+  haversineMeters,
+  distanceBand,
+  rankProviders,
+  DEFAULT_QUERY_RADIUS_M,
+  MAX_QUERY_RADIUS_M
+} from '../phase1/marketplace-discovery.mjs';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDir, '../..');
@@ -1691,6 +1698,158 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 12.1a.1 — Marketplace discovery.
+      //
+      // GET /api/marketplace/providers?lat&lng&radiusMeters&role&limit
+      //   Public. Ranked list of active providers whose
+      //   point-radius service area overlaps the citizen's search
+      //   bubble. Returns publicProviderRecord shape (centroid
+      //   coarsened to 2 decimals) plus a coarse distanceBand pill
+      //   ('<1km' / '1-3km' / …) — never exact metres. NO ONDC.
+      //   Rate-limited by the wrapping limiter (policyFor → 'read').
+      //
+      //   Ledger emits one marketplace.searched event per call with
+      //   only coarse latBucket/lngBucket (1 decimal ~11 km) and NO
+      //   citizen identity — even when a session is present. The
+      //   discovery endpoint runs anonymous from the audit POV.
+      if (request.method === 'GET' && url.pathname === '/api/marketplace/providers') {
+        const latRaw = url.searchParams.get('lat');
+        const lngRaw = url.searchParams.get('lng');
+        const radiusRaw = url.searchParams.get('radiusMeters');
+        const roleRaw = url.searchParams.get('role');
+        const limitRaw = url.searchParams.get('limit');
+        const lat = Number(latRaw);
+        const lng = Number(lngRaw);
+        if (latRaw == null || lngRaw == null || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_geo_query', message: 'lat and lng are required finite numbers in [-90,90]/[-180,180].' }
+          });
+          return;
+        }
+        let radiusMeters = DEFAULT_QUERY_RADIUS_M;
+        if (radiusRaw != null) {
+          const r = Math.trunc(Number(radiusRaw));
+          if (!Number.isFinite(r) || r < 100 || r > MAX_QUERY_RADIUS_M) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_geo_query', message: `radiusMeters must be an integer in [100, ${MAX_QUERY_RADIUS_M}].` }
+            });
+            return;
+          }
+          radiusMeters = r;
+        }
+        let role = null;
+        if (roleRaw != null && roleRaw !== '') {
+          if (!PROVIDER_ROLE_KINDS.includes(roleRaw)) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_role', message: `role must be one of: ${PROVIDER_ROLE_KINDS.join(', ')}.` }
+            });
+            return;
+          }
+          role = roleRaw;
+        }
+        let limit = 30;
+        if (limitRaw != null) {
+          const l = Math.trunc(Number(limitRaw));
+          if (Number.isFinite(l) && l >= 1 && l <= 100) limit = l;
+        }
+        // Defensive coarsening — the FE is supposed to round to 1
+        // decimal before calling, but server re-rounds so a misbehaving
+        // client can't sneak high-precision coords in.
+        const queryLat = Math.round(lat * 10) / 10;
+        const queryLng = Math.round(lng * 10) / 10;
+        const candidates = await store.listProviderIdentities({ status: 'active', roleKind: role || undefined });
+        const ranked = rankProviders({
+          origin: { lat: queryLat, lng: queryLng },
+          candidates,
+          radiusMeters,
+          role,
+          limit
+        });
+        const results = ranked.map(({ provider, distanceMeters, withinServiceRadius }) => ({
+          ...publicProviderRecord(provider),
+          distanceBand: distanceBand(distanceMeters),
+          withinServiceRadius
+        }));
+        // Anonymous audit row. No userId, no rootIdentityId.
+        await store.appendLedger({
+          type: 'marketplace.searched',
+          latBucket: queryLat,
+          lngBucket: queryLng,
+          radiusMeters,
+          role: role || null,
+          providerCount: results.length,
+          at: new Date().toISOString()
+        });
+        jsonResponse(response, 200, {
+          query: { latBucket: queryLat, lngBucket: queryLng, radiusMeters, role, limit },
+          results
+        });
+        return;
+      }
+
+      // POST /api/marketplace/providers/:providerIdentityId/express-interest
+      //   Citizen-side stub for the deferred booking flow (12.1a.2).
+      //   Emits a typed `marketplace.interest_expressed` ledger event
+      //   carrying (providerIdentityId, citizenRootIdentityId, role, at)
+      //   so Phase 12.1a.2 has a real precedent row to upgrade into a
+      //   booking entity. No state change on the provider record. No
+      //   escrow lock. The FE pairs this with the existing intent
+      //   orchestration path to surface a human-readable confirmation.
+      const expressInterestMatch = /^\/api\/marketplace\/providers\/([^/]+)\/express-interest$/.exec(url.pathname);
+      if (request.method === 'POST' && expressInterestMatch) {
+        const providerIdentityId = decodeURIComponent(expressInterestMatch[1]);
+        const body = await readRequestJson(request);
+        const citizenRootIdentityId = typeof body.citizenRootIdentityId === 'string' ? body.citizenRootIdentityId.trim() : '';
+        if (!citizenRootIdentityId) {
+          jsonResponse(response, 400, {
+            error: { code: 'citizen_required', message: 'citizenRootIdentityId is required.' }
+          });
+          return;
+        }
+        // PRIV-1 (adversarial review) — verify the citizen identity
+        // actually exists in the store before writing it to the audit
+        // ledger. Without this, an attacker could forge interest rows
+        // under arbitrary IDs. Session-binding (full auth) lands in
+        // 12.1a.2 when the booking flow needs it; existence check is
+        // enough to keep the audit trail honest.
+        const citizenIdentity = await store.readIdentity(citizenRootIdentityId).catch(() => null);
+        if (!citizenIdentity) {
+          jsonResponse(response, 404, {
+            error: { code: 'citizen_not_found', message: 'citizenRootIdentityId does not resolve to a known identity.' }
+          });
+          return;
+        }
+        const provider = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!provider || provider.status !== 'active') {
+          jsonResponse(response, 404, {
+            error: { code: 'provider_not_bookable', message: 'provider not found or not active.' }
+          });
+          return;
+        }
+        // EC-2 (adversarial review) — normalise CRLF, strip leading
+        // UTF-8 BOM, trim, collapse empty to null. Required for
+        // replay safety + downstream ledger consumers.
+        const note = body.note == null
+          ? null
+          : (String(body.note).replace(/\r\n/g, '\n').replace(/^﻿/, '').slice(0, 280).trim() || null);
+        const at = new Date().toISOString();
+        await store.appendLedger({
+          type: 'marketplace.interest_expressed',
+          providerIdentityId,
+          citizenRootIdentityId,
+          roleKind: provider.roleKind,
+          note,
+          at
+        });
+        jsonResponse(response, 201, {
+          ok: true,
+          providerIdentityId,
+          roleKind: provider.roleKind,
+          at
+        });
+        return;
+      }
+
       // Phase 10.1 — labeling-job lifecycle endpoints. Sponsor-bearer
       // gated for create/upload/launch; public for worker-side
       // discovery; worker-anchored for submissions.
@@ -2592,6 +2751,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/provider-identities/:providerIdentityId/profile  (root owner — edit)',
             'POST /api/admin/provider-identities/:providerIdentityId/kyc-attest  (operator)',
             'POST /api/admin/provider-identities/:providerIdentityId/transition  (operator status change)',
+            'GET /api/marketplace/providers?lat&lng&radiusMeters&role&limit  (Phase 12.1a.1 — discovery)',
+            'POST /api/marketplace/providers/:providerIdentityId/express-interest  (Phase 12.1a.1 — booking stub)',
             'GET /api/identities/:identityId/installed-slms',
             'POST /api/identities/:identityId/installed-slms',
             'DELETE /api/identities/:identityId/installed-slms/:installId',
