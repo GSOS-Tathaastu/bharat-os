@@ -2201,6 +2201,36 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.0.0a — SHIPPED 2026-06-01 (ADR 0150).** Shared
+  wllama runtime singleton. The booking-advisor header had
+  been claiming the runtime was loaded at most once across
+  all SLM consumers, but each hook actually held its own
+  `runtimeRef` and reloaded the GGUF independently. A warm
+  session running 4 SLM verbs loaded ~1.4 GB into WASM four
+  times. NEW `getSharedSlmRuntime(packId, blobLoader, opts?)`
+  + `releaseSharedSlmRuntime(packId?)` in `slm-runtime.ts` —
+  module-level `Promise<SlmRuntime>` cache keyed on packId;
+  same packId → cached promise (load once); different packId
+  → fire-and-forget unload prior + rebuild; `Error('no_blob')`
+  rejection clears the cache so retries work; rejected loads
+  also clear the cache. All 4 SLM hooks + SlmTryPrompt
+  refactored to compose the singleton. Each hook keeps its
+  own `mountedRef + inflightRef + rate-limit + status union`
+  (per-feature concerns) but the runtime itself is shared.
+  Unmount no longer calls `runtime.unload()` (would pull the
+  rug from concurrent hook instances on the same runtime);
+  pack uninstall in `Labs.tsx` `handleRemove` now calls
+  `releaseSharedSlmRuntime(install.modelPackId)` so WASM
+  memory is freed when the citizen removes the active pack.
+  **§15 hardening propagated**: `logger: 'silent'` now passed
+  to the shared runtime load from ALL 4 hooks + SlmTryPrompt
+  (was only doc-summariser in Phase 13.0). Defence-in-depth
+  on bytes-never-leave — wllama tokenisation errors can no
+  longer echo prompt bytes to DevTools console regardless of
+  which SLM verb fired. Tests: vitest 193 → **201** (+8
+  shared-singleton cases — concurrent-same-pack dedup,
+  pack-swap unload-rebuild, no_blob rejection, retry-after-
+  reject, release semantics); Node 1217 unchanged. tsc clean.
 - **Phase 13.0 — SHIPPED 2026-06-01 (ADR 0149).** SLM-E
   on-device document summariser (demo cut v1) — first
   feature in the Phase 13.x SLM USP arc. NEW

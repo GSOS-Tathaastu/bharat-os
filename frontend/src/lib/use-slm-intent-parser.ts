@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
-import { loadSlmRuntime, type SlmRuntime } from './slm-runtime';
+import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { buildIntentParsePrompt, parseIntentCompletion, type ParsedIntent } from './intent-parser';
 import { useInstalledSlms } from './hooks';
 
@@ -82,14 +82,13 @@ export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
     setStatus((prev) => (prev.kind === 'unavailable' ? { kind: 'ready' } : prev));
   }, [identityId, active, safeSetStatus]);
 
-  // Unload runtime on unmount to release WASM memory.
+  // Phase 13.0.0a — runtime is now shared module-level via
+  // getSharedSlmRuntime. Unmount no longer calls unload() (that
+  // would pull the rug from concurrent SLM consumers). Drop the
+  // local ref so a remount re-binds to the shared runtime cleanly.
   useEffect(() => {
     return () => {
-      const rt = runtimeRef.current;
-      if (rt) {
-        void rt.unload();
-        runtimeRef.current = null;
-      }
+      runtimeRef.current = null;
     };
   }, []);
 
@@ -106,19 +105,26 @@ export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
         try {
           if (!runtimeRef.current) {
             safeSetStatus({ kind: 'loading', progress: 0 });
-            const blob = await readSlmBlob(active.modelPackId);
-            if (!blob) {
-              safeSetStatus({ kind: 'error', message: 'Model bytes not in this browser. Install the pack again.' });
-              return null;
-            }
-            const runtime = await loadSlmRuntime({
-              ggufBytes: blob,
-              onProgress: (loaded, total) => {
-                const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
-                safeSetStatus({ kind: 'loading', progress: pct });
+            try {
+              const runtime = await getSharedSlmRuntime(
+                active.modelPackId,
+                () => readSlmBlob(active.modelPackId),
+                {
+                  logger: 'silent',
+                  onProgress: (loaded, total) => {
+                    const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+                    safeSetStatus({ kind: 'loading', progress: pct });
+                  }
+                }
+              );
+              runtimeRef.current = runtime;
+            } catch (loadErr) {
+              if ((loadErr as Error).message === 'no_blob') {
+                safeSetStatus({ kind: 'error', message: 'Model bytes not in this browser. Install the pack again.' });
+                return null;
               }
-            });
-            runtimeRef.current = runtime;
+              throw loadErr;
+            }
           }
           safeSetStatus({ kind: 'parsing' });
           const prompt = buildIntentParsePrompt(intentText);

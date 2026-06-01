@@ -16,7 +16,7 @@ import {
 import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
 import { DocSummariserPanel } from '@/components/DocSummariserPanel';
-import { loadSlmRuntime } from '@/lib/slm-runtime';
+import { loadSlmRuntime, releaseSharedSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
   const gb = bytes / 1_000_000_000;
@@ -139,6 +139,10 @@ export function LabsPage() {
     // Wipe OPFS first; even if the server delete fails we no longer
     // hold the bytes on this device.
     removeSlmBlob(install.modelPackId).catch(() => {});
+    // Phase 13.0.0a — also release the shared wllama runtime if it
+    // matches the removed pack, so WASM memory is freed without
+    // waiting for a page navigation.
+    void releaseSharedSlmRuntime(install.modelPackId);
     remove.mutate(
       { identityId: identity.id, installId: install.installId },
       {

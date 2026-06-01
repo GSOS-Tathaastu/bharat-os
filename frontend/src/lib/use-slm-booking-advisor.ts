@@ -1,14 +1,14 @@
 // Phase 12.1b.4 — SLM-D booking-advisor hook.
 //
-// Reuses the wllama runtime singleton from Phase 9.0c so the
-// model bytes are loaded at most once across the SLM intent
-// parser (12.1b.1), SLM-C field suggest (12.1b.3), and this
-// advisor (12.1b.4). Rate-limited so a provider tapping the chip
-// repeatedly doesn't lock the device.
+// Reuses the Phase 13.0.0a shared wllama runtime singleton so the
+// model bytes are loaded at most once across all SLM consumers
+// (intent parser, field suggest, advisor, doc summariser, and any
+// future SLM-F/G/H spec). Rate-limited so a provider tapping the
+// chip repeatedly doesn't lock the device.
 
 import { useCallback, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
-import { loadSlmRuntime, type SlmRuntime } from './slm-runtime';
+import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { useInstalledSlms } from './hooks';
 import {
   buildBookingAdvisorPrompt,
@@ -88,12 +88,19 @@ export function useSlmBookingAdvisor({ identityId }: UseOptions) {
         try {
           if (!runtimeRef.current) {
             setStatus({ kind: 'loading' });
-            const blob = await readSlmBlob(installed.modelPackId);
-            if (!blob) {
-              setStatus({ kind: 'unavailable', reason: 'no_blob' });
-              return null;
+            try {
+              runtimeRef.current = await getSharedSlmRuntime(
+                installed.modelPackId,
+                () => readSlmBlob(installed.modelPackId),
+                { logger: 'silent' }
+              );
+            } catch (loadErr) {
+              if ((loadErr as Error).message === 'no_blob') {
+                setStatus({ kind: 'unavailable', reason: 'no_blob' });
+                return null;
+              }
+              throw loadErr;
             }
-            runtimeRef.current = await loadSlmRuntime({ ggufBytes: blob });
           }
           setStatus({ kind: 'thinking' });
           const prompt = buildBookingAdvisorPrompt(input.context);

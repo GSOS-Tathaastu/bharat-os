@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
-import { loadSlmRuntime, type SlmRuntime } from './slm-runtime';
+import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { useInstalledSlms } from './hooks';
 import {
   buildDocSummaryPrompt,
@@ -134,19 +134,15 @@ export function useSlmDocSummariser({ identityId }: UseOptions) {
     setStatus((prev) => (prev.kind === 'unavailable' ? { kind: 'ready' } : prev));
   }, [identityId, installed, safeSetStatus]);
 
-  // Unmount cleanup: unload the runtime so WASM memory is released.
-  // Summariser maxTokens 384 is the longest-running of all SLM
-  // hooks, maximising the unmount-during-load race window — this
-  // matches the use-slm-intent-parser pattern and is REQUIRED.
-  // Phase 13.0 adversarial fix MF-5 — also clear any pending
-  // cooling-down auto-exit timer.
+  // Phase 13.0.0a — runtime is now shared module-level via
+  // getSharedSlmRuntime. Unmount no longer calls unload() (that
+  // would pull the rug from any other live SLM hook). Pack
+  // uninstall paths call releaseSharedSlmRuntime explicitly.
+  // We still drop the local ref so a remount rebuilds the shared
+  // runtime fresh if needed.
   useEffect(() => {
     return () => {
-      const rt = runtimeRef.current;
-      if (rt) {
-        void rt.unload();
-        runtimeRef.current = null;
-      }
+      runtimeRef.current = null;
       if (cooldownTimerRef.current) {
         clearTimeout(cooldownTimerRef.current);
         cooldownTimerRef.current = null;
@@ -218,29 +214,36 @@ export function useSlmDocSummariser({ identityId }: UseOptions) {
         try {
           if (!runtimeRef.current) {
             safeSetStatus({ kind: 'loading', progress: 0 });
-            const blob = await readSlmBlob(installed.modelPackId);
-            if (!blob) {
-              safeSetStatus({ kind: 'unavailable', reason: 'no_blob' });
-              return null;
-            }
-            const runtime = await loadSlmRuntime({
-              ggufBytes: blob,
-              // Phase 13.0 adversarial fix SF-2 — silent logger so a
-              // malformed-prompt error from wllama doesn't echo doc
-              // bytes to the DevTools console.
-              logger: 'silent',
-              onProgress: (loaded, total) => {
-                // Phase 13.0 adversarial fix SF-5 — clamp to 100
-                // so wllama edge cases that report loaded>total
-                // don't surface as "Loading model… 103%".
-                const pct =
-                  total > 0
-                    ? Math.min(100, Math.round((loaded / total) * 100))
-                    : 0;
-                safeSetStatus({ kind: 'loading', progress: pct });
+            try {
+              const runtime = await getSharedSlmRuntime(
+                installed.modelPackId,
+                () => readSlmBlob(installed.modelPackId),
+                {
+                  // Phase 13.0 adversarial fix SF-2 — silent logger
+                  // so a malformed-prompt error from wllama doesn't
+                  // echo doc bytes to the DevTools console.
+                  logger: 'silent',
+                  onProgress: (loaded, total) => {
+                    // Phase 13.0 adversarial fix SF-5 — clamp to
+                    // 100 so wllama edge cases that report
+                    // loaded>total don't surface as "Loading
+                    // model… 103%".
+                    const pct =
+                      total > 0
+                        ? Math.min(100, Math.round((loaded / total) * 100))
+                        : 0;
+                    safeSetStatus({ kind: 'loading', progress: pct });
+                  }
+                }
+              );
+              runtimeRef.current = runtime;
+            } catch (loadErr) {
+              if ((loadErr as Error).message === 'no_blob') {
+                safeSetStatus({ kind: 'unavailable', reason: 'no_blob' });
+                return null;
               }
-            });
-            runtimeRef.current = runtime;
+              throw loadErr;
+            }
           }
           streamedTextRef.current = '';
           safeSetPartial('');

@@ -252,3 +252,113 @@ export async function loadSlmRuntimeFromUrl(
   const bytes = await response.arrayBuffer();
   return loadSlmRuntime({ ggufBytes: bytes, ...opts });
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Phase 13.0.0a — shared wllama runtime singleton.
+//
+// Before this substrate: each SLM hook (intent-parser, booking-advisor,
+// field-suggest, doc-summariser) held its own `runtimeRef` and called
+// `loadSlmRuntime({ ggufBytes: blob })` independently the first time
+// its verb fired. A warm session running 4 SLM verbs loaded the same
+// GGUF bytes into WASM 4 times — wasted ~5 GB of memory churn and
+// ~15s of redundant load time.
+//
+// After this substrate: every hook calls `getSharedSlmRuntime(packId,
+// blobLoader, opts?)`. The module caches a single `Promise<SlmRuntime>`
+// keyed by `packId`. Same packId → returns the cached promise instantly.
+// New packId → unloads the previous runtime + builds a new one (so a
+// citizen swapping installed packs still works).
+//
+// The hooks no longer call `runtime.unload()` on unmount (that would
+// pull the rug from other concurrent hook instances). Pack uninstall
+// from the Labs install-list calls `releaseSharedSlmRuntime()` to free
+// WASM memory explicitly when the citizen removes the active pack.
+//
+// §15 / ADR 0114 contracts inherited: the singleton wraps
+// `loadSlmRuntime`; no direct `'@wllama/wllama'` import; bundle code-
+// split preserved.
+
+let _sharedPromise: Promise<SlmRuntime> | null = null;
+let _sharedModelPackId: string | null = null;
+
+/**
+ * Get-or-build the module-level shared SLM runtime keyed on
+ * `modelPackId`. Concurrent callers with the same packId share the
+ * same in-flight promise (load happens once). Callers with a
+ * different packId trigger an unload + rebuild.
+ *
+ * `blobLoader` is invoked at most once per (modelPackId, lifetime
+ * of the cached promise). Returning `null` from it propagates a
+ * rejected promise so the caller can surface `no_blob` honestly.
+ */
+export function getSharedSlmRuntime(
+  modelPackId: string,
+  blobLoader: () => Promise<Blob | ArrayBuffer | null>,
+  opts: Omit<LoadOptions, 'ggufBytes'> = {}
+): Promise<SlmRuntime> {
+  if (_sharedPromise && _sharedModelPackId === modelPackId) {
+    return _sharedPromise;
+  }
+  // Different packId (or no cached runtime) → unload + rebuild.
+  // The unload is fire-and-forget: callers waiting on the new
+  // runtime shouldn't block on the old one's cleanup.
+  if (_sharedPromise) {
+    const prior = _sharedPromise;
+    void prior
+      .then((rt) => rt.unload())
+      .catch(() => {
+        // best-effort: a failed prior load may not have a runtime
+        // instance to unload; swallow.
+      });
+  }
+  _sharedModelPackId = modelPackId;
+  _sharedPromise = (async () => {
+    const bytes = await blobLoader();
+    if (!bytes) {
+      throw new Error('no_blob');
+    }
+    return loadSlmRuntime({ ggufBytes: bytes, ...opts });
+  })();
+  // If the build itself rejects, clear the cache so the next caller
+  // retries cleanly (otherwise every subsequent call would replay
+  // the same rejected promise).
+  void _sharedPromise.catch(() => {
+    if (_sharedPromise && _sharedModelPackId === modelPackId) {
+      _sharedPromise = null;
+      _sharedModelPackId = null;
+    }
+  });
+  return _sharedPromise;
+}
+
+/**
+ * Drop the shared runtime if it currently matches `modelPackId` (or
+ * if no `modelPackId` is supplied, drop whatever is cached). Called
+ * from the Labs install-list when the citizen uninstalls the active
+ * pack, so WASM memory is released without waiting for a page
+ * navigation. Best-effort: errors from `unload()` are swallowed.
+ */
+export async function releaseSharedSlmRuntime(modelPackId?: string): Promise<void> {
+  if (!_sharedPromise) return;
+  if (modelPackId !== undefined && _sharedModelPackId !== modelPackId) return;
+  const prior = _sharedPromise;
+  _sharedPromise = null;
+  _sharedModelPackId = null;
+  try {
+    const rt = await prior;
+    await rt.unload();
+  } catch (_e) {
+    // best-effort
+  }
+}
+
+/**
+ * Test-only: returns the currently-cached modelPackId or null.
+ * The shared promise itself is intentionally NOT exposed — callers
+ * must go through `getSharedSlmRuntime` so the cache invariant
+ * (one packId at a time) holds. The hook test files use this to
+ * assert pack-swap unload semantics without poking module internals.
+ */
+export function _sharedSlmRuntimeModelPackIdForTesting(): string | null {
+  return _sharedModelPackId;
+}

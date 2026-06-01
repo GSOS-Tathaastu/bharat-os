@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Action, Card, Evidence, useToast } from '@/components/ui';
 import { readSlmBlob } from '@/lib/opfs';
-import { loadSlmRuntime, type SlmRuntime } from '@/lib/slm-runtime';
+import { getSharedSlmRuntime, type SlmRuntime } from '@/lib/slm-runtime';
 import { useActiveIdentity, useRecordMeshEvent } from '@/lib/hooks';
 
 interface SlmTryPromptProps {
@@ -38,24 +38,29 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
 
   async function ensureRuntime(): Promise<SlmRuntime | null> {
     if (runtimeRef.current) return runtimeRef.current;
-    const blob = await readSlmBlob(modelPackId);
-    if (!blob) {
-      show('Model bytes not in OPFS. Install the pack first.', 'error');
-      return null;
-    }
     setBusy('loading');
     setLoadProgress(0);
     try {
-      const runtime = await loadSlmRuntime({
-        ggufBytes: blob,
-        onProgress: (loaded, total) => {
-          setLoadProgress(total > 0 ? Math.round((loaded / total) * 100) : 0);
+      // Phase 13.0.0a — shared runtime; load happens at most once
+      // across SlmTryPrompt + every SLM hook for the same packId.
+      const runtime = await getSharedSlmRuntime(
+        modelPackId,
+        () => readSlmBlob(modelPackId),
+        {
+          logger: 'silent',
+          onProgress: (loaded, total) => {
+            setLoadProgress(total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
+          }
         }
-      });
+      );
       runtimeRef.current = runtime;
       return runtime;
     } catch (err) {
-      show(`Could not load runtime: ${(err as Error).message}`, 'error');
+      if ((err as Error).message === 'no_blob') {
+        show('Model bytes not in OPFS. Install the pack first.', 'error');
+      } else {
+        show(`Could not load runtime: ${(err as Error).message}`, 'error');
+      }
       return null;
     } finally {
       setBusy('idle');
@@ -113,10 +118,10 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
   }
 
   async function handleClose() {
-    if (runtimeRef.current) {
-      await runtimeRef.current.unload();
-      runtimeRef.current = null;
-    }
+    // Phase 13.0.0a — don't unload the shared runtime; other SLM
+    // consumers may be using it. Pack uninstall in Labs.tsx calls
+    // releaseSharedSlmRuntime explicitly.
+    runtimeRef.current = null;
     onClose?.();
   }
 

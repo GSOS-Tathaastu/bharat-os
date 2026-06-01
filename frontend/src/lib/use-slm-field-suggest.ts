@@ -12,7 +12,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
-import { loadSlmRuntime, type SlmRuntime } from './slm-runtime';
+import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { useInstalledSlms } from './hooks';
 import type { FieldSpec } from './dynamic-form';
 
@@ -113,12 +113,19 @@ export function useSlmFieldSuggest({ identityId }: UseSlmFieldSuggestOptions) {
         try {
           if (!runtimeRef.current) {
             setStatus({ kind: 'loading' });
-            const blob = await readSlmBlob(installed.modelPackId);
-            if (!blob) {
-              setStatus({ kind: 'unavailable', reason: 'no_blob' });
-              return null;
+            try {
+              runtimeRef.current = await getSharedSlmRuntime(
+                installed.modelPackId,
+                () => readSlmBlob(installed.modelPackId),
+                { logger: 'silent' }
+              );
+            } catch (loadErr) {
+              if ((loadErr as Error).message === 'no_blob') {
+                setStatus({ kind: 'unavailable', reason: 'no_blob' });
+                return null;
+              }
+              throw loadErr;
             }
-            runtimeRef.current = await loadSlmRuntime({ ggufBytes: blob });
           }
           setStatus({ kind: 'generating' });
           const prompt = buildPrompt(input);

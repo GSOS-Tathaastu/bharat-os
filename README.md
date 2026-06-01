@@ -152,6 +152,39 @@ Implemented pieces:
 
 ---
 
+## ⚙️ 2026-06-01 — Phase 13.0.0a shipped: shared wllama runtime singleton (prereq for SLM-F/G/H)
+
+The Phase 13.0 adversarial review caught a latent lie — the
+booking-advisor header had been claiming the runtime is
+loaded at most once across all SLM consumers, but each hook
+held its own `runtimeRef` and reloaded the GGUF
+independently. A warm session running 4 SLM verbs loaded
+~1.4 GB into WASM four times.
+
+- **ADR 0150** — `getSharedSlmRuntime(packId, blobLoader,
+  opts?)` + `releaseSharedSlmRuntime(packId?)` in
+  `slm-runtime.ts`. Module-level `Promise<SlmRuntime>` cache.
+  Same packId → cached promise (load once). Different packId
+  → fire-and-forget unload prior + rebuild. `Error('no_blob')`
+  rejection clears cache so retries work.
+- **All 4 SLM hooks + SlmTryPrompt refactored** to compose
+  the singleton. Each hook keeps its own mountedRef +
+  inflightRef + rate-limit + status union (per-feature
+  concerns) but the runtime itself is shared.
+- **Unmount no longer unloads** (would pull the rug from
+  concurrent consumers). Pack uninstall in Labs.tsx
+  `handleRemove` calls `releaseSharedSlmRuntime(packId)`
+  explicitly.
+- **§15 hardening propagated**: `logger: 'silent'` now passed
+  from ALL 4 hooks + SlmTryPrompt (was only doc-summariser
+  in Phase 13.0). Defence-in-depth — wllama tokenisation
+  errors can no longer echo prompt bytes to DevTools console
+  regardless of which SLM verb fired.
+- **Tests**: vitest 193 → **201** (+8 cases). Node 1217
+  unchanged. tsc clean.
+
+---
+
 ## 📄 2026-06-01 — Phase 13.0 shipped: SLM-E on-device document summariser (demo cut v1)
 
 The first feature in the Phase 13.x SLM USP arc. **Paste an
