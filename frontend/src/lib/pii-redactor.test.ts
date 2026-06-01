@@ -213,6 +213,9 @@ describe('SAMPLE_FIXTURES — PII hygiene', () => {
   // 12345 obvious sequence).
   const REAL_PAN_RE = /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g;
   const REAL_AADHAAR_RE = /\b[0-9]{4}\s?[0-9]{4}\s?[0-9]{4}\b/;
+  // Phase 13.2 adversarial fix D6 — fixture PIN codes must use the
+  // 199999/299999/399999 demo family, not real Indian postal codes.
+  const PIN_RE = /\bPIN\s+([0-9]{6})\b/g;
 
   for (const key of Object.keys(SAMPLE_FIXTURES) as PiiFixtureKey[]) {
     const fixture = SAMPLE_FIXTURES[key];
@@ -233,6 +236,13 @@ describe('SAMPLE_FIXTURES — PII hygiene', () => {
           /^12345678901[0-9]$/.test(digits) ||
           /^1234567890123[0-9]$/.test(digits); // 14-digit ABHA demo
         expect(isDemoFamily).toBe(true);
+      }
+    });
+
+    it(`fixture ${key} PIN codes use the demo-family (N99999)`, () => {
+      const pins = [...fixture.matchAll(PIN_RE)].map((m) => m[1]);
+      for (const pin of pins) {
+        expect(pin).toMatch(/^[1-3]99999$/);
       }
     });
 

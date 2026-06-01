@@ -2201,6 +2201,53 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.2 — SHIPPED 2026-06-01 (ADR 0152).** Closes the
+  SLM-F arc with the first BE delta. NEW `piiRedaction`
+  sub-envelope on `intentAnnotation` (`src/phase0/intent-
+  annotation.mjs`): count-only fields `detectedCount`,
+  `maskedCount`, `kinds[]`, `source` (`regex` | `regex+slm`),
+  `appliedAt`. **Strict allowlist** at the boundary — any key
+  not in `PII_ALLOWED_KEYS` is rejected (defence-in-depth
+  beyond the original denylist; closed leak vectors from
+  synonyms like `body / value / snippet / payload / content`).
+  `appliedAt` validated as ISO-8601 UTC instant with ms
+  precision DROPPED on accept (neutralises timing-fingerprint
+  side-channel). `kinds[]` cap enforced post-dedup. Ledger
+  event `intent.slm_<verdict>` surfaces count-only meta;
+  JSON-grep test asserts no forbidden key surfaces. Auto-scan
+  on Send is **opt-in** (`piiAutoscanEnabled` per-session flag
+  flips true on first chip tap OR first Apply) so first-time
+  citizens don't get surprise modals on benign 6-digit /
+  10-digit sequences. The "Keep All → Apply → Send" re-open
+  loop closed via `acknowledgedSinceScan` flag (set on Apply
+  OR sheet Close/Cancel). `markApplied(appliedSpans,
+  appliedResult)` new signature so `buildAnnotation` reports
+  honest `maskedCount = appliedSpans.length` and `kinds[]`
+  reflects only the citizen-applied set — earlier impl lied
+  with `maskedCount === detectedCount`. `hasPendingPii`
+  getter replaced with `hasPendingPiiAgainst(text)` method so
+  callers can't ignore text drift. `buildAnnotation` text-
+  drift guard returns null when current text is neither
+  original nor post-mask. `PiiReviewSheet` gets a `title`
+  prop; Notes passes "Check for PII before saving". Phase
+  13.1 deferred SHOULD_FIX wins also applied: D6 (sample
+  fixture PIN swap to 199999 / 299999 / 399999 demo
+  family), D7 (honest "Check for PII (patterns only)" chip
+  framing when no SLM installed), D10 (per-row mask preview
+  bug — `applyMask(span.raw, [{...span}])` was failing
+  text.slice invariant; now uses `PII_KIND_MASK[kind]`
+  directly), D21 (unused Field import removed),
+  D-SF9 (`applyMask` widened to `MaskableSpan` structural
+  interface; unsafe TS cast removed). **Adversarial
+  review** (3 lenses + triage): **3 MUST_FIX + 10 SHOULD_FIX
+  + 5 defer**; all 3 must + 6 key should fixed in-phase.
+  **API_INTEGRATIONS.md impact**: ZERO new external API.
+  Last-updated header bumped. Tests: Node 1230 → **1233**
+  (+3 MF-3 strict-allowlist / ISO-8601 / ms-drop cases);
+  Vitest 309 → **313** (+4 fixture-PIN guards). tsc clean.
+  **Next**: Phase 13.3 (standalone piiRedaction-only path +
+  per-identity persisted opt-in + offline-queue replay
+  redaction + SLM-G personalization) OR Phase 14 Sahayak.
 - **Phase 13.1 — SHIPPED 2026-06-01 (ADR 0151).** SLM-F
   on-device PII redactor. Second SLM USP feature. Hybrid
   architecture: **regex-primary (deterministic, synchronous,

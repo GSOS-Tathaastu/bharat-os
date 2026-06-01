@@ -8,9 +8,10 @@ import {
   type MemorySensitivity,
   type MemorySummary
 } from '@/lib/hooks';
-import { useSlmPiiRedactor } from '@/lib/use-slm-pii-redactor';
+import { useSlmPiiRedactor, type PiiScanSpan } from '@/lib/use-slm-pii-redactor';
 import { PiiReviewSheet } from '@/components/PiiReviewSheet';
 import { CooldownCountdown } from '@/components/CooldownCountdown';
+import { scanWithRegex } from '@/lib/pii-detectors';
 
 // Phase 12.0.2 — /app/citizen/notes — personal memory records.
 //
@@ -48,13 +49,24 @@ export function CitizenNotes() {
   // Phase 13.1 — on-device PII redactor on the note body.
   const piiRedactor = useSlmPiiRedactor({ identityId: identity?.id });
   const [piiSheetOpen, setPiiSheetOpen] = useState(false);
+  // Phase 13.2 adversarial fix MF-2 — auto-scan opt-in (see
+  // CitizenHome.tsx for rationale).
+  const [piiAutoscanEnabled, setPiiAutoscanEnabled] = useState(false);
   async function handleCheckPii() {
+    setPiiAutoscanEnabled(true);
     const result = await piiRedactor.scan(text);
     if (result) setPiiSheetOpen(true);
   }
-  function handlePiiApply(maskedText: string) {
+  function handlePiiApply(maskedText: string, appliedSpans: PiiScanSpan[]) {
     setText(maskedText);
-    piiRedactor.markApplied();
+    if (piiRedactor.lastResult) {
+      piiRedactor.markApplied(appliedSpans, piiRedactor.lastResult);
+    }
+    setPiiAutoscanEnabled(true);
+  }
+  function handlePiiSheetClose() {
+    piiRedactor.markAcknowledged();
+    setPiiSheetOpen(false);
   }
 
   function handleCreate() {
@@ -62,20 +74,21 @@ export function CitizenNotes() {
       show('Write something to save.', 'error');
       return;
     }
-    // Phase 13.1 adversarial fix M6 — Save-side gate. Notes are
-    // encrypted at rest, but citizen-intended redaction shouldn't
-    // be silently bypassed. If the citizen scanned, found PII, and
-    // dismissed without applying, confirm before persisting.
-    if (
-      piiRedactor.hasPendingPii &&
+    // Phase 13.2 — transparent PII pre-flight on Save.
+    // MF-2: auto-scan is opt-in; first-time citizens skip the
+    // pre-flight to avoid surprise modals.
+    if (piiRedactor.hasPendingPiiAgainst(text)) {
+      setPiiSheetOpen(true);
+      return;
+    }
+    const alreadyAcked =
+      piiRedactor.acknowledgedSinceScan &&
       piiRedactor.lastResult &&
-      piiRedactor.lastResult.scannedText === text
-    ) {
-      const n = piiRedactor.lastResult.mergedSpans.length;
-      const ok = window.confirm(
-        `You found ${n} potential PII item${n === 1 ? '' : 's'} but haven't masked any of them. Save the note anyway?`
-      );
-      if (!ok) {
+      piiRedactor.lastResult.scannedText === text;
+    if (piiAutoscanEnabled && !alreadyAcked) {
+      const preflightSpans = scanWithRegex(text);
+      if (preflightSpans.length > 0) {
+        void piiRedactor.scan(text);
         setPiiSheetOpen(true);
         return;
       }
@@ -272,7 +285,9 @@ export function CitizenNotes() {
                   ? `Loading on-device model ${piiRedactor.status.progress}%…`
                   : piiRedactor.status.kind === 'scanning'
                     ? 'Scanning on-device…'
-                    : '🛡 Check for PII before saving'}
+                    : piiRedactor.hasSlm
+                      ? '🛡 Check for PII before saving'
+                      : '🛡 Check for PII (patterns only)'}
               </button>
               {piiRedactor.lastResult && piiRedactor.lastResult.scannedText === text && (
                 <Badge
@@ -319,12 +334,14 @@ export function CitizenNotes() {
           a single press (citizen loses the typed note) AND the
           inner Sheet's unmount would re-enable body scroll while
           the outer was still open. */}
+      {/* SF-3 — Notes flow saves locally, doesn't send. */}
       <PiiReviewSheet
         open={piiSheetOpen}
-        onClose={() => setPiiSheetOpen(false)}
+        onClose={handlePiiSheetClose}
         currentText={text}
         result={piiRedactor.lastResult}
         onApply={handlePiiApply}
+        title="Check for PII before saving"
       />
 
       {/* Read sheet */}

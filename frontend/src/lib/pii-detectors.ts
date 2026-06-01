@@ -426,6 +426,15 @@ export const PII_KIND_MASK: Record<PiiKind, (raw: string) => string> = {
   pin: maskPin
 };
 
+/** Structural shape applyMask consumes. Any span source (regex
+ *  or SLM) satisfies it without a cast — Phase 13.2 SF-9 cleanup. */
+export interface MaskableSpan {
+  start: number;
+  end: number;
+  kind: PiiKind;
+  raw: string;
+}
+
 /**
  * Rewrite `text` with `spans` masked. Spans must be
  * non-overlapping (use `scanWithRegex` output or
@@ -434,7 +443,7 @@ export const PII_KIND_MASK: Record<PiiKind, (raw: string) => string> = {
  * same result because the mask character 'X' is outside every
  * detector character class.
  */
-export function applyMask(text: string, spans: ReadonlyArray<{ start: number; end: number; kind: PiiKind; raw: string }>): string {
+export function applyMask(text: string, spans: ReadonlyArray<MaskableSpan>): string {
   if (spans.length === 0) return text;
   // Defensive copy + sort by start ascending. Caller-supplied
   // spans should already be sorted but we don't trust the caller.

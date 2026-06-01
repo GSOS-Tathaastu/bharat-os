@@ -270,7 +270,7 @@ export const SAMPLE_FIXTURES = Object.freeze({
   shopping: [
     "Hi! I'd like to order 2 kg of basmati rice. My UPI is alice@demo-bank,",
     "and my phone is 9000000000. If you need PAN it's ABCDX0000Z. Deliver to",
-    "PIN 411014.",
+    "PIN 199999.",
   ].join('\n'),
   loan_intent: [
     'I want to apply for a personal loan of 3 lakh. My Aadhaar is 9999 9999 9999.',
@@ -278,11 +278,11 @@ export const SAMPLE_FIXTURES = Object.freeze({
   ].join('\n'),
   health_check: [
     'Booking a health checkup. My ABHA ID is 12345678901234. Mobile 7000000000.',
-    'Email demo@example.com. PIN 560001.'
+    'Email demo@example.com. PIN 299999.'
   ].join('\n'),
   shop_kyc: [
     'Onboarding my kirana shop. Shop GSTIN 27ABCDE1234F1Z5, owner PAN ABCDX0000Z.',
-    'WhatsApp 9000000000. Pickup PIN 110001.'
+    'WhatsApp 9000000000. Pickup PIN 399999.'
   ].join('\n')
 });
 

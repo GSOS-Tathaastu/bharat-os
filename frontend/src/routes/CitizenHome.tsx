@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Action, Badge, Card, Evidence, Field, Sheet, Tabs, useToast } from '@/components/ui';
+import { Action, Badge, Card, Evidence, Sheet, Tabs, useToast } from '@/components/ui';
 import { ConsentGrantSheet } from '@/components/ConsentGrantSheet';
 import { DailyBriefCard } from '@/components/DailyBriefCard';
 import { CitizenNotes } from '@/routes/CitizenNotes';
@@ -19,9 +19,10 @@ import {
 } from '@/lib/hooks';
 import { isVoiceIntentSupported, VoiceIntentSession } from '@/lib/voice-intent';
 import { useSlmIntentParser } from '@/lib/use-slm-intent-parser';
-import { useSlmPiiRedactor } from '@/lib/use-slm-pii-redactor';
+import { useSlmPiiRedactor, type PiiScanSpan } from '@/lib/use-slm-pii-redactor';
 import { PiiReviewSheet } from '@/components/PiiReviewSheet';
 import { CooldownCountdown } from '@/components/CooldownCountdown';
+import { scanWithRegex, applyMask } from '@/lib/pii-detectors';
 import { actionTypeFriendlyLabel, type ParsedIntent } from '@/lib/intent-parser';
 import { useSmartSendIntent } from '@/lib/use-send-intent-smart';
 import { OfflineQueuePill } from '@/components/OfflineQueuePill';
@@ -200,13 +201,29 @@ function CitizenIntent() {
   // handleSend runs.
   const piiRedactor = useSlmPiiRedactor({ identityId: identity?.id });
   const [piiSheetOpen, setPiiSheetOpen] = useState(false);
+  // Phase 13.2 adversarial fix MF-2 — opt-in flag for the
+  // auto-scan-on-Send behaviour. Defaults false; flips true the
+  // first time the citizen taps the Check chip OR Applies a mask.
+  // Without this gate, first-time citizens get an unsolicited PII
+  // sheet on Send when their intent happens to contain a 6-digit
+  // number ('order #834567') or a 10-digit sequence ('pay 9876543210
+  // rupees'). Per-session in-memory; persistence to BosStore is a
+  // Phase 13.3 follow-up.
+  const [piiAutoscanEnabled, setPiiAutoscanEnabled] = useState(false);
   async function handleCheckPii() {
+    setPiiAutoscanEnabled(true);
     const result = await piiRedactor.scan(text);
     if (result) setPiiSheetOpen(true);
   }
-  function handlePiiApply(maskedText: string) {
+  function handlePiiApply(maskedText: string, appliedSpans: PiiScanSpan[]) {
     setText(maskedText);
-    piiRedactor.markApplied();
+    // Phase 13.2 adversarial fix MF-1 — pass through the citizen's
+    // selected spans + the result at Apply time so buildAnnotation
+    // reports honest counts.
+    if (piiRedactor.lastResult) {
+      piiRedactor.markApplied(appliedSpans, piiRedactor.lastResult);
+    }
+    setPiiAutoscanEnabled(true);
     // The annotation gate already invalidates on any text change,
     // so a setText after Apply clears any stale SLM-A annotation
     // via the existing onChange handler in the textarea (line ~348
@@ -217,6 +234,13 @@ function CitizenIntent() {
       setParsedFromText(null);
       slmParser.reset();
     }
+  }
+  function handlePiiSheetClose() {
+    // Phase 13.2 adversarial fix MF-2 — closing the sheet without
+    // applying still counts as the citizen having SEEN the spans.
+    // Subsequent Sends against the same text skip the auto-open.
+    piiRedactor.markAcknowledged();
+    setPiiSheetOpen(false);
   }
 
   // Phase 12.1b.1 — keep a reference to the EXACT text the user
@@ -241,20 +265,31 @@ function CitizenIntent() {
       show('Type or pick what you want to do.', 'error');
       return;
     }
-    // Phase 13.1 adversarial fix M6 — Send foot-gun gate. The chip
-    // promised "Check for PII before sending"; if the citizen
-    // scanned, saw N spans, dismissed the sheet, and now hits Send,
-    // surface a confirm so the trust theatre is honest.
-    if (
-      piiRedactor.hasPendingPii &&
+    // Phase 13.2 — transparent PII pre-flight on Send.
+    //   (a) Citizen scanned but never acknowledged + PII pending →
+    //       open the PiiReviewSheet.
+    //   (b) Citizen hit Send WITHOUT tapping the chip (or any prior
+    //       opt-in interaction) → SKIP auto-scan. MF-2 fix:
+    //       auto-scan is opt-in to avoid surprise modals on benign
+    //       6-digit / 10-digit sequences.
+    //   (c) Opted in + no acknowledgement yet against this text →
+    //       synchronous regex pre-flight + sheet auto-open.
+    // The actual POST is deferred until the citizen Apply's a mask
+    // (or explicitly Sends after acknowledging).
+    if (piiRedactor.hasPendingPiiAgainst(intentText)) {
+      setPiiSheetOpen(true);
+      return;
+    }
+    const alreadyAcked =
+      piiRedactor.acknowledgedSinceScan &&
       piiRedactor.lastResult &&
-      piiRedactor.lastResult.scannedText === intentText
-    ) {
-      const n = piiRedactor.lastResult.mergedSpans.length;
-      const ok = window.confirm(
-        `You found ${n} potential PII item${n === 1 ? '' : 's'} but haven't masked any of them. Send anyway?`
-      );
-      if (!ok) {
+      piiRedactor.lastResult.scannedText === intentText;
+    if (piiAutoscanEnabled && !alreadyAcked) {
+      const preflightSpans = scanWithRegex(intentText);
+      if (preflightSpans.length > 0) {
+        // Kick off the full async scan so the sheet gets SLM hits
+        // when they land.
+        void piiRedactor.scan(intentText);
         setPiiSheetOpen(true);
         return;
       }
@@ -265,6 +300,15 @@ function CitizenIntent() {
     //   • the sent text doesn't match the text the chip was built
     //     from (any edit invalidates the annotation)
     const interimPending = listening && interim.trim().length > 0;
+    // Phase 13.2 — fetch the count-only PII redaction sub-envelope.
+    // Returns null when the citizen hasn't Apply'd a mask against
+    // the current text. The BE substrate validates the shape and
+    // rejects any forbidden key (spans/text/raw/etc.) at boundary.
+    // For v1, piiRedaction rides as a sub-envelope of the SLM-A
+    // annotation — a standalone piiRedaction-only annotation would
+    // need a new orchestrator field (deferred to 13.3+) to avoid
+    // surfacing a noisy 'disagreed' verdict.
+    const piiRedaction = piiRedactor.buildAnnotation(intentText);
     const annotation =
       parsedIntent && !interimPending && parsedFromText != null && intentText === parsedFromText
         ? {
@@ -274,7 +318,8 @@ function CitizenIntent() {
             rationale: parsedIntent.rationale,
             modelPackId: slmParser.modelPackId,
             entities: parsedIntent.entities,
-            generatedAt: new Date().toISOString()
+            generatedAt: new Date().toISOString(),
+            piiRedaction
           }
         : null;
     // Phase 12.1b.2 — smart send: queues to IDB if offline, posts
@@ -522,7 +567,9 @@ function CitizenIntent() {
                 ? `Loading on-device model ${piiRedactor.status.progress}%…`
                 : piiRedactor.status.kind === 'scanning'
                   ? 'Scanning on-device…'
-                  : '🛡 Check for PII before sending'}
+                  : piiRedactor.hasSlm
+                    ? '🛡 Check for PII before sending'
+                    : '🛡 Check for PII (patterns only)'}
             </button>
             {piiRedactor.lastResult && piiRedactor.lastResult.scannedText === text && (
               <Badge
@@ -555,7 +602,7 @@ function CitizenIntent() {
         )}
         <PiiReviewSheet
           open={piiSheetOpen}
-          onClose={() => setPiiSheetOpen(false)}
+          onClose={handlePiiSheetClose}
           currentText={text}
           result={piiRedactor.lastResult}
           onApply={handlePiiApply}

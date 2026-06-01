@@ -1232,9 +1232,13 @@ picked "minimum onboarding load, maximum coverage"):
   GSTIN/account/DL/RC/ABHA/UPI/email/PIN) + SLM-secondary
   context augmentation. Chip on CitizenIntent + CitizenNotes;
   Apply rewrites textarea before handleSend/handleCreate
-  fires. Deferred to 13.2: transparent handleSend integration
-  + `piiRedactionAnnotation` envelope + offline-queue replay
-  redaction.
+  fires. **Phase 13.2 shipped 2026-06-01 (ADR 0152)** —
+  count-only `piiRedaction` sub-envelope on
+  `intentAnnotation` (first BE delta in 13.x) + opt-in
+  transparent Send pre-flight + strict-allowlist BE
+  hardening. Deferred to 13.3: standalone piiRedaction-only
+  annotation path + per-identity persisted opt-in +
+  offline-queue replay redaction.
 - [ ] **G.** On-device personalization (preferences never leave
   device).
 - [ ] **H.** On-device skill agents for Indian tasks

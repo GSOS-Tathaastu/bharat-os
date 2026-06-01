@@ -15,16 +15,16 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 13.1 — SLM-F on-device PII
-redactor shipped. **Still zero new external-API
-dependencies** by design: regex-primary + SLM-secondary
-both run on-device. Phase 13.0.0a shared wllama runtime
-singleton also shipped — pre-req substrate for SLM-F/G/H,
-no external impact. The whole SLM USP arc continues to add
-capability without partner credentials. The parallel
-revenue-lines Phase 13.x items at §4.1 UPI rails and
-§4.2 IFSC lookup are the only remaining 13.x entries that
-will touch this doc.)
+Last updated: 2026-06-01 (Phase 13.2 — piiRedaction count-
+only annotation envelope + opt-in transparent Send pre-flight
+shipped. **Still zero new external-API dependencies**: the
+`piiRedaction` sub-envelope rides through the existing
+`/api/orchestrations` POST as part of `intentAnnotation`; no
+new endpoint, no new partner credentials. The whole 13.x SLM
+USP arc continues to add capability without external services.
+The parallel revenue-lines Phase 13.x items at §4.1 UPI rails
+and §4.2 IFSC lookup are still the only remaining 13.x
+entries that will touch this doc.)
 
 ## Legend
 

@@ -46,7 +46,6 @@ import { djb2Hash } from './slm-parse-helpers';
 import {
   scanWithRegex,
   applyMask,
-  type PiiKind,
   type RegexSpan
 } from './pii-detectors';
 import {
@@ -163,6 +162,22 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
   // tapping Send while PII detected but never applied". Flips
   // true inside markApplied; flips false on every fresh scan().
   const [appliedSinceScan, setAppliedSinceScan] = useState(false);
+  // Phase 13.2 adversarial fix MF-2 — separate flag for "citizen
+  // has SEEN this scan" (Apply OR Cancel). Send-side auto-scan
+  // gate reads this so a "Keep All → Apply → Send" loop is broken:
+  // after the citizen has acknowledged the scan, hitting Send
+  // against the same text proceeds to POST without re-opening.
+  const [acknowledgedSinceScan, setAcknowledgedSinceScan] = useState(false);
+  // Phase 13.2 adversarial fix MF-1 — the applied set of spans
+  // captured AT APPLY TIME drives buildAnnotation's count + kinds.
+  // Earlier impl set maskedCount = detectedCount unconditionally,
+  // which lied to the ledger when the citizen partially deselected.
+  const appliedSpansRef = useRef<PiiScanSpan[]>([]);
+  const appliedResultRef = useRef<SlmPiiScanResult | null>(null);
+  const appliedAtRef = useRef<string | null>(null);
+  // Phase 13.2 — track latest scannedText via a ref so the scan()
+  // closure doesn't read a stale lastResult on rapid re-taps.
+  const lastScannedTextRef = useRef<string | null>(null);
 
   const safeSetStatus = useCallback((s: SlmPiiRedactorStatus) => {
     if (mountedRef.current) setStatus(s);
@@ -249,8 +264,16 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
           generationMs: null
         };
         if (mountedRef.current) {
+          const priorScannedText = lastScannedTextRef.current;
           setLastResult(result);
-          setAppliedSinceScan(false);
+          lastScannedTextRef.current = text;
+          if (priorScannedText !== text) {
+            setAppliedSinceScan(false);
+            setAcknowledgedSinceScan(false);
+            appliedSpansRef.current = [];
+            appliedResultRef.current = null;
+            appliedAtRef.current = null;
+          }
         }
         safeSetStatus({ kind: 'unavailable', reason: 'no_install' });
         return result;
@@ -300,6 +323,38 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
         return inflightRef.current.piiKey === piiKey
           ? inflightRef.current.promise
           : null;
+      }
+
+      // Phase 13.2 — seed lastResult synchronously with the regex
+      // pass so the PiiReviewSheet can render IMMEDIATELY on
+      // auto-scan-on-Send. The SLM second pass refines this when
+      // it lands. Without this seed, the sheet briefly renders
+      // null between the scan kickoff and the SLM completion.
+      // Phase 13.2 adversarial fix MF-2 — only flip the
+      // applied/acknowledged flags when the scan is against a
+      // DIFFERENT scannedText than the prior one. Same-text re-tap
+      // (eg auto-scan-on-Send racing the existing chip tap)
+      // preserves prior citizen acknowledgement.
+      const seed: SlmPiiScanResult = {
+        regexSpans,
+        slmSpans: [],
+        mergedSpans: mergeSpans(regexSpans, []),
+        redactedText: applyMask(text, regexSpans),
+        scannedText: text,
+        modelPackId: installed.modelPackId,
+        generationMs: null
+      };
+      if (mountedRef.current) {
+        const priorScannedText = lastScannedTextRef.current;
+        setLastResult(seed);
+        lastScannedTextRef.current = text;
+        if (priorScannedText !== text) {
+          setAppliedSinceScan(false);
+          setAcknowledgedSinceScan(false);
+          appliedSpansRef.current = [];
+          appliedResultRef.current = null;
+          appliedAtRef.current = null;
+        }
       }
 
       const job = (async (): Promise<SlmPiiScanResult | null> => {
@@ -411,6 +466,11 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
   const reset = useCallback(() => {
     setLastResult(null);
     setAppliedSinceScan(false);
+    setAcknowledgedSinceScan(false);
+    appliedSpansRef.current = [];
+    appliedResultRef.current = null;
+    appliedAtRef.current = null;
+    lastScannedTextRef.current = null;
     safeSetStatus(
       identityId
         ? installed
@@ -420,24 +480,98 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
     );
   }, [identityId, installed, safeSetStatus]);
 
-  // Phase 13.1 adversarial fix M6 — markApplied is called by the
-  // PiiReviewSheet's onApply hookup site after the citizen
-  // explicitly accepts a mask. Drives the Send-side gate that
-  // surfaces "you scanned and found PII but never masked it".
-  const markApplied = useCallback(() => {
-    setAppliedSinceScan(true);
+  // Phase 13.1 adversarial fix M6 + Phase 13.2 adversarial fix MF-1
+  // — markApplied is called by the PiiReviewSheet's onApply hookup
+  // site after the citizen explicitly accepts a mask. The applied
+  // span set + the result-at-Apply-time + a wall-clock timestamp
+  // are captured into refs so buildAnnotation reports the citizen's
+  // actual choices (not the detected superset).
+  const markApplied = useCallback(
+    (appliedSpans: PiiScanSpan[], appliedResult: SlmPiiScanResult) => {
+      appliedSpansRef.current = appliedSpans;
+      appliedResultRef.current = appliedResult;
+      // Wall-clock at Apply time. BE substrate strips millisecond
+      // precision before persisting, so the timestamp can't leak a
+      // citizen's typing speed.
+      appliedAtRef.current = new Date().toISOString();
+      setAppliedSinceScan(true);
+      setAcknowledgedSinceScan(true);
+    },
+    []
+  );
+
+  // Phase 13.2 adversarial fix MF-2 — citizen tapped Cancel /
+  // Escape on the sheet WITHOUT applying. Acknowledged but not
+  // applied. The Send-side auto-scan gate respects this so the
+  // citizen isn't trapped in a "Keep All → Apply → Send" re-open
+  // loop or a "Cancel → Send" re-open.
+  const markAcknowledged = useCallback(() => {
+    setAcknowledgedSinceScan(true);
   }, []);
 
-  /** True when a scan completed against the CURRENT text, found
-   *  at least one span, and the citizen has NOT explicitly Apply'd
-   *  a mask since. Send-side gate reads this to confirm before
-   *  posting raw PII. */
-  const hasPendingPii = (() => {
+  /** Phase 13.2 adversarial fix SF-6 — TRUE when a scan completed
+   *  against the SUPPLIED text (not just any text), found at least
+   *  one span, and the citizen has NOT Apply'd a mask since. The
+   *  earlier getter ignored text drift and lied about staleness
+   *  to any caller other than handleSend. */
+  function hasPendingPiiAgainst(currentText: string): boolean {
     if (!lastResult) return false;
     if (lastResult.mergedSpans.length === 0) return false;
     if (appliedSinceScan) return false;
-    return true;
-  })();
+    return lastResult.scannedText === currentText;
+  }
+
+  /** Phase 13.2 — build the count-only piiRedaction sub-envelope
+   *  for `intentAnnotation`. Returns null when no scan was Apply'd
+   *  against the current text OR the text has drifted since Apply.
+   *  Never includes spans, raws, or redacted text — the BE
+   *  substrate's strict allowlist would reject the call.
+   *
+   *  Phase 13.2 adversarial fix MF-1 — reads from the at-Apply-time
+   *  refs (appliedSpansRef + appliedResultRef + appliedAtRef) so
+   *  maskedCount + kinds reflect the citizen's actual selection,
+   *  not the detected superset.
+   *
+   *  Phase 13.2 adversarial fix SF-4 — text-drift guard. If the
+   *  citizen edited the textarea after Apply'ing, the envelope is
+   *  no longer truthful; return null rather than describing the
+   *  old scan against the new text.
+   */
+  function buildAnnotation(currentText: string): {
+    detectedCount: number;
+    maskedCount: number;
+    kinds: string[];
+    source: 'regex' | 'regex+slm';
+    appliedAt: string;
+  } | null {
+    const appliedResult = appliedResultRef.current;
+    const appliedAt = appliedAtRef.current;
+    if (!appliedSinceScan || !appliedResult || !appliedAt) return null;
+    const detectedCount = appliedResult.mergedSpans.length;
+    if (detectedCount === 0) return null;
+    const appliedSpans = appliedSpansRef.current;
+    // Drift guard — currentText must be either the original
+    // scannedText (citizen Apply'd nothing, all kept) or the
+    // post-mask text (citizen Apply'd the captured selection).
+    // Anything else means the citizen edited after Apply; the
+    // captured envelope no longer describes the text being sent.
+    const postMaskText = applyMask(appliedResult.scannedText, appliedSpans);
+    if (currentText !== appliedResult.scannedText && currentText !== postMaskText) {
+      return null;
+    }
+    const kinds = Array.from(
+      new Set(appliedSpans.map((s) => s.kind))
+    ).sort();
+    const source: 'regex' | 'regex+slm' =
+      appliedResult.slmSpans.length > 0 ? 'regex+slm' : 'regex';
+    return {
+      detectedCount,
+      maskedCount: appliedSpans.length,
+      kinds,
+      source,
+      appliedAt
+    };
+  }
 
   return {
     status,
@@ -445,7 +579,10 @@ export function useSlmPiiRedactor({ identityId }: UseOptions) {
     reset,
     lastResult,
     markApplied,
-    hasPendingPii,
+    markAcknowledged,
+    hasPendingPiiAgainst,
+    acknowledgedSinceScan,
+    buildAnnotation,
     hasSlm: Boolean(installed),
     modelPackId: installed?.modelPackId ?? null
   };

@@ -27,7 +27,7 @@ import { Action, Badge, Sheet } from '@/components/ui';
 import {
   applyMask,
   PII_KIND_LABEL,
-  type PiiKind,
+  PII_KIND_MASK,
   type RegexSpan
 } from '@/lib/pii-detectors';
 import type { SlmSpan } from '@/lib/pii-redactor';
@@ -42,7 +42,14 @@ interface PiiReviewSheetProps {
    */
   currentText: string;
   result: SlmPiiScanResult | null;
-  onApply: (maskedText: string) => void;
+  /** Phase 13.2 adversarial fix MF-1 — the sheet passes the
+   *  citizen-selected span set out to the caller so the buildAnnotation
+   *  envelope can report maskedCount honestly (not the detected
+   *  superset). */
+  onApply: (maskedText: string, appliedSpans: PiiScanSpan[]) => void;
+  /** Phase 13.2 adversarial fix SF-3 — title override so the Notes
+   *  surface can say "before saving" instead of "before sending". */
+  title?: string;
 }
 
 function spanKey(span: PiiScanSpan): string {
@@ -62,7 +69,8 @@ export function PiiReviewSheet({
   onClose,
   currentText,
   result,
-  onApply
+  onApply,
+  title = 'Check for PII before sending'
 }: PiiReviewSheetProps) {
   // Selection state: maps spanKey → checked. Regex spans default
   // to true (pre-checked as "will mask"); SLM spans default to
@@ -101,7 +109,10 @@ export function PiiReviewSheet({
   const previewMasked = useMemo(() => {
     if (!result) return '';
     if (isStale) return '';
-    return applyMask(currentText, selectedSpans as Array<{ start: number; end: number; kind: PiiKind; raw: string }>);
+    // Phase 13.2 adversarial fix SF-9 — applyMask widens to accept
+    // any { start, end, kind, raw } shape; PiiScanSpan satisfies it
+    // by structural shape, no cast needed.
+    return applyMask(currentText, selectedSpans);
   }, [result, currentText, selectedSpans, isStale]);
 
   function handleToggle(key: string) {
@@ -124,14 +135,14 @@ export function PiiReviewSheet({
 
   function handleApply() {
     if (isStale || !result) return;
-    onApply(previewMasked);
+    onApply(previewMasked, selectedSpans);
     onClose();
   }
 
   if (!result) return null;
 
   return (
-    <Sheet open={open} onClose={onClose} title="Check for PII before sending">
+    <Sheet open={open} onClose={onClose} title={title}>
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Badge variant="trust">Stays on this device · 0 bytes uploaded</Badge>
@@ -179,8 +190,17 @@ export function PiiReviewSheet({
               {result.mergedSpans.map((span) => {
                 const key = spanKey(span);
                 const checked = selected[key] ?? false;
+                // Phase 13.2 adversarial fix D10 — per-row preview
+                // calls the per-kind mask shaper DIRECTLY. The
+                // earlier `applyMask(span.raw, [{...span}])` call
+                // failed because applyMask expects span.start/end
+                // to be offsets into the supplied text (which here
+                // was span.raw of length === span.end-span.start,
+                // not the original text). Spans were silently
+                // dropped on the text.slice mismatch guard and the
+                // row rendered the raw value as "masked".
                 const masked = checked
-                  ? applyMask(span.raw, [{ ...span }])
+                  ? PII_KIND_MASK[span.kind](span.raw)
                   : span.raw;
                 return (
                   <li

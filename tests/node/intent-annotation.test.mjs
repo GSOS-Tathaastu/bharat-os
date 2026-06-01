@@ -25,7 +25,8 @@ import {
   compareIntentAnnotation,
   buildIntentAnnotationLedgerEvent,
   INTENT_ANNOTATION_VERDICTS,
-  INTENT_ANNOTATION_PROTOCOL_VERSION
+  INTENT_ANNOTATION_PROTOCOL_VERSION,
+  PII_KIND_ALLOWLIST
 } from '../../src/phase0/intent-annotation.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -127,6 +128,245 @@ test('INTENT_ANNOTATION_VERDICTS set is exhaustive', () => {
     INTENT_ANNOTATION_VERDICTS.slice().sort(),
     ['absent', 'agreed', 'disagreed', 'fe_only', 'server_only']
   );
+});
+
+// ─── Phase 13.2 PII redaction envelope ────────────────────────────
+
+test('Phase 13.2 PII_KIND_ALLOWLIST matches the FE PII_KINDS exactly', () => {
+  // FE source-of-truth lives in frontend/src/lib/pii-detectors.ts;
+  // this list MUST stay in lockstep so the BE rejects any kind the
+  // FE doesn't surface and vice versa.
+  assert.deepEqual([...PII_KIND_ALLOWLIST].sort(), [
+    'aadhaar', 'abha', 'account', 'dl', 'email',
+    'gstin', 'mobile', 'pan', 'pin', 'rc', 'upi'
+  ]);
+});
+
+test('normaliseIntentAnnotation accepts a piiRedaction count-only envelope', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8,
+    piiRedaction: {
+      detectedCount: 3,
+      maskedCount: 2,
+      kinds: ['pan', 'aadhaar', 'mobile'],
+      source: 'regex+slm',
+      appliedAt: '2026-06-01T10:05:00.000Z'
+    }
+  });
+  assert.equal(out.piiRedaction.detectedCount, 3);
+  assert.equal(out.piiRedaction.maskedCount, 2);
+  assert.deepEqual(out.piiRedaction.kinds, ['aadhaar', 'mobile', 'pan']); // sorted
+  assert.equal(out.piiRedaction.source, 'regex+slm');
+  // Phase 13.2 MF-3 — ms precision dropped on accept.
+  assert.equal(out.piiRedaction.appliedAt, '2026-06-01T10:05:00Z');
+});
+
+test('normaliseIntentAnnotation: piiRedaction omitted → field is null', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8
+  });
+  assert.equal(out.piiRedaction, null);
+});
+
+test('normaliseIntentAnnotation: piiRedaction defaults source to "regex"', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8,
+    piiRedaction: { detectedCount: 1, maskedCount: 1, kinds: ['pan'] }
+  });
+  assert.equal(out.piiRedaction.source, 'regex');
+});
+
+test('normaliseIntentAnnotation: piiRedaction dedupes + sorts kinds', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8,
+    piiRedaction: {
+      detectedCount: 4,
+      maskedCount: 4,
+      kinds: ['pan', 'pan', 'aadhaar', 'mobile']
+    }
+  });
+  assert.deepEqual(out.piiRedaction.kinds, ['aadhaar', 'mobile', 'pan']);
+});
+
+test('Phase 13.2 MF-3 — piiRedaction strict allowlist rejects unknown keys', () => {
+  // Earlier forbidden-key denylist (spans/text/rawText/etc.) PLUS
+  // synonym leak vectors a denylist would have missed (body, value,
+  // snippet, payload, content) all hard-reject under the strict
+  // allowlist.
+  for (const unknownKey of [
+    'spans', 'text', 'rawText', 'redactedText', 'scannedText',
+    'original', 'raw', 'masked', 'start', 'end',
+    'body', 'value', 'snippet', 'preview', 'payload', 'content',
+    'before', 'after', 'plain', 'plaintext'
+  ]) {
+    assert.throws(
+      () => normaliseIntentAnnotation({
+        actionType: 'service_booking',
+        confidence: 0.8,
+        piiRedaction: {
+          detectedCount: 1,
+          maskedCount: 1,
+          kinds: ['pan'],
+          [unknownKey]: 'should be rejected'
+        }
+      }),
+      new RegExp(`piiRedaction\\.${unknownKey} is not a permitted field`)
+    );
+  }
+});
+
+test('Phase 13.2 MF-3 — appliedAt must be ISO-8601 UTC instant', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 1, maskedCount: 1, kinds: ['pan'], appliedAt: 'X'.repeat(40) }
+    }),
+    /appliedAt must be an ISO-8601 UTC instant/
+  );
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 1, maskedCount: 1, kinds: ['pan'], appliedAt: '2026-06-01 12:34:56' }
+    }),
+    /ISO-8601/
+  );
+});
+
+test('Phase 13.2 MF-3 — appliedAt millisecond precision is dropped to second', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8,
+    piiRedaction: {
+      detectedCount: 1, maskedCount: 1, kinds: ['pan'],
+      appliedAt: '2026-06-01T12:34:56.789Z'
+    }
+  });
+  assert.equal(out.piiRedaction.appliedAt, '2026-06-01T12:34:56Z');
+});
+
+test('Phase 13.2 SF-10 — kinds cap is enforced AFTER dedup (duplicates not exploitable)', () => {
+  const out = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8,
+    piiRedaction: { detectedCount: 1, maskedCount: 1, kinds: Array(11).fill('pan') }
+  });
+  // Pre-fix would have admitted the 11-entry duplicate array; the
+  // strict allowlist + post-dedup invariant reduce it cleanly.
+  assert.deepEqual(out.piiRedaction.kinds, ['pan']);
+});
+
+test('normaliseIntentAnnotation: piiRedaction rejects unknown kind', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 1, maskedCount: 1, kinds: ['ssn'] }
+    }),
+    /unknown kind: ssn/
+  );
+});
+
+test('normaliseIntentAnnotation: piiRedaction rejects unknown source', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 0, maskedCount: 0, kinds: [], source: 'remote-llm' }
+    }),
+    /source must be one of/
+  );
+});
+
+test('normaliseIntentAnnotation: piiRedaction maskedCount > detectedCount rejected', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 1, maskedCount: 5, kinds: ['pan'] }
+    }),
+    /maskedCount cannot exceed detectedCount/
+  );
+});
+
+test('normaliseIntentAnnotation: piiRedaction count cap is 64', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: { detectedCount: 65, maskedCount: 0, kinds: [] }
+    }),
+    /must be an integer in \[0, 64\]/
+  );
+});
+
+test('normaliseIntentAnnotation: piiRedaction non-object input rejected', () => {
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: 'oops'
+    }),
+    /must be an object/
+  );
+  assert.throws(
+    () => normaliseIntentAnnotation({
+      actionType: 'service_booking',
+      confidence: 0.8,
+      piiRedaction: [1, 2]
+    }),
+    /must be an object/
+  );
+});
+
+test('buildIntentAnnotationLedgerEvent surfaces piiRedaction in annotation meta (counts only)', () => {
+  const a = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.85,
+    piiRedaction: {
+      detectedCount: 2,
+      maskedCount: 1,
+      kinds: ['pan', 'aadhaar'],
+      source: 'regex'
+    }
+  });
+  const ev = buildIntentAnnotationLedgerEvent({
+    orchestrationId: 'bos:orchestration:xyz',
+    annotation: a,
+    serverActionType: 'service_booking',
+    verdict: 'agreed',
+    at: '2026-06-01T10:00:00.000Z'
+  });
+  assert.equal(ev.annotation.piiRedaction.detectedCount, 2);
+  assert.equal(ev.annotation.piiRedaction.maskedCount, 1);
+  assert.deepEqual(ev.annotation.piiRedaction.kinds.sort(), ['aadhaar', 'pan']);
+  assert.equal(ev.annotation.piiRedaction.source, 'regex');
+  // §15 binding — the ledger event must not contain ANY raw value
+  // or span structure. JSON-stringify + grep for guard.
+  const json = JSON.stringify(ev);
+  for (const forbidden of ['spans', 'rawText', 'redactedText', 'scannedText', 'start', 'end', 'raw', 'masked']) {
+    assert.ok(!json.includes(`"${forbidden}"`), `ledger event must not surface ${forbidden}`);
+  }
+});
+
+test('buildIntentAnnotationLedgerEvent: piiRedaction null when annotation has no redaction', () => {
+  const a = normaliseIntentAnnotation({
+    actionType: 'service_booking',
+    confidence: 0.8
+  });
+  const ev = buildIntentAnnotationLedgerEvent({
+    orchestrationId: 'bos:orchestration:xyz',
+    annotation: a,
+    serverActionType: 'service_booking',
+    verdict: 'agreed',
+    at: '2026-06-01T10:00:00.000Z'
+  });
+  assert.equal(ev.annotation.piiRedaction, null);
 });
 
 // ─── Orchestrator pass-through ─────────────────────────────────────

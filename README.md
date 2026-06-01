@@ -152,6 +152,56 @@ Implemented pieces:
 
 ---
 
+## 🔒 2026-06-01 — Phase 13.2 shipped: piiRedaction annotation envelope + opt-in transparent Send pre-flight
+
+Closes the Phase 13.1 SLM-F arc with the first BE delta in the
+13.x SLM USP arc. The citizen's mask act is now provable in the
+audit ledger as count-only meta — never spans, never the raw
+or masked text.
+
+- **ADR 0152** — new optional `piiRedaction` sub-envelope on
+  `intentAnnotation` (`src/phase0/intent-annotation.mjs`):
+  `detectedCount`, `maskedCount`, `kinds[]`, `source`,
+  `appliedAt`.
+- **Strict allowlist at the boundary** — any key not in
+  `PII_ALLOWED_KEYS` is rejected. Closes leak vectors from
+  synonyms (body / value / snippet / payload / content) that
+  the original Phase 13.2 denylist would have missed.
+- **§15 hardenings** — `appliedAt` strictly ISO-8601 UTC with
+  millisecond precision DROPPED on accept (neutralises timing
+  fingerprint). `kinds[]` cap enforced post-dedup. Ledger
+  event surfaces count-only meta with JSON-grep test asserting
+  no forbidden key surfaces.
+- **Auto-scan on Send is OPT-IN** — `piiAutoscanEnabled`
+  per-session flag flips true on first chip tap or first
+  Apply. First-time citizens don't get surprise modals on
+  benign 6-digit / 10-digit sequences. The "Keep All → Apply
+  → Send" re-open loop is closed via `acknowledgedSinceScan`.
+- **buildAnnotation honest counts** — `markApplied` now takes
+  `(appliedSpans, appliedResult)` so `maskedCount =
+  appliedSpans.length` and `kinds[]` reflects only the
+  citizen-applied set. Earlier impl lied with
+  `maskedCount === detectedCount` when citizens partially
+  deselected.
+- **Text-drift guard** — `buildAnnotation` returns null when
+  the current text is neither original nor post-mask.
+  `hasPendingPii` getter replaced with method-based
+  `hasPendingPiiAgainst(text)` so callers can't ignore
+  staleness.
+- **Phase 13.1 deferred SHOULD_FIX wins** also applied: D6
+  (fixture PIN swap to demo-family), D7 (honest "patterns
+  only" chip framing when no SLM), D10 (per-row mask preview
+  bug), D21 (unused import), SF-9 (`MaskableSpan` structural
+  interface; unsafe TS cast removed).
+- **Adversarial review** (3 lenses + triage): **3 MUST_FIX +
+  10 SHOULD_FIX + 5 defer**; all 3 must + 6 key should fixed
+  in-phase. Verdict ship_with_fixes.
+- **API_INTEGRATIONS.md impact**: ZERO new external API.
+- **Tests**: Node 1230 → **1233** (+3 MF-3 cases). Vitest 309
+  → **313** (+4 fixture-PIN guards). tsc clean.
+
+---
+
 ## 🛡 2026-06-01 — Phase 13.1 shipped: SLM-F on-device PII redactor (regex-primary + SLM-secondary)
 
 Second SLM USP feature. Citizens type intents + notes that
@@ -456,11 +506,11 @@ smartphones is captured as a binding.
   integration + 7 adversarial-fix cases). Vitest 138
   unchanged. tsc clean. Build green. Bundle unchanged.
 
-**Next: Phase 13.2** (transparent handleSend integration +
-`piiRedactionAnnotation` envelope + offline-queue replay
-redaction) OR **Phase 13.3 SLM-G** (on-device personalization)
-OR **Phase 13.0.1** (PDF.js upload — needs npm-dep approval)
-OR **Phase 14 Sahayak**. Direction flexible.
+**Next: Phase 13.3** (standalone piiRedaction-only annotation
+path + per-identity persisted opt-in + offline-queue replay
+redaction + SLM-G on-device personalization) OR **Phase 13.0.1**
+(PDF.js upload — needs npm-dep approval) OR **Phase 14
+Sahayak**. Direction flexible.
 
 ---
 
