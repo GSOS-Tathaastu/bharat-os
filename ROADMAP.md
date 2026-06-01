@@ -398,6 +398,58 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.1b.4 — SLM-D booking advisor ✅ SHIPPED 2026-06-01 — Phase 12.1b ARC CLOSED
+- **ADR 0140** — last of four 12.1b sub-phases. All four SLM
+  sub-phases (A intent / B offline / C forms / D advisor)
+  shipped today.
+- **Honest scope call**: true rate-negotiation breaks
+  rateSnapshot immutability + escrow contract (multi-week
+  effort → Phase 12.2). Shipped the smallest useful slice
+  that fits one session: **FE-only provider booking advisor**.
+- On a `pre_authorized` booking, provider taps "✨ Ask my SLM:
+  should I accept?" → on-device wllama generates `accept |
+  reject | unsure` + rationale + optional polite reject-reason
+  chip the provider taps to pre-fill the existing reject
+  input. The chip NEVER changes booking state.
+- Pure primitives at `frontend/src/lib/booking-advisor.ts`
+  (prompt builder + completion parser; protocol version
+  pinned). Runtime hook reuses Phase 9.0c wllama singleton —
+  model bytes load AT MOST ONCE across SLM-A intent / SLM-C
+  field-suggest / SLM-D advisor.
+- Tiered rate limit: 3 per booking per 60s + 12 global per
+  5min. Inflight singleton.
+- Surface: `frontend/src/components/booking/SlmBookingAdvisorChip.tsx`,
+  hidden when no SLM installed (honest empty state, no
+  upsell). Wired into `ProviderBookingDetail.tsx` above the
+  Accept/Reject Card; passes onAcceptSuggestedRejectReason so
+  the suggested polite reason pre-fills the existing input.
+- Bindings: 1dp bubble in prompt ONLY — vitest case asserts
+  no 4dp coordinate literal in the prompt; no citizen PII;
+  zero new ledger events (existing booking.accepted /
+  booking.rejected are the audit trail regardless of SLM
+  participation); user controls inputs.
+- Zero BE changes this phase — pure FE.
+- Tests: **1035/1035 Node** unchanged + **115/115 vitest**
+  (+10 booking-advisor contract cases — prompt embedding,
+  no-4dp-coord binding, parser verdicts, confidence clamping).
+- Bundle: main 592 → 599 KB / 170 KB gzipped (+7 KB for
+  primitives + hook + chip). wllama lazy chunk unchanged.
+- **DEFERRED**: true rate negotiation (Phase 12.2 — needs
+  rateSnapshot mutability + escrow re-design), citizen-side
+  advisor, multi-turn negotiation chat, voice replies,
+  advisor for in_progress/dispute states, per-advisor ledger
+  event (no operator surface needs it today), adversarial
+  review (substrate is binding-tested + composes proven
+  patterns).
+- **Phase 12.1b arc CLOSED**. Sub-phases shipped today:
+  - 12.1b.1 SLM-A vernacular intent parser (ADR 0137).
+  - 12.1b.2 SLM-B offline-first decisioning + queued sync
+    (ADR 0138).
+  - 12.1b.3 SLM-C light dynamic forms (ADR 0139).
+  - 12.1b.4 SLM-D booking advisor (ADR 0140).
+- **Next**: Phase 12.2 wave-1 KYC wizard (Aadhaar OCR +
+  DigiLocker + operator review console).
+
 #### Phase 12.1b.3 — SLM-C light dynamic forms ✅ SHIPPED 2026-06-01
 - **ADR 0139** — third of four 12.1b sub-phases.
 - **Generic substrate** at `src/phase0/dynamic-form.mjs`:

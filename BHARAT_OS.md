@@ -2140,7 +2140,7 @@ on top of the four earlier:
 | **12.1b.2** ✅ | **SHIPPED 2026-06-01 (ADR 0138).** SLM-B offline-first decisioning + queued sync. Ledger-backed idempotency (3 event types, no new SQL table, scope-generic), per-identity IndexedDB queue, Web Locks single-flight drainer, OfflineQueuePill + QueuedIntentsPanel. Scope: orchestrations only — bookings/consents/flags deferred to 12.1b.3. | ✅ shipped |
 | **12.1b.2.x** | Bookings/consents/flags offline queue + queue-feedback UX batch + 17 more Indic languages. | ~1 wk |
 | **12.1b.3** ✅ | **SHIPPED 2026-06-01 (ADR 0139).** SLM-C light dynamic forms. Schema-driven DynamicForm renderer + per-role light schemas for 4 wave-1 roles + SLM tap-to-accept suggest chip. New `roleAnswers` field on providerIdentity (NOT echoed to public). New `provider_identity.updated` ledger event. | ✅ shipped |
-| **12.1b.4** | SLM-D on-device negotiation agent for marketplace. | ~1 wk |
+| **12.1b.4** ✅ | **SHIPPED 2026-06-01 (ADR 0140).** SLM-D booking advisor. FE-only provider advisor on `pre_authorized` bookings — verdict + rationale + polite reject-reason chip. True rate-negotiation deferred to 12.2 (breaks rateSnapshot immutability + escrow contract). **Phase 12.1b arc CLOSED.** | ✅ shipped |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
 | **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
 | **13.x** | SLM USP features: on-device document summariser · PII redactor · personalization (preferences never leave device) · skill agents for Indian tasks (electricity bill / consumer complaint / PM-KISAN). | ~6 wks |
@@ -2201,6 +2201,27 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1b.4 — SHIPPED 2026-06-01 (ADR 0140).** SLM-D booking
+  advisor — last of the four 12.1b sub-phases. Honest scope:
+  true rate-negotiation breaks `rateSnapshot` immutability +
+  escrow contract (Phase 12.2 work). Shipped the smallest useful
+  slice: a **FE-only provider advisor**. On `pre_authorized`,
+  provider taps "✨ Ask my SLM: should I accept?" → on-device
+  wllama generates `accept | reject | unsure` + rationale +
+  optional polite reject-reason chip the provider taps to
+  pre-fill the existing reject input. Chip NEVER changes booking
+  state — only the existing Accept/Reject buttons do. Pure
+  primitives at `frontend/src/lib/booking-advisor.ts`; runtime
+  hook reuses Phase 9.0c wllama singleton (model bytes load AT
+  MOST ONCE across SLM-A / SLM-C / SLM-D). Tiered rate limit
+  (3/booking/60s + 12/global/5min). Bindings: pickup precision
+  held to 1dp bubble ONLY (vitest case asserts no 4dp coord in
+  prompt); no citizen PII; zero new ledger events. Zero BE
+  changes. Tests: 1035/1035 Node unchanged + 115/115 vitest
+  (+10). Bundle 592 → 599 KB / 170 KB gzipped (+7 KB).
+  **Phase 12.1b arc CLOSED** — all four SLM sub-phases (A intent
+  / B offline / C forms / D advisor) shipped. Next: Phase 12.2
+  wave-1 KYC wizard.
 - **Phase 12.1b.3 — SHIPPED 2026-06-01 (ADR 0139).** SLM-C light
   dynamic forms. Generic schema-driven `<DynamicForm/>` renderer
   (controlled component, schema-driven, inline per-field error

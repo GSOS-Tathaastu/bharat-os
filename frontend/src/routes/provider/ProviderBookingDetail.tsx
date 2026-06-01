@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Action, Badge, Card, Field, useToast } from '@/components/ui';
-import { BookingStatusPill, DisputeFileSheet } from '@/components/booking';
+import { BookingStatusPill, DisputeFileSheet, SlmBookingAdvisorChip } from '@/components/booking';
 import { formatRupees, formatRateBasis } from '@/lib/format-paise';
 import { formatDistanceMeters } from '@/lib/format-distance';
 import { useBooking, useBookingTransition, type ProviderIdentity } from '@/lib/hooks';
@@ -132,24 +132,33 @@ export function ProviderBookingDetail({ provider, rootIdentityId }: Props) {
 
       {/* Action area */}
       {b.status === 'pre_authorized' && (
-        <Card title="Accept or reject">
-          <div className="flex flex-wrap gap-2">
-            <Action onClick={() => fire('accept')} disabled={transition.isPending}>
-              Accept
-            </Action>
-          </div>
-          <div className="mt-3 space-y-2">
-            <Field
-              label="Reject reason (optional)"
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Eg: Not in my area today"
-            />
-            <Action variant="ghost" onClick={() => fire('reject', rejectReason.trim() || null as unknown as string)} disabled={transition.isPending}>
-              Reject (refunds citizen)
-            </Action>
-          </div>
-        </Card>
+        <>
+          {/* Phase 12.1b.4 SLM-D — optional on-device advisor */}
+          <SlmBookingAdvisorChip
+            identityId={rootIdentityId}
+            booking={b}
+            provider={provider}
+            onAcceptSuggestedRejectReason={(r) => setRejectReason(r)}
+          />
+          <Card title="Accept or reject">
+            <div className="flex flex-wrap gap-2">
+              <Action onClick={() => fire('accept')} disabled={transition.isPending}>
+                Accept
+              </Action>
+            </div>
+            <div className="mt-3 space-y-2">
+              <Field
+                label="Reject reason (optional)"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Eg: Not in my area today"
+              />
+              <Action variant="ghost" onClick={() => fire('reject', rejectReason.trim() || null as unknown as string)} disabled={transition.isPending}>
+                Reject (refunds citizen)
+              </Action>
+            </div>
+          </Card>
+        </>
       )}
 
       {b.status === 'in_progress' && (
