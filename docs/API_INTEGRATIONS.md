@@ -15,10 +15,11 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 12.2.6 — DigiLocker OAuth2
-substrate + stub shipped. Wired into Parivahan as the
-`digilocker` provider; citizen-authorised signed-document
-flow now end-to-end on stub.)
+Last updated: 2026-06-01 (Phase 12.2.7 — citizen-facing
+"Link DigiLocker" surface shipped at the top of the KYC L1
+wizard. The substrate goes end-to-end FE → BE → operator
+review in stub mode now. Live mode awaits partner
+credentials.)
 
 ## Legend
 
@@ -131,7 +132,8 @@ flow now end-to-end on stub.)
   side. DPDP cascade erases both `digilocker_states` and
   `digilocker_links` atomically with the identity.
 - **Phase shipped**: 12.2.6 (substrate stub; live wires
-  in additively).
+  in additively); **12.2.7** (citizen-facing "Link
+  DigiLocker" surface at top of KYC L1 wizard).
 
 ### 3.2 PAN verification (NSDL / Income Tax) 📋 Reserved
 

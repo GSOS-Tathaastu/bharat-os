@@ -2201,6 +2201,34 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.7 — SHIPPED 2026-06-01 (ADR 0147).** FE
+  "Link DigiLocker" card + KYC L1 wiring. Closes the FE-BE
+  gap on Phase 12.2.6 (BE-only substrate now has a
+  citizen-facing surface). NEW
+  `frontend/src/lib/use-digilocker-link.ts` — 3 TanStack
+  hooks (status query + link mutation runs authorize +
+  callback in stub mode without a popup + unlink mutation).
+  NEW `LinkDigilockerCard` component rendered at TOP of
+  the KYC L1 wizard's identity step. Honest "(demo mode —
+  substrate ready, partner credentials pending)" tag in
+  stub mode. **§15 bindings**: actingRootIdentityId in
+  X-Bharat-OS-Acting-Identity header ONLY (never URL query
+  to avoid service-worker / referer telemetry leak);
+  same-origin assert on the BE-supplied authorizeUrl;
+  TanStack response type excludes tokens. **Adversarial
+  review** (2 lenses) surfaced 10 findings; **6 medium
+  fixed in-phase**: same-origin assert on
+  authorizeUrl, query-string → header migration,
+  window.confirm before Unlink (matches codebase's
+  destructive-action discipline), error branching
+  (invalid_or_expired_state vs 5xx vs 401 vs generic),
+  double-tap gate via mutation status check, status-error
+  fallback so API-down doesn't silently hide the card.
+  **API_INTEGRATIONS.md** updated: DigiLocker §3.1 now
+  notes the citizen-facing surface ships in 12.2.7. Tests:
+  138 → **140 vitest** (+2 hook smoke cases). Node 1199
+  unchanged (FE-only phase). tsc clean. Bundle 628 → 632 KB
+  / 177 → 179 KB gzipped (+4 KB).
 - **Phase 12.2.6 — SHIPPED 2026-06-01 (ADR 0146).** DigiLocker
   OAuth2 substrate + first non-stub Parivahan provider + Sahayak
   no-smartphone binding. NEW

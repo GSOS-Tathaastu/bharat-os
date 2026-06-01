@@ -35,6 +35,7 @@ import {
 import { usePincodeLookup, isValidPincode } from '@/lib/use-pincode-lookup';
 import { PhotoCapture } from '@/components/forms/PhotoCapture';
 import { RoleExtrasStep } from '@/components/forms/RoleExtrasStep';
+import { LinkDigilockerCard } from '@/components/forms/LinkDigilockerCard';
 import {
   getRoleExtrasSchema,
   roleRequiresExtras,
@@ -348,6 +349,12 @@ export function KycLevel1Page() {
               </>
             ) : null}
           </p>
+        </div>
+      )}
+
+      {step === 'identity' && identity && (
+        <div className="mb-3">
+          <LinkDigilockerCard identityId={identity.id} />
         </div>
       )}
 

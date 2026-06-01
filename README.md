@@ -152,6 +152,52 @@ Implemented pieces:
 
 ---
 
+## 🔗 2026-06-01 — Phase 12.2.7 shipped: FE "Link DigiLocker" card + KYC L1 wiring (closes FE-BE gap from 12.2.6)
+
+The Phase 12.2.6 DigiLocker substrate now goes end-to-end —
+citizen taps "Link DigiLocker" at the top of the KYC L1
+wizard → stub OAuth dance completes → operator sees the
+🔏 (signed) badge on the verification result.
+
+- **ADR 0147** — `frontend/src/lib/use-digilocker-link.ts`
+  exports three TanStack hooks: `useDigilockerLinkStatus`
+  (query), `useLinkDigilocker` (runs authorize + callback
+  in sequence in stub mode), `useUnlinkDigilocker`.
+- **NEW `<LinkDigilockerCard/>`** at the top of the KYC L1
+  identity step. Honest **"(demo mode — substrate ready,
+  partner credentials pending)"** tag whenever
+  `mode==='stub'` so investors / operators don't mistake
+  stub verification for the real thing.
+- **§15 bindings honored** — `actingRootIdentityId` travels
+  in the `X-Bharat-OS-Acting-Identity` header ONLY (never
+  in URL query strings; the shell ships a service worker
+  that logs URLs, and the rootIdentityId is a stable
+  per-user correlator that shouldn't sit in URL telemetry).
+  TanStack response type excludes tokens. Same-origin
+  assert on the BE-supplied authorizeUrl defends against a
+  redirectUri allowlist regression.
+- **Adversarial review** — 2 lenses (FE token-leak / UX
+  honesty) surfaced 10 findings. **6 medium fixed
+  in-phase**: same-origin assert, query-string → header
+  migration, `window.confirm` before Unlink (matches the
+  codebase's destructive-action discipline), error
+  branching for clearer citizen messages, double-tap gate
+  via mutation status, status-error fallback so API-down
+  doesn't silently hide the card.
+- **API_INTEGRATIONS.md** updated: DigiLocker §3.1 now
+  documents the FE surface ships in 12.2.7.
+- **Tests** — Vitest 138 → **140** (+2 hook smoke cases).
+  Node 1199 unchanged (FE-only phase). tsc clean. Bundle
+  628 → 632 KB / 177 → 179 KB gzipped (+4 KB).
+
+**Next: Phase 12.2.8** — live OAuth popup flow + postMessage
+listener when partner credentials arrive. OR Phase 12.3+
+(wave-2 provider roles: kirana + GST verify, skilled-trades
++ ITI cert). OR Phase 14 Sahayak (rural-reach product
+layer, biggest demo unlock).
+
+---
+
 ## 🔏 2026-06-01 — Phase 12.2.6 shipped: DigiLocker OAuth2 substrate + first non-stub Parivahan provider + Sahayak no-smartphone binding
 
 The first **citizen-authenticated** verification flow lands —

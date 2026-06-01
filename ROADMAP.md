@@ -1119,12 +1119,32 @@ serving the ~700M Indians without usable smartphones
 (Phase 14.x scope). Tests: 1166 → **1199 Node** (+33);
 vitest unchanged (138). tsc clean. **ADR 0146**.
 
-#### Phase 12.2.7 — FE wizard "Link DigiLocker" button (reserved)
+#### Phase 12.2.7 — FE "Link DigiLocker" card + KYC L1 wiring ✅ SHIPPED 2026-06-01
 
-The Phase 12.2.6 substrate is BE-only. Phase 12.2.7
-adds the FE button in the KYC L1 wizard that opens the
-DigiLocker authorize URL in a popup, handles the redirect
-back, and shows a "linked ✓" indicator inline.
+Closes the FE-BE gap on Phase 12.2.6. NEW
+`useDigilockerLink` hook (status + link + unlink). NEW
+`<LinkDigilockerCard/>` rendered at top of KYC L1
+identity step with honest "(demo mode)" tag in stub mode.
+Stub OAuth dance runs via fetch (no popup). **§15
+bindings**: actingRootIdentityId in header only (never
+URL query — service worker / referer telemetry leak);
+same-origin assert on authorizeUrl. Adversarial review
+(2 lenses) surfaced 10 findings; 6 medium fixed in-phase:
+same-origin assert, query→header migration,
+window.confirm before Unlink, error branching,
+double-tap gate, status-error fallback. Tests: 138 →
+**140 vitest** (+2 hook smoke cases). Node 1199
+unchanged (FE-only). tsc clean. Bundle 628 → 632 KB / 177
+→ 179 KB gzipped (+4 KB). **ADR 0147**.
+
+#### Phase 12.2.8 — Live DigiLocker popup flow + postMessage listener (reserved)
+
+When partner credentials arrive: ship the popup-helper
+component that opens the live authorize URL in a window,
+listens for postMessage from the callback page, and
+refreshes the status query. The hook already returns
+authorizeUrl + state in live mode — only the popup
+orchestration is missing.
 
 #### Phase 12.2.3 — Attachment CORE substrate + KYC L1 selfie/ID-proof ✅ SHIPPED 2026-06-01
 
