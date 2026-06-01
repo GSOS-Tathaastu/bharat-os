@@ -1054,6 +1054,30 @@ Tests: 1035 → **1053 Node** (+18 substrate + adapter + HTTP
 binding cases) + 115 → **119 vitest** (+4). tsc clean. Bundle
 main unchanged at 599 KB / 170 KB gzipped. **ADR 0141**.
 
+#### Phase 12.2.3 — Attachment CORE substrate + KYC L1 selfie/ID-proof ✅ SHIPPED 2026-06-01
+
+Binary blob substrate reused across KYC L1 (selfie + ID
+proof), Phase 12.2.4 per-role extras (vehicle docs, police
+verification), and Phase 12.x dispute evidence. NEW
+`src/phase1/attachment.mjs` (mime allowlist, content-addressed
+`bos:att:<32hex>` IDs, 5 MiB/blob + 50 MiB/actor caps, EXIF
+flag, typed errors). NEW `attachments` table on both stores
+(SqliteStore BLOB column, BosStore two-file `.bin`+`.json`).
+POST/GET-list/GET-id/DELETE `/api/attachments` (content-
+addressed cache headers + ETag; expensive rate-limit
+policy; quota check in `BEGIN IMMEDIATE` transaction). KYC
+L1 schema accepts optional `selfieAttachmentId` +
+`idProofAttachmentId` (ownership-verified at submit). FE:
+`useAttachmentUpload` + `<PhotoCapture/>` (file-input
+primary, preview + confirm + retake, thumbnail render on
+resubmit). KYC L1 wizard 3 → **5 steps**. Operator console
+View buttons (admin-bearer fetch + blob URL); audit event
+on every admin read. **Adversarial review** (4 lenses)
+surfaced 26 findings; 11 high+med fixed in-phase. Tests:
+1082 → **1110 Node** (+28) + 121 → **124 vitest** (+3). tsc
+clean. Bundle 612 → 618 KB / 174 → 175 KB gzipped (+6 KB).
+**ADR 0143**.
+
 #### Phase 12.2.2 — KYC Level 1 wizard + India Post PIN-code adapter ✅ SHIPPED 2026-06-01
 
 The common physical-service KYC slice for all four wave-1
@@ -1088,6 +1112,7 @@ Four roles share a common physical-service onboarding flow
 (**KYC L1 done in 12.2.2**) + role-specific extras (founder
 picked "minimum onboarding load, maximum coverage"):
 - [x] **Common KYC L1 substrate + wizard** — Phase 12.2.2.
+- [x] **Attachment CORE substrate + KYC L1 photo capture** — Phase 12.2.3.
 - [ ] `cab-driver` — own commercial vehicle (taxi/auto/ride-hail).
   Extras: vehicle docs + commercial permit.
 - [ ] `personal-driver` — chauffeur for citizen's vehicle.
@@ -1096,11 +1121,6 @@ picked "minimum onboarding load, maximum coverage"):
   daily wage. Extras: sardar/contractor attestation.
 - [ ] `household-help` — maid + cook combined. Extras: police
   verification + references.
-- [ ] **Attachment CORE substrate** — selfie + ID-proof photo
-  capture, content-addressed blob store on both BosStore and
-  SqliteStore, multipart endpoint with size/MIME guards, DPDP
-  cascade-delete wiring, React capture component. Reused
-  across KYC L1, dispute evidence, future health-doc flows.
 
 #### Phase 12.3+ — Remaining provider roles (~3 wks)
 - [ ] `kirana` (shop license + GST optional).

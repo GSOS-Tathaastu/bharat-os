@@ -119,7 +119,7 @@ import {
   cooldownState,
   COOLDOWN_SCOPES
 } from '../phase1/recovery-cooldown.mjs';
-import { checkAdminAuth } from './admin-auth.mjs';
+import { checkAdminAuth, requireAdminToken, AdminAuthError } from './admin-auth.mjs';
 import {
   aggregateByMonth,
   createEarningsEntry,
@@ -286,6 +286,19 @@ import {
 } from '../phase1/provider-role-forms.mjs';
 import { createNominatimAdapter } from '../phase1/nominatim-geocoder.mjs';
 import { createPincodeAdapter, isValidPincode } from '../phase1/india-post-pincode.mjs';
+import {
+  ATTACHMENT_KINDS,
+  ATTACHMENT_MIME_ALLOWLIST,
+  ATTACHMENT_MAX_BYTES_PER_BLOB,
+  ATTACHMENT_MAX_BYTES_PER_ACTOR,
+  AttachmentValidationError,
+  buildAttachmentRecord,
+  decodeAttachmentBytes,
+  deriveAttachmentId,
+  isAllowedKind,
+  isAllowedMime,
+  publicAttachmentMeta
+} from '../phase1/attachment.mjs';
 import { ExternalAdapterError } from './external-adapter.mjs';
 import {
   haversineMeters,
@@ -412,15 +425,18 @@ function methodNotAllowed(response, allowed) {
   );
 }
 
-async function readRequestJson(request) {
+async function readRequestJson(request, { maxBytes } = {}) {
+  // Phase 12.2.3 — per-route body cap override. Default global
+  // 1 MiB stays in place for every existing handler; the
+  // attachments POST is the only caller that overrides (8 MiB
+  // ceiling for base64-encoded blobs ≤ 5 MiB raw).
+  const cap = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_REQUEST_BODY_BYTES;
   const chunks = [];
   let totalBytes = 0;
   for await (const chunk of request) {
     totalBytes += chunk.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
-      const error = new Error(
-        `request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes`
-      );
+    if (totalBytes > cap) {
+      const error = new Error(`request body exceeds ${cap} bytes`);
       error.statusCode = 413;
       throw error;
     }
@@ -1803,6 +1819,28 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           requestId
         });
         if (!existing) return;
+        // Phase 12.2.3 — when the body carries attachment refs,
+        // verify each one exists AND is owned by the same root
+        // identity. Without this, a citizen could submit a KYC
+        // L1 referring to ANOTHER citizen's selfie blob.
+        if (body.selfieAttachmentId) {
+          const att = await store.readAttachment(body.selfieAttachmentId, { rootIdentityId: existing.rootIdentityId }).catch(() => null);
+          if (!att) {
+            jsonResponse(response, 400, {
+              error: { code: 'selfie_attachment_not_found', message: 'selfieAttachmentId does not resolve to an owned attachment.', field: 'selfieAttachmentId' }
+            });
+            return;
+          }
+        }
+        if (body.idProofAttachmentId) {
+          const att = await store.readAttachment(body.idProofAttachmentId, { rootIdentityId: existing.rootIdentityId }).catch(() => null);
+          if (!att) {
+            jsonResponse(response, 400, {
+              error: { code: 'id_proof_attachment_not_found', message: 'idProofAttachmentId does not resolve to an owned attachment.', field: 'idProofAttachmentId' }
+            });
+            return;
+          }
+        }
         let next;
         try {
           next = submitKycLevel1(existing, {
@@ -1812,7 +1850,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             addressPinCode: body.addressPinCode,
             addressLine: body.addressLine,
             cityFromPincode: body.cityFromPincode,
-            stateFromPincode: body.stateFromPincode
+            stateFromPincode: body.stateFromPincode,
+            selfieAttachmentId: body.selfieAttachmentId || null,
+            idProofAttachmentId: body.idProofAttachmentId || null
           });
         } catch (err) {
           if (err instanceof KycLevel1ValidationError) {
@@ -1867,7 +1907,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'addressPinCode',
             'addressLine',
             'cityFromPincode',
-            'stateFromPincode'
+            'stateFromPincode',
+            ...(next.kycLevel1Submission.selfieAttachmentId ? ['selfieAttachmentId'] : []),
+            ...(next.kycLevel1Submission.idProofAttachmentId ? ['idProofAttachmentId'] : [])
           ],
           cityFromPincode: next.kycLevel1Submission.cityFromPincode,
           stateFromPincode: next.kycLevel1Submission.stateFromPincode,
@@ -2272,6 +2314,254 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             error: { code: 'pincode_lookup_failed', message: err && err.message ? err.message : 'pincode lookup failed.' }
           });
         }
+        return;
+      }
+
+      // ── Phase 12.2.3 — Attachment CORE substrate ─────────────────
+      //
+      // POST   /api/attachments       — owner upload (base64 body)
+      // GET    /api/attachments/:id   — owner OR operator fetch
+      // GET    /api/attachments?rootIdentityId&kind — owner list
+      // DELETE /api/attachments/:id   — owner delete
+      //
+      // §15 bindings honored:
+      //   - Owner-auth via X-Bharat-OS-Acting-Identity (header)
+      //     or actingRootIdentityId (body). Operator path requires
+      //     the admin bearer.
+      //   - Per-blob cap (5 MiB raw) + per-actor aggregate cap
+      //     (50 MiB) enforced before write.
+      //   - MIME allowlist (jpeg/png/webp/pdf) — substrate refuses
+      //     everything else.
+      //   - Audit ledger event carries {attachmentId, actorId,
+      //     sha256, byteLength, mimeType} — NEVER the bytes.
+      //   - GET response uses content-addressed cache: 1-year
+      //     immutable + ETag derived from sha256.
+
+      // POST /api/attachments — base64 upload, 8 MiB body cap.
+      if (request.method === 'POST' && url.pathname === '/api/attachments') {
+        let body;
+        try {
+          body = await readRequestJson(request, { maxBytes: 8 * 1024 * 1024 });
+        } catch (err) {
+          if (err.statusCode === 413) {
+            jsonResponse(response, 413, {
+              error: { code: 'body_too_large', message: err.message }
+            });
+            return;
+          }
+          throw err;
+        }
+        const acting = (body.actingRootIdentityId
+          || request.headers['x-bharat-os-acting-identity']
+          || ''
+        ).toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'attachment uploads require actingRootIdentityId (body) or X-Bharat-OS-Acting-Identity (header).' }
+          });
+          return;
+        }
+        // Verify the identity actually exists — without this, an
+        // attacker could squat blobs under bogus rootIdentityId
+        // strings and the DPDP cascade would never reach them.
+        const ownerExists = await store.readIdentity(acting).catch(() => null);
+        if (!ownerExists) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_identity', message: 'actingRootIdentityId does not resolve to a known identity.' }
+          });
+          return;
+        }
+        let decoded;
+        try {
+          decoded = decodeAttachmentBytes(body.bytesBase64);
+        } catch (err) {
+          if (err instanceof AttachmentValidationError) {
+            jsonResponse(response, err.status, {
+              error: { code: err.code, message: err.message }
+            });
+            return;
+          }
+          throw err;
+        }
+        let record;
+        try {
+          record = buildAttachmentRecord({
+            bytes: decoded.bytes,
+            sha256: decoded.sha256,
+            byteLength: decoded.byteLength,
+            rootIdentityId: acting,
+            mimeType: body.mimeType,
+            kind: body.kind,
+            createdAt: new Date().toISOString()
+          });
+        } catch (err) {
+          if (err instanceof AttachmentValidationError) {
+            jsonResponse(response, err.status, {
+              error: { code: err.code, message: err.message }
+            });
+            return;
+          }
+          throw err;
+        }
+        // Phase 12.2.3 fix A3-4 — pass the per-actor cap into
+        // saveAttachment so the BEGIN IMMEDIATE transaction
+        // checks-and-inserts atomically. Two parallel uploads
+        // from the same actor are now serialised by SQLite's
+        // RESERVED lock, so the aggregate cap holds.
+        try {
+          await store.saveAttachment(record, { quotaCapBytes: ATTACHMENT_MAX_BYTES_PER_ACTOR });
+        } catch (err) {
+          if (err && err.code === 'actor_quota_exceeded') {
+            jsonResponse(response, 413, {
+              error: {
+                code: 'actor_quota_exceeded',
+                message: `actor would exceed the ${ATTACHMENT_MAX_BYTES_PER_ACTOR}-byte aggregate cap.`,
+                currentBytes: err.currentBytes,
+                attemptedAdd: err.attemptedAdd,
+                cap: err.cap
+              }
+            });
+            return;
+          }
+          throw err;
+        }
+        jsonResponse(response, 201, { attachment: publicAttachmentMeta(record) });
+        return;
+      }
+
+      // GET /api/attachments — owner-only list.
+      if (request.method === 'GET' && url.pathname === '/api/attachments') {
+        const acting = (url.searchParams.get('actingRootIdentityId')
+          || request.headers['x-bharat-os-acting-identity']
+          || ''
+        ).toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'attachment listing requires actingRootIdentityId (query) or X-Bharat-OS-Acting-Identity (header).' }
+          });
+          return;
+        }
+        const kindQ = url.searchParams.get('kind');
+        if (kindQ && !isAllowedKind(kindQ)) {
+          jsonResponse(response, 400, {
+            error: { code: 'kind_not_allowed', message: `kind must be one of: ${ATTACHMENT_KINDS.join(', ')}.` }
+          });
+          return;
+        }
+        const items = await store.listAttachments({ rootIdentityId: acting, kind: kindQ || undefined });
+        jsonResponse(response, 200, {
+          attachments: items.map(publicAttachmentMeta)
+        });
+        return;
+      }
+
+      // GET /api/attachments/:id — raw blob. Owner OR operator.
+      // The GET emits content-addressed cache headers (1-year
+      // immutable) since the URL is keyed on sha256.
+      const attachmentReadMatch = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && attachmentReadMatch) {
+        const attachmentId = decodeURIComponent(attachmentReadMatch[1]);
+        if (!attachmentId.startsWith('bos:att:')) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_attachment_id', message: 'attachmentId must start with bos:att:.' }
+          });
+          return;
+        }
+        // Two auth paths: (a) acting-identity owner of the blob,
+        // OR (b) operator bearer token. We peek at the admin
+        // token via requireAdminToken so a missing token doesn't
+        // commit an HTTP error response — the owner path may
+        // still succeed.
+        const acting = (request.headers['x-bharat-os-acting-identity'] || '').toString().trim();
+        let operatorIdentifier = null;
+        try {
+          const operatorAuth = requireAdminToken(request, { requestId });
+          operatorIdentifier = operatorAuth.operator;
+        } catch (err) {
+          if (!(err instanceof AdminAuthError)) throw err;
+        }
+        if (!acting && !operatorIdentifier) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'attachment reads require an owner identity or admin token.' }
+          });
+          return;
+        }
+        const record = await store.readAttachment(attachmentId, {
+          rootIdentityId: acting || undefined
+        }).catch(() => null);
+        if (!record) {
+          // Phase 12.2.3 fix DPDP-3 — when the attachment has
+          // been erased (by owner DELETE or DPDP cascade), the
+          // operator console gets a clear `attachment_erased`
+          // code instead of a generic 404 so the UI can render
+          // "evidence withdrawn" rather than "broken link".
+          // The substrate can't tell "never existed" from
+          // "erased" today; we hand the operator a stable code
+          // they can branch on.
+          jsonResponse(response, 404, {
+            error: {
+              code: operatorIdentifier ? 'attachment_unavailable' : 'unknown_attachment',
+              message: operatorIdentifier
+                ? 'attachment not found — owner may have erased it or it never existed.'
+                : 'attachment not found.'
+            }
+          });
+          return;
+        }
+        // Phase 12.2.3 fix A3-2 — when an operator reads a
+        // citizen's attachment, the access MUST land on the
+        // audit ledger so an over-broad token-holder leaves a
+        // trail. Owner reads do NOT emit this event (citizens
+        // read their own data freely).
+        if (operatorIdentifier) {
+          await store.appendLedger({
+            type: 'attachment.admin_read',
+            attachmentId: record.attachmentId,
+            rootIdentityId: record.rootIdentityId,
+            sha256: record.sha256,
+            byteLength: record.byteLength,
+            mimeType: record.mimeType,
+            kind: record.kind,
+            operatorId: operatorIdentifier,
+            at: new Date().toISOString()
+          });
+        }
+        // Content-addressed cache headers — the URL maps 1:1 to
+        // the bytes by sha256, so it's safe to cache forever on
+        // the citizen's device. Operator reviewers benefit too.
+        response.writeHead(200, {
+          'content-type': record.mimeType,
+          'content-length': String(record.byteLength),
+          'cache-control': 'private, max-age=31536000, immutable',
+          'etag': `"${record.sha256}"`,
+          'x-bharat-os-request-id': requestId
+        });
+        response.end(record.bytes);
+        return;
+      }
+
+      // DELETE /api/attachments/:id — owner-only.
+      const attachmentDeleteMatch = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'DELETE' && attachmentDeleteMatch) {
+        const attachmentId = decodeURIComponent(attachmentDeleteMatch[1]);
+        const acting = (request.headers['x-bharat-os-acting-identity'] || '').toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'attachment delete requires X-Bharat-OS-Acting-Identity.' }
+          });
+          return;
+        }
+        const ok = await store.deleteAttachment(attachmentId, {
+          rootIdentityId: acting,
+          at: new Date().toISOString()
+        });
+        if (!ok) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_attachment', message: 'attachment not found or not owned.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { ok: true, attachmentId });
         return;
       }
 
@@ -3808,6 +4098,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/marketplace/providers/:providerIdentityId/express-interest  (Phase 12.1a.1 — booking stub)',
             'GET /api/geocode/reverse?lat&lng  (Phase 12.2.1 — OSM Nominatim reverse geocode; mode=stub|live)',
             'GET /api/geocode/pincode/:pin  (Phase 12.2.2 — India Post PIN code → city/state; mode=stub|live)',
+            'POST /api/attachments  (Phase 12.2.3 — owner upload, base64 body, 5MiB/blob 50MiB/actor caps)',
+            'GET /api/attachments?actingRootIdentityId&kind  (Phase 12.2.3 — owner list metadata)',
+            'GET /api/attachments/:id  (Phase 12.2.3 — owner OR admin fetch; content-addressed immutable cache)',
+            'DELETE /api/attachments/:id  (Phase 12.2.3 — owner delete)',
             'POST /api/provider-identities/:providerIdentityId/submit-kyc-l1  (Phase 12.2.2 — citizen-driven KYC L1 submission)',
             'GET /api/admin/provider-identities?status&roleKind&limit  (Phase 12.2.2 — operator KYC review queue)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',

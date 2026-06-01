@@ -466,6 +466,26 @@ const SCHEMAS = `
     citizen_root_identity_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
   );
+
+  -- Phase 12.2.3 — Attachment CORE substrate. Binary blobs
+  -- owned by a root identity (KYC selfies, ID proofs, per-role
+  -- docs, dispute evidence). Composite PK on (sha256, root)
+  -- so two citizens uploading the same JPEG hold their own
+  -- DPDP-erasable copies. The bytes column is the BLOB (first
+  -- in the schema); json mirrors the metadata for cheap reads.
+  CREATE TABLE IF NOT EXISTS attachments (
+    sha256 TEXT NOT NULL,
+    root_identity_id TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    byte_length INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    json TEXT NOT NULL,
+    PRIMARY KEY (sha256, root_identity_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_attachments_owner_created ON attachments(root_identity_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_attachments_kind ON attachments(kind);
 `;
 
 function parse(row) {
@@ -2280,6 +2300,174 @@ export class SqliteStore {
     return this._readOne('citizen_escrows', 'citizen_root_identity_id', citizenRootIdentityId);
   }
 
+  // ─── Phase 12.2.3 — Attachment CORE substrate ─────────────────────────
+
+  async saveAttachment(record, { quotaCapBytes } = {}) {
+    if (!record?.attachmentId) throw new Error('attachment requires attachmentId.');
+    if (!record.rootIdentityId) throw new Error('attachment requires rootIdentityId.');
+    if (!Buffer.isBuffer(record.bytes)) throw new Error('attachment.bytes must be a Buffer.');
+    await this.init();
+    // bytes column is BLOB; the rest of the metadata mirrors
+    // into json for cheap meta-only reads.
+    const meta = {
+      attachmentId: record.attachmentId,
+      protocolVersion: record.protocolVersion,
+      objectType: record.objectType,
+      rootIdentityId: record.rootIdentityId,
+      sha256: record.sha256,
+      byteLength: record.byteLength,
+      mimeType: record.mimeType,
+      mayContainExif: Boolean(record.mayContainExif),
+      kind: record.kind,
+      createdAt: record.createdAt
+    };
+    // Phase 12.2.3 fix A3-4 — wrap the (current sum + new
+    // byteLength) check + INSERT in a single BEGIN IMMEDIATE
+    // transaction so two parallel POSTs from the same actor
+    // can't both pass the cap check and blow past the limit.
+    // When quotaCapBytes is omitted, the txn still serialises
+    // the insert (useful for tests) but skips the cap math.
+    this.db.prepare('BEGIN IMMEDIATE').run();
+    try {
+      if (Number.isFinite(quotaCapBytes)) {
+        const row = this.db
+          .prepare('SELECT COALESCE(SUM(byte_length), 0) AS total FROM attachments WHERE root_identity_id = ?')
+          .get(record.rootIdentityId);
+        const current = row ? Number(row.total || 0) : 0;
+        // Subtract the existing row's bytes if this is an
+        // overwrite of the same (sha256, root) — content-
+        // addressed so the new bytes are identical, but the
+        // count would double otherwise.
+        const existingRow = this.db
+          .prepare('SELECT byte_length FROM attachments WHERE sha256 = ? AND root_identity_id = ?')
+          .get(record.sha256, record.rootIdentityId);
+        const existingBytes = existingRow ? Number(existingRow.byte_length || 0) : 0;
+        if (current - existingBytes + record.byteLength > quotaCapBytes) {
+          this.db.prepare('ROLLBACK').run();
+          const err = new Error('attachment would exceed the actor quota.');
+          err.code = 'actor_quota_exceeded';
+          err.currentBytes = current;
+          err.attemptedAdd = record.byteLength;
+          err.cap = quotaCapBytes;
+          throw err;
+        }
+      }
+      this.db
+        .prepare(
+          `INSERT INTO attachments (sha256, root_identity_id, mime_type, byte_length, kind, created_at, bytes, json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (sha256, root_identity_id) DO UPDATE SET
+             mime_type = excluded.mime_type,
+             byte_length = excluded.byte_length,
+             kind = excluded.kind,
+             created_at = excluded.created_at,
+             bytes = excluded.bytes,
+             json = excluded.json`
+        )
+        .run(
+          record.sha256,
+          record.rootIdentityId,
+          record.mimeType,
+          record.byteLength,
+          record.kind,
+          record.createdAt,
+          record.bytes,
+          JSON.stringify(meta)
+        );
+      this.db.prepare('COMMIT').run();
+    } catch (err) {
+      // BEGIN IMMEDIATE always commits or rolls back; ignore
+      // the ROLLBACK-after-ROLLBACK error.
+      try { this.db.prepare('ROLLBACK').run(); } catch (_) {}
+      throw err;
+    }
+    await this.appendLedger({
+      type: 'attachment.saved',
+      attachmentId: record.attachmentId,
+      rootIdentityId: record.rootIdentityId,
+      sha256: record.sha256,
+      byteLength: record.byteLength,
+      mimeType: record.mimeType,
+      kind: record.kind,
+      at: record.createdAt
+    });
+    return record;
+  }
+
+  async readAttachment(attachmentId, { rootIdentityId } = {}) {
+    await this.init();
+    if (!attachmentId) return null;
+    // Content-addressed ID encodes the sha256 prefix; we still
+    // require the rootIdentityId for the composite key lookup,
+    // OR we scan by sha256 prefix (slower, used only when the
+    // caller doesn't know the owner — e.g. an operator).
+    let row;
+    if (rootIdentityId) {
+      row = this.db
+        .prepare('SELECT json, bytes FROM attachments WHERE sha256 LIKE ? AND root_identity_id = ?')
+        .get(attachmentId.slice('bos:att:'.length) + '%', rootIdentityId);
+    } else {
+      row = this.db
+        .prepare('SELECT json, bytes FROM attachments WHERE sha256 LIKE ? LIMIT 1')
+        .get(attachmentId.slice('bos:att:'.length) + '%');
+    }
+    if (!row) return null;
+    // node:sqlite returns BLOB as Uint8Array; normalise to
+    // Buffer so callers can stream it through response.end +
+    // hex-compare in tests.
+    const bytes = Buffer.isBuffer(row.bytes) ? row.bytes : Buffer.from(row.bytes);
+    return { ...JSON.parse(row.json), bytes };
+  }
+
+  async listAttachments({ rootIdentityId, kind } = {}) {
+    await this.init();
+    let sql = 'SELECT json FROM attachments';
+    const where = [];
+    const params = [];
+    if (rootIdentityId) {
+      where.push('root_identity_id = ?');
+      params.push(rootIdentityId);
+    }
+    if (kind) {
+      where.push('kind = ?');
+      params.push(kind);
+    }
+    if (where.length) sql += ' WHERE ' + where.join(' AND ');
+    sql += ' ORDER BY created_at DESC';
+    const rows = this.db.prepare(sql).all(...params);
+    // The listing endpoint MUST NOT return bytes — that's what
+    // GET /api/attachments/:id is for. Metadata only.
+    return rows.map((r) => JSON.parse(r.json));
+  }
+
+  async sumAttachmentBytesByActor(rootIdentityId) {
+    // Phase 12.2.3 fix PII-6 — refuse empty actor.
+    if (!rootIdentityId) return 0;
+    await this.init();
+    const row = this.db
+      .prepare('SELECT COALESCE(SUM(byte_length), 0) AS total FROM attachments WHERE root_identity_id = ?')
+      .get(rootIdentityId);
+    return row ? Number(row.total || 0) : 0;
+  }
+
+  async deleteAttachment(attachmentId, { rootIdentityId, at } = {}) {
+    await this.init();
+    if (!attachmentId) return false;
+    const result = this.db
+      .prepare('DELETE FROM attachments WHERE sha256 LIKE ? AND root_identity_id = ?')
+      .run(attachmentId.slice('bos:att:'.length) + '%', rootIdentityId);
+    if (result.changes > 0) {
+      await this.appendLedger({
+        type: 'attachment.erased',
+        attachmentId,
+        rootIdentityId,
+        at: at || new Date().toISOString()
+      });
+      return true;
+    }
+    return false;
+  }
+
   // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────
 
   async readAuditSigner() {
@@ -2467,6 +2655,11 @@ export class SqliteStore {
       sections.bookings = sweep('bookings', ['citizen_root_identity_id', 'provider_root_identity_id']);
       // Citizen-escrow envelope cascades on citizen erasure.
       sections.citizenEscrows = sweep('citizen_escrows', ['citizen_root_identity_id']);
+      // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
+      // per-role docs, dispute evidence) cascade by
+      // root_identity_id. The bytes column goes with the row so
+      // erasure is atomic — no half-deleted blob on disk.
+      sections.attachments = sweep('attachments', ['root_identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

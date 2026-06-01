@@ -110,6 +110,11 @@ export const KYC_L1_PAN_LAST4_RE = /^[A-Z0-9]{4}$/;
 export const KYC_L1_PINCODE_RE = /^[1-9][0-9]{5}$/;
 export const KYC_L1_FULL_LEGAL_NAME_MAX = 120;
 export const KYC_L1_ADDRESS_LINE_MAX = 240;
+// Phase 12.2.3 — optional KYC L1 selfie + ID-proof attachment
+// references. Stored as content-addressed attachment IDs from
+// the attachment substrate; the wizard captures the citizen's
+// blobs first, then references the IDs in the L1 submission.
+export const KYC_L1_ATTACHMENT_ID_RE = /^bos:att:[0-9a-f]{32}$/;
 
 export class KycLevel1ValidationError extends Error {
   constructor(code, message, field = null) {
@@ -130,7 +135,13 @@ export function validateKycLevel1Submission({
   addressPinCode,
   addressLine,
   cityFromPincode,
-  stateFromPincode
+  stateFromPincode,
+  // Phase 12.2.3 — optional. When provided, MUST be a valid
+  // bos:att:<32hex> id. The api handler verifies the
+  // attachment exists + is owned by the same root before
+  // accepting the submission.
+  selfieAttachmentId = null,
+  idProofAttachmentId = null
 } = {}) {
   const name = fullLegalName == null ? '' : String(fullLegalName).trim();
   if (!name) throw new KycLevel1ValidationError('full_legal_name_required', 'fullLegalName is required.', 'fullLegalName');
@@ -184,6 +195,18 @@ export function validateKycLevel1Submission({
   if (!city) throw new KycLevel1ValidationError('city_required', 'cityFromPincode is required.', 'cityFromPincode');
   if (!state) throw new KycLevel1ValidationError('state_required', 'stateFromPincode is required.', 'stateFromPincode');
 
+  // Phase 12.2.3 — optional attachment refs. When supplied,
+  // must match the substrate id shape; substrate ownership +
+  // existence are checked by the API handler.
+  const selfieRef = selfieAttachmentId == null ? null : String(selfieAttachmentId).trim() || null;
+  if (selfieRef && !KYC_L1_ATTACHMENT_ID_RE.test(selfieRef)) {
+    throw new KycLevel1ValidationError('selfie_attachment_invalid', 'selfieAttachmentId must be a valid bos:att:<32hex> id.', 'selfieAttachmentId');
+  }
+  const idProofRef = idProofAttachmentId == null ? null : String(idProofAttachmentId).trim() || null;
+  if (idProofRef && !KYC_L1_ATTACHMENT_ID_RE.test(idProofRef)) {
+    throw new KycLevel1ValidationError('id_proof_attachment_invalid', 'idProofAttachmentId must be a valid bos:att:<32hex> id.', 'idProofAttachmentId');
+  }
+
   return {
     fullLegalName: name,
     aadhaarLast4: a,
@@ -191,7 +214,9 @@ export function validateKycLevel1Submission({
     addressPinCode: pin,
     addressLine: line,
     cityFromPincode: city,
-    stateFromPincode: state
+    stateFromPincode: state,
+    selfieAttachmentId: selfieRef,
+    idProofAttachmentId: idProofRef
   };
 }
 
@@ -718,6 +743,8 @@ export function selfProviderRecord(provider) {
         addressLine: '•••• (re-enter to edit)',
         cityFromPincode: sub.cityFromPincode,
         stateFromPincode: sub.stateFromPincode,
+        selfieAttachmentId: sub.selfieAttachmentId || null,
+        idProofAttachmentId: sub.idProofAttachmentId || null,
         submittedAt: sub.submittedAt
       }
       : null,

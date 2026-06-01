@@ -152,6 +152,67 @@ Implemented pieces:
 
 ---
 
+## 📸 2026-06-01 — Phase 12.2.3 shipped: Attachment CORE substrate + KYC L1 selfie/ID-proof photos
+
+The binary blob substrate Phase 12.2.4 per-role extras and Phase
+12.x dispute evidence will compose without modification. Built
+once, shipped with KYC L1 selfie + ID-proof as the first
+consumer + the operator review queue's photo-view path.
+
+- **ADR 0143** — `src/phase1/attachment.mjs` substrate with
+  MIME allowlist (jpeg/png/webp/pdf), content-addressed
+  `bos:att:<32hex>` IDs (sha256-derived), 5 MiB per-blob +
+  50 MiB per-actor caps, EXIF-bearing flag, typed errors.
+  New `attachments` table on both stores (SqliteStore: BLOB
+  column with composite PK on sha256 + root; BosStore:
+  two-file `.bin` + `.json` siblings, DPDP cascade unlinks
+  `.bin` FIRST to avoid orphaned naked blobs).
+- **Endpoints** — POST/GET-list/GET-id/DELETE
+  `/api/attachments` with owner-auth (`X-Bharat-OS-Acting-
+  Identity` header) or admin-bearer paths. Content-addressed
+  cache on GET (`private, max-age=31536000, immutable` +
+  ETag); per-route 8 MiB body cap; `expensive` rate-limit
+  policy on POST.
+- **§15 bindings** — `attachment.saved` / `attachment.erased`
+  / `attachment.admin_read` events carry meta only (never
+  bytes). `/api/attachments/:id` rewritten in `safePath` so
+  the access log never carries the sha256 prefix. Operator
+  GET emits an audit event so a leaked admin token leaves a
+  trail. Quota wrapped in `BEGIN IMMEDIATE` on SQLite
+  (parallel uploads can't blow past the cap). EXIF flagged
+  but not yet stripped — Phase 12.x scope.
+- **KYC L1 wiring** — schema extended with optional
+  `selfieAttachmentId` + `idProofAttachmentId`; ownership
+  cross-checked at submit time (a citizen cannot reference
+  another citizen's blob); KYC L1 wizard grew 3 → 5 steps
+  (identity → **selfie** → **idProof** → address → review).
+- **FE** — `useAttachmentUpload` TanStack mutation +
+  `<PhotoCapture/>` component (file-input primary path with
+  `accept="image/*" capture=environment|user`; preview +
+  confirm + retake; real thumbnail render on resubmit, fixed
+  during adversarial review).
+- **Operator console** — per-row "View selfie" / "View ID
+  proof" buttons; blob URL opens in new tab; URL revoked
+  after 30s; EXIF warning banner; graceful framing when the
+  citizen erased a blob between submit and review.
+- **Adversarial review** — 4-lens parallel workflow surfaced
+  26 findings (6 PII / 6 DPDP / 6 auth / 8 UX). 11 high+med
+  fixed in-phase including PIN-style access-log redaction,
+  BosStore cascade ordering bug, quota TOCTOU race, admin-
+  read audit event, real-thumbnail UX-honesty fix. 15 low
+  deferred or accepted with explicit scope.
+- **Tests** — Node 1082 → **1110** (+28 substrate + storage
+  + endpoint + binding-grep + adversarial-fix cases) +
+  vitest 121 → **124** (+3 substrate constants). tsc clean.
+  Bundle main 612 → 618 KB / 174 → 175 KB gzipped (+6 KB).
+
+**Next: Phase 12.2.4** — wave-1 per-role extras compose this
+substrate (cab-driver vehicle docs, personal-driver police
+verification, labourers contractor attestation, household-help
+references) + EXIF stripper on existing rows.
+
+---
+
 ## 🪪 2026-06-01 — Phase 12.2.2 shipped: citizen-driven KYC L1 wizard + India Post PIN-code adapter + operator review queue
 
 The common physical-service KYC slice for the 4 wave-1 provider

@@ -1665,6 +1665,25 @@ function renderProviderKycReview(items) {
         : '<span class="muted">—</span>';
       const canAttest = sub != null;
       const canActivate = p.status === 'submitted' && p.kycLevel !== 'none';
+      // Phase 12.2.3 — attach view buttons for selfie + ID
+      // proof. Fetch uses the admin bearer; bytes pop into a
+      // blob URL the operator opens in a new tab.
+      const selfieBtn = sub && sub.selfieAttachmentId
+        ? `<button data-kyc-view-attachment="${escapeHtml(sub.selfieAttachmentId)}" type="button">View selfie</button>`
+        : '';
+      const idProofBtn = sub && sub.idProofAttachmentId
+        ? `<button data-kyc-view-attachment="${escapeHtml(sub.idProofAttachmentId)}" type="button">View ID proof</button>`
+        : '';
+      // Phase 12.2.3 fix PII-4 — the substrate flags JPEG /
+      // WebP uploads as potentially carrying EXIF GPS. v1
+      // does NOT strip; the operator should be aware before
+      // saving the image off-platform.
+      const exifWarn = (selfieBtn || idProofBtn)
+        ? '<div class="muted small">⚠ Photos may carry EXIF / GPS — strip before forwarding.</div>'
+        : '';
+      const attachmentButtons = (selfieBtn || idProofBtn)
+        ? `<div class="small">${selfieBtn} ${idProofBtn}</div>${exifWarn}`
+        : '';
       return `<tr>
         <td>${escapeHtml(p.displayName)}<br><span class="muted small">${escapeHtml(p.providerIdentityId)}</span></td>
         <td>${escapeHtml(p.roleKind)}</td>
@@ -1677,6 +1696,7 @@ function renderProviderKycReview(items) {
           <button data-kyc-attest-basic="${escapeHtml(p.providerIdentityId)}" ${canAttest ? '' : 'disabled'} type="button">Attest basic</button>
           <button data-kyc-attest-verified="${escapeHtml(p.providerIdentityId)}" ${canAttest ? '' : 'disabled'} type="button">Attest verified</button>
           <button data-kyc-activate="${escapeHtml(p.providerIdentityId)}" ${canActivate ? '' : 'disabled'} type="button">Activate</button>
+          ${attachmentButtons}
         </td>
       </tr>`;
     })
@@ -1798,13 +1818,51 @@ async function activateProvider(providerIdentityId) {
   }
 }
 
+async function viewAttachment(attachmentId) {
+  const headers = readAdminHeaders();
+  if (!headers['Authorization']) {
+    window.alert('Paste an admin token in the topbar first.');
+    return;
+  }
+  try {
+    const r = await fetch(`/api/attachments/${encodeURIComponent(attachmentId)}`, { headers });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      const code = (body.error && body.error.code) || 'error';
+      if (code === 'attachment_unavailable' || code === 'unknown_attachment') {
+        // Phase 12.2.3 fix DPDP-3 — operator-friendly framing
+        // when the citizen has erased the attachment between
+        // L1 submission and operator review.
+        window.alert('This attachment is no longer available. The citizen may have withdrawn it; ask them to re-submit.');
+        return;
+      }
+      window.alert(`View failed: ${r.status} ${code}`);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const opened = window.open(url, '_blank', 'noopener');
+    // Revoke the URL after the new tab has a chance to fetch
+    // it. 30s is a generous buffer for image rendering; the
+    // browser keeps a reference once it's painted.
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    if (!opened) {
+      window.alert('Popup blocked. Allow popups for this page to view attachments.');
+    }
+  } catch (err) {
+    window.alert(`View failed: ${err.message}`);
+  }
+}
+
 $('providerKycReviewTable').addEventListener('click', (event) => {
   const basic = event.target.closest('[data-kyc-attest-basic]');
   if (basic && !basic.disabled) { attestProviderKyc(basic.dataset.kycAttestBasic, 'basic'); return; }
   const verified = event.target.closest('[data-kyc-attest-verified]');
   if (verified && !verified.disabled) { attestProviderKyc(verified.dataset.kycAttestVerified, 'verified'); return; }
   const activate = event.target.closest('[data-kyc-activate]');
-  if (activate && !activate.disabled) { activateProvider(activate.dataset.kycActivate); }
+  if (activate && !activate.disabled) { activateProvider(activate.dataset.kycActivate); return; }
+  const view = event.target.closest('[data-kyc-view-attachment]');
+  if (view) { viewAttachment(view.dataset.kycViewAttachment); }
 });
 $('providerKycStatusFilter').addEventListener('change', loadProviderKycReview);
 $('providerKycRoleFilter').addEventListener('change', loadProviderKycReview);

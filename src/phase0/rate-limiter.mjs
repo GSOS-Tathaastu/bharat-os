@@ -167,6 +167,13 @@ export function policyFor(method, pathname) {
   // Account recovery start — sends SMS AND scans the identity list.
   // Definitely expensive. Verify stays write (retry-friendly).
   if (method === 'POST' && pathname === '/api/recovery/start') return 'expensive';
+  // Phase 12.2.3 — attachment upload buffers up to 8 MiB of
+  // base64 BEFORE the substrate validates quota / mime. In the
+  // 'write' policy (30/min) a single IP could push ~240 MiB/min
+  // of decoded base64. 'expensive' lands it in the 10/min
+  // bucket so a misbehaving client can't blow through the
+  // node's memory allocator.
+  if (method === 'POST' && pathname === '/api/attachments') return 'expensive';
   // Mutating routes — anything that POSTs / PUTs / DELETEs.
   if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
     return 'write';

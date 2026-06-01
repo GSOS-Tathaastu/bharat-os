@@ -32,8 +32,11 @@ import {
   type ProviderIdentity
 } from '@/lib/hooks';
 import { usePincodeLookup, isValidPincode } from '@/lib/use-pincode-lookup';
+import { PhotoCapture } from '@/components/forms/PhotoCapture';
 
-type Step = 'identity' | 'address' | 'review';
+type Step = 'identity' | 'selfie' | 'idProof' | 'address' | 'review';
+
+const STEP_ORDER: Step[] = ['identity', 'selfie', 'idProof', 'address', 'review'];
 
 interface FormState {
   fullLegalName: string;
@@ -41,6 +44,12 @@ interface FormState {
   panLast4: string;
   addressPinCode: string;
   addressLine: string;
+  // Phase 12.2.3 — substrate-backed capture handles. Stored as
+  // content-addressed attachmentId from POST /api/attachments.
+  // The wizard uploads before moving past the step; the parent
+  // submission references the IDs.
+  selfieAttachmentId: string | null;
+  idProofAttachmentId: string | null;
 }
 
 const EMPTY: FormState = {
@@ -48,7 +57,9 @@ const EMPTY: FormState = {
   aadhaarLast4: '',
   panLast4: '',
   addressPinCode: '',
-  addressLine: ''
+  addressLine: '',
+  selfieAttachmentId: null,
+  idProofAttachmentId: null
 };
 
 function trimToMax(s: string, max: number): string {
@@ -109,7 +120,13 @@ export function KycLevel1Page() {
       aadhaarLast4: /^[0-9]{4}$/.test(s.aadhaarLast4) ? s.aadhaarLast4 : '',
       panLast4: /^[A-Z0-9]{4}$/.test(s.panLast4) ? s.panLast4 : '',
       addressPinCode: s.addressPinCode,
-      addressLine: /^••••/.test(s.addressLine) ? '' : s.addressLine
+      addressLine: /^••••/.test(s.addressLine) ? '' : s.addressLine,
+      // Phase 12.2.3 — re-use any prior selfie / ID-proof
+      // capture so a citizen who bounced halfway doesn't
+      // re-take the photos. The citizen can still tap
+      // "Replace" on each PhotoCapture to upload again.
+      selfieAttachmentId: s.selfieAttachmentId || null,
+      idProofAttachmentId: s.idProofAttachmentId || null
     });
     hydratedRef.current = true;
   }, [provider?.kycLevel1Submission]);
@@ -150,6 +167,12 @@ export function KycLevel1Page() {
     if (!/^[A-Z0-9]{4}$/.test(form.panLast4)) return false;
     return true;
   }
+  function canAdvanceFromSelfie(): boolean {
+    return /^bos:att:[0-9a-f]{32}$/.test(form.selfieAttachmentId || '');
+  }
+  function canAdvanceFromIdProof(): boolean {
+    return /^bos:att:[0-9a-f]{32}$/.test(form.idProofAttachmentId || '');
+  }
   function canAdvanceFromAddress(): boolean {
     if (!isValidPincode(form.addressPinCode)) return false;
     if (!form.addressLine.trim()) return false;
@@ -169,7 +192,9 @@ export function KycLevel1Page() {
         addressPinCode: form.addressPinCode,
         addressLine: form.addressLine.trim(),
         cityFromPincode: effectiveCity,
-        stateFromPincode: effectiveState
+        stateFromPincode: effectiveState,
+        selfieAttachmentId: form.selfieAttachmentId,
+        idProofAttachmentId: form.idProofAttachmentId
       });
       show('KYC submitted. An operator will review and elevate your provider profile.', 'success');
       navigate(returnTo);
@@ -231,7 +256,7 @@ export function KycLevel1Page() {
     <main className="mx-auto max-w-2xl px-4 pb-24 pt-6">
       <header className="mb-4 flex items-center gap-3">
         <h1 className="text-h2 font-semibold text-text">KYC Level 1</h1>
-        <Badge variant="pending">Step {step === 'identity' ? 1 : step === 'address' ? 2 : 3} of 3</Badge>
+        <Badge variant="pending">Step {STEP_ORDER.indexOf(step) + 1} of {STEP_ORDER.length}</Badge>
       </header>
       <p className="mb-4 text-body text-text-muted">
         A short, citizen-controlled identity + address record so an operator can verify
@@ -294,7 +319,62 @@ export function KycLevel1Page() {
             containerClassName="mt-3"
           />
           <div className="mt-4 flex justify-end">
-            <Action onClick={() => setStep('address')} disabled={!canAdvanceFromIdentity()}>
+            <Action onClick={() => setStep('selfie')} disabled={!canAdvanceFromIdentity()}>
+              Next: take a selfie
+            </Action>
+          </div>
+        </Card>
+      )}
+
+      {step === 'selfie' && identity && (
+        <Card title="Take a selfie">
+          <p className="text-body text-text-muted">
+            A clear, well-lit photo of your face. The operator uses this to
+            verify it's you in the ID proof.
+          </p>
+          <div className="mt-3">
+            <PhotoCapture
+              identityId={identity.id}
+              kind="kyc_l1_selfie"
+              captureMode="user"
+              helper="Hold your phone at eye level. Look at the camera. No filters."
+              existingAttachmentId={form.selfieAttachmentId}
+              onUploaded={(meta) => setForm((p) => ({ ...p, selfieAttachmentId: meta.attachmentId }))}
+            />
+          </div>
+          <div className="mt-4 flex justify-between">
+            <Action variant="ghost" onClick={() => setStep('identity')}>
+              Back
+            </Action>
+            <Action onClick={() => setStep('idProof')} disabled={!canAdvanceFromSelfie()}>
+              Next: ID proof
+            </Action>
+          </div>
+        </Card>
+      )}
+
+      {step === 'idProof' && identity && (
+        <Card title="Photo of your ID">
+          <p className="text-body text-text-muted">
+            A clear photo of the front of your Aadhaar or PAN card. The
+            substrate stores the last 4 of each separately; this photo is
+            only for the operator to confirm the match.
+          </p>
+          <div className="mt-3">
+            <PhotoCapture
+              identityId={identity.id}
+              kind="kyc_l1_id_proof"
+              captureMode="environment"
+              helper="Lay the card flat. Make sure all four corners are visible. No glare."
+              existingAttachmentId={form.idProofAttachmentId}
+              onUploaded={(meta) => setForm((p) => ({ ...p, idProofAttachmentId: meta.attachmentId }))}
+            />
+          </div>
+          <div className="mt-4 flex justify-between">
+            <Action variant="ghost" onClick={() => setStep('selfie')}>
+              Back
+            </Action>
+            <Action onClick={() => setStep('address')} disabled={!canAdvanceFromIdProof()}>
               Next: address
             </Action>
           </div>
@@ -369,7 +449,7 @@ export function KycLevel1Page() {
             containerClassName="mt-3"
           />
           <div className="mt-4 flex justify-between">
-            <Action variant="ghost" onClick={() => setStep('identity')}>
+            <Action variant="ghost" onClick={() => setStep('idProof')}>
               Back
             </Action>
             <Action onClick={() => setStep('review')} disabled={!canAdvanceFromAddress()}>
@@ -396,6 +476,14 @@ export function KycLevel1Page() {
             <dd className="text-body text-text">{effectiveState}</dd>
             <dt className="text-caption text-text-muted">Address</dt>
             <dd className="text-body text-text">{form.addressLine}</dd>
+            <dt className="text-caption text-text-muted">Selfie</dt>
+            <dd className="text-body text-text">
+              {form.selfieAttachmentId ? <Badge variant="trust">Captured</Badge> : <span className="text-text-muted">Not captured</span>}
+            </dd>
+            <dt className="text-caption text-text-muted">ID proof photo</dt>
+            <dd className="text-body text-text">
+              {form.idProofAttachmentId ? <Badge variant="trust">Captured</Badge> : <span className="text-text-muted">Not captured</span>}
+            </dd>
           </dl>
           <p className="mt-4 text-caption text-text-muted">
             By submitting, you confirm these details match a government ID you can show

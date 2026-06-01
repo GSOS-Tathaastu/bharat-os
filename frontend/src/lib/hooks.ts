@@ -1945,6 +1945,9 @@ export interface KycLevel1Submission {
   addressLine: string;
   cityFromPincode: string;
   stateFromPincode: string;
+  // Phase 12.2.3 — content-addressed substrate handles.
+  selfieAttachmentId?: string | null;
+  idProofAttachmentId?: string | null;
   submittedAt: string;
 }
 
@@ -2076,6 +2079,9 @@ export interface SubmitKycLevel1Input {
   addressLine: string;
   cityFromPincode: string;
   stateFromPincode: string;
+  // Phase 12.2.3 — optional.
+  selfieAttachmentId?: string | null;
+  idProofAttachmentId?: string | null;
 }
 
 export function useSubmitKycLevel1() {
@@ -2102,7 +2108,9 @@ export function useSubmitKycLevel1() {
             addressPinCode: input.addressPinCode,
             addressLine: input.addressLine,
             cityFromPincode: input.cityFromPincode,
-            stateFromPincode: input.stateFromPincode
+            stateFromPincode: input.stateFromPincode,
+            selfieAttachmentId: input.selfieAttachmentId ?? null,
+            idProofAttachmentId: input.idProofAttachmentId ?? null
           })
         }
       ),

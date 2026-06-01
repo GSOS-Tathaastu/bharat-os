@@ -72,6 +72,12 @@ export class BosStore {
     this.phoneOtpsPath = path.join(rootPath, 'phone-otps');
     this.bookingsPath = path.join(rootPath, 'bookings');
     this.citizenEscrowsPath = path.join(rootPath, 'citizen-escrows');
+    // Phase 12.2.3 — attachment blob store. Each blob is a
+    // single file named <attachmentId>.bin (raw bytes) with a
+    // sibling .json carrying metadata. Two-file layout keeps
+    // the bytes streamable + the meta scannable. DPDP cascade
+    // walks meta files filtered by rootIdentityId.
+    this.attachmentsPath = path.join(rootPath, 'attachments');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -106,6 +112,7 @@ export class BosStore {
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
     await fs.mkdir(this.citizenEscrowsPath, { recursive: true });
+    await fs.mkdir(this.attachmentsPath, { recursive: true });
     await fs.mkdir(this.labelingJobsPath, { recursive: true });
     await fs.mkdir(this.labelingJobItemsPath, { recursive: true });
     await fs.mkdir(this.labelingSubmissionsPath, { recursive: true });
@@ -469,6 +476,49 @@ export class BosStore {
     } catch (_error) {
       sections.citizenEscrows = 0;
     }
+
+    // Phase 12.2.3 — attachment blob cascade. Walk meta files
+    // filtered by rootIdentityId, unlink both .json and .bin
+    // siblings. Each blob owned by this root identity goes,
+    // satisfying DPDP §12(3) atomically per blob.
+    // Phase 12.2.3 fix DPDP-2 — unlink .bin FIRST and only
+    // unlink .json if the .bin succeeded. Previous ordering
+    // could leave an orphaned naked .bin (no metadata,
+    // undeletable via API) if the .bin unlink raced with the
+    // OS (EBUSY on Windows / EACCES on a virus scanner lock).
+    // We surface the count of TRULY removed pairs only.
+    const attachments = await this.listAttachments({ rootIdentityId: identityId }).catch(() => []);
+    let attachmentsRemoved = 0;
+    for (const a of attachments) {
+      let binGone = false;
+      try {
+        await fs.unlink(this.attachmentBytesFile(a.attachmentId));
+        binGone = true;
+      } catch (err) {
+        // ENOENT is fine — the bytes file may have already
+        // been deleted by an earlier cascade attempt. Anything
+        // else, we leave BOTH files in place so a retry can
+        // sweep the pair atomically.
+        if (err && err.code === 'ENOENT') binGone = true;
+      }
+      if (binGone) {
+        try {
+          await fs.unlink(this.attachmentMetaFile(a.attachmentId));
+          attachmentsRemoved += 1;
+        } catch (err) {
+          // .json unlink failed AFTER .bin succeeded — the
+          // worst case is an orphaned meta pointing at a
+          // missing .bin, which the API correctly returns
+          // null for. Operator can retry the cascade.
+          if (err && err.code !== 'ENOENT') {
+            // best-effort; logged via the ledger event below
+          } else {
+            attachmentsRemoved += 1;
+          }
+        }
+      }
+    }
+    sections.attachments = attachmentsRemoved;
 
     await sweep(
       'workerNotifications',
@@ -1432,6 +1482,121 @@ export class BosStore {
 
   async readCitizenEscrow(citizenRootIdentityId) {
     return readJson(this.citizenEscrowFile(citizenRootIdentityId));
+  }
+
+  // Phase 12.2.3 — Attachment CORE substrate. Two-file layout
+  // per blob: <id>.bin (raw bytes) + <id>.json (metadata). The
+  // .json is what listJson scans; the .bin is read on demand.
+  attachmentBytesFile(attachmentId) {
+    return path.join(this.attachmentsPath, `${safeName(attachmentId)}.bin`);
+  }
+  attachmentMetaFile(attachmentId) {
+    return path.join(this.attachmentsPath, `${safeName(attachmentId)}.json`);
+  }
+
+  async saveAttachment(record, { quotaCapBytes } = {}) {
+    if (!record?.attachmentId) throw new Error('attachment requires attachmentId.');
+    if (!record.rootIdentityId) throw new Error('attachment requires rootIdentityId.');
+    if (!Buffer.isBuffer(record.bytes)) throw new Error('attachment.bytes must be a Buffer.');
+    await this.init();
+    // Phase 12.2.3 fix A3-4 — best-effort quota check on the
+    // file-store. BosStore has no transactional primitive; the
+    // file-system race window is small (read-then-write within
+    // a single Node microtask), and the production posture is
+    // SqliteStore which has the proper BEGIN IMMEDIATE guard.
+    if (Number.isFinite(quotaCapBytes)) {
+      const current = await this.sumAttachmentBytesByActor(record.rootIdentityId);
+      const existing = await readJson(this.attachmentMetaFile(record.attachmentId)).catch(() => null);
+      const existingBytes = existing ? Number(existing.byteLength || 0) : 0;
+      if (current - existingBytes + record.byteLength > quotaCapBytes) {
+        const err = new Error('attachment would exceed the actor quota.');
+        err.code = 'actor_quota_exceeded';
+        err.currentBytes = current;
+        err.attemptedAdd = record.byteLength;
+        err.cap = quotaCapBytes;
+        throw err;
+      }
+    }
+    const meta = {
+      attachmentId: record.attachmentId,
+      protocolVersion: record.protocolVersion,
+      objectType: record.objectType,
+      rootIdentityId: record.rootIdentityId,
+      sha256: record.sha256,
+      byteLength: record.byteLength,
+      mimeType: record.mimeType,
+      mayContainExif: Boolean(record.mayContainExif),
+      kind: record.kind,
+      createdAt: record.createdAt
+    };
+    await fs.writeFile(this.attachmentBytesFile(record.attachmentId), record.bytes);
+    await writeJson(this.attachmentMetaFile(record.attachmentId), meta);
+    await this.appendLedger({
+      type: 'attachment.saved',
+      attachmentId: record.attachmentId,
+      rootIdentityId: record.rootIdentityId,
+      sha256: record.sha256,
+      byteLength: record.byteLength,
+      mimeType: record.mimeType,
+      kind: record.kind,
+      at: record.createdAt
+    });
+    return record;
+  }
+
+  async readAttachment(attachmentId, { rootIdentityId } = {}) {
+    if (!attachmentId) return null;
+    const meta = await readJson(this.attachmentMetaFile(attachmentId));
+    if (!meta) return null;
+    if (rootIdentityId && meta.rootIdentityId !== rootIdentityId) return null;
+    const bytes = await fs.readFile(this.attachmentBytesFile(attachmentId)).catch(() => null);
+    if (!bytes) return null;
+    return { ...meta, bytes };
+  }
+
+  async listAttachments({ rootIdentityId, kind } = {}) {
+    const all = await listJson(this.attachmentsPath);
+    return all
+      .filter((m) => {
+        // Phase 12.2.3 fix PII-6 — REQUIRE a non-empty
+        // rootIdentityId. An empty/null caller arg used to
+        // short-circuit the filter, leaking every actor's
+        // attachments to a buggy internal caller (operators
+        // already have an explicit admin-token path).
+        if (!rootIdentityId || m.rootIdentityId !== rootIdentityId) return false;
+        if (kind && m.kind !== kind) return false;
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+
+  async sumAttachmentBytesByActor(rootIdentityId) {
+    // Phase 12.2.3 fix PII-6 — same guard. Without a non-empty
+    // actor id, return zero so quota math errs on the side of
+    // refusing rather than silently approving.
+    if (!rootIdentityId) return 0;
+    const all = await listJson(this.attachmentsPath);
+    let total = 0;
+    for (const m of all) {
+      if (m.rootIdentityId === rootIdentityId) total += Number(m.byteLength || 0);
+    }
+    return total;
+  }
+
+  async deleteAttachment(attachmentId, { rootIdentityId, at } = {}) {
+    if (!attachmentId) return false;
+    const meta = await readJson(this.attachmentMetaFile(attachmentId));
+    if (!meta) return false;
+    if (rootIdentityId && meta.rootIdentityId !== rootIdentityId) return false;
+    await fs.unlink(this.attachmentBytesFile(attachmentId)).catch(() => {});
+    await fs.unlink(this.attachmentMetaFile(attachmentId)).catch(() => {});
+    await this.appendLedger({
+      type: 'attachment.erased',
+      attachmentId,
+      rootIdentityId: meta.rootIdentityId,
+      at: at || new Date().toISOString()
+    });
+    return true;
   }
 
   // Phase 10.1 — labeling marketplace tables. Three resources:

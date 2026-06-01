@@ -2201,6 +2201,46 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.3 — SHIPPED 2026-06-01 (ADR 0143).** Attachment
+  CORE substrate + KYC L1 selfie / ID-proof wiring + operator
+  view of citizen-captured photos. NEW
+  `src/phase1/attachment.mjs` (mime allowlist /
+  jpeg+png+webp+pdf, content-addressed `bos:att:<32hex>` IDs,
+  5 MiB per-blob + 50 MiB per-actor caps, EXIF-bearing flag,
+  typed `AttachmentValidationError`). NEW `attachments` table
+  on SqliteStore (composite PK on sha256 + root, BLOB column,
+  first BLOB in the entire schema) + two-file layout on
+  BosStore (.bin + .json siblings, cascade unlinks .bin FIRST).
+  POST/GET-list/GET-id/DELETE `/api/attachments` with owner-
+  auth (acting-identity header) or operator-bearer paths.
+  GET-id emits content-addressed cache headers
+  (`private, max-age=31536000, immutable` + ETag). **§15
+  bindings**: `attachment.saved`/`erased`/`admin_read` ledger
+  events carry meta only (NEVER bytes); `/api/attachments/:id`
+  rewritten in `safePath` (covers `:`-form AND URL-encoded
+  `%3A` form); operator GET emits an audit event so a leaked
+  token leaves a trail; quota check wrapped in `BEGIN IMMEDIATE`
+  on SQLite so parallel uploads can't blow past the actor cap;
+  EXIF retention flagged but NOT stripped in v1. KYC L1
+  schema extended with optional `selfieAttachmentId` +
+  `idProofAttachmentId` (ownership-verified at submit time —
+  citizen cannot reference another citizen's blob). FE: NEW
+  `useAttachmentUpload` mutation + `<PhotoCapture/>` (file-
+  input primary path with `accept="image/*"
+  capture=environment|user`, preview + confirm + retake, real
+  thumbnail render on resubmit). KYC L1 wizard grew 3→**5
+  steps** (identity → selfie → idProof → address → review).
+  Operator console: per-row "View selfie" / "View ID proof"
+  buttons (fetch + blob URL + open in new tab, URL revoked
+  after 30s); EXIF warning banner; graceful framing on
+  citizen-erased attachments. Adversarial-review workflow
+  surfaced 26 findings across 4 lenses (PII / DPDP / auth /
+  UX); 11 high+med fixed in-phase, 15 low deferred or
+  accepted with scope rationale in ADR. Phase 12.2.4 per-role
+  extras + Phase 12.x dispute evidence reuse this substrate
+  without modification. Tests: 1082 → **1110 Node** (+28) +
+  121 → **124 vitest** (+3). tsc clean. Bundle 612 → 618 KB /
+  174 → 175 KB gzipped (+6 KB).
 - **Phase 12.2.2 — SHIPPED 2026-06-01 (ADR 0142).** KYC Level 1
   citizen-driven wizard + India Post PIN-code adapter (second
   composition of the external-adapter substrate) + operator

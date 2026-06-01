@@ -114,7 +114,18 @@ const PII_PATH_TEMPLATES = [
   // pointer (one PIN ≈ thousands of citizens) but join-keyed
   // with a near-simultaneous KYC L1 submission, it would
   // recover the citizen's residential PIN.
-  { pattern: /^\/api\/geocode\/pincode\/[^/]+$/, rewrite: '/api/geocode/pincode/:pin' }
+  { pattern: /^\/api\/geocode\/pincode\/[^/]+$/, rewrite: '/api/geocode/pincode/:pin' },
+  // Phase 12.2.3 — attachmentId on the path is the sha256
+  // prefix of the blob's bytes. An attacker with access to
+  // log aggregation can fingerprint known-image sets (a
+  // leaked PAN scan, a celebrity selfie) by re-computing
+  // the hash and grepping. Redact the trailing segment so
+  // structured access logs only carry the route shape.
+  // The regex is intentionally permissive: url.pathname leaves
+  // colons URL-encoded as %3A, so we match anything non-empty
+  // after /api/attachments/. The list/collection endpoint at
+  // /api/attachments (no trailing segment) is not matched.
+  { pattern: /^\/api\/attachments\/[^/]+$/, rewrite: '/api/attachments/:id' }
 ];
 
 // Strip query strings + percent-decode safely so log paths are
