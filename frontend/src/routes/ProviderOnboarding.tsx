@@ -10,6 +10,9 @@ import {
 } from '@/lib/hooks';
 import { EARN_ROLES } from '@/lib/earn-roles';
 import { ServiceAreaPicker } from '@/components/geo';
+import { DynamicForm } from '@/components/forms';
+import { getProviderRoleForm } from '@/lib/provider-role-forms';
+import { validateAnswers, type RoleAnswers } from '@/lib/dynamic-form';
 
 // Phase 12.0 — generic provider-onboarding flow. Per-role wizard
 // ships in Phase 12.2 (Aadhaar e-KYC + role-specific docs +
@@ -58,6 +61,9 @@ export function ProviderOnboardingPage() {
   const [hourlyRupees, setHourlyRupees] = useState('');
   const [perServiceRupees, setPerServiceRupees] = useState('');
   const [description, setDescription] = useState('');
+  // Phase 12.1b.3 — per-role light form answers (optional).
+  const [roleAnswers, setRoleAnswers] = useState<RoleAnswers>({});
+  const roleForm = role ? getProviderRoleForm(role) : null;
 
   useEffect(() => {
     if (identity && !displayName) setDisplayName(identity.displayName ?? '');
@@ -109,6 +115,17 @@ export function ProviderOnboardingPage() {
       show('Set your service area — citizens nearby cannot find you without a pin.', 'error');
       return;
     }
+    // Phase 12.1b.3 — validate role answers locally before POST.
+    let roleAnswerValues: Record<string, unknown> | null = null;
+    if (roleForm) {
+      const verdict = validateAnswers(roleForm, roleAnswers);
+      if (!verdict.ok) {
+        const firstField = Object.keys(verdict.errors)[0];
+        show(`Fix the highlighted ${firstField} field below.`, 'error');
+        return;
+      }
+      roleAnswerValues = verdict.normalized;
+    }
     create.mutate(
       {
         rootIdentityId: identity!.id,
@@ -117,7 +134,8 @@ export function ProviderOnboardingPage() {
         ratePaisePerHour: hourly,
         ratePaisePerService: perService,
         serviceArea,
-        description: description.trim() || null
+        description: description.trim() || null,
+        roleAnswerValues
       },
       {
         onSuccess: ({ providerIdentity }) => {
@@ -199,6 +217,23 @@ export function ProviderOnboardingPage() {
       </Card>
 
       <ServiceAreaPicker value={serviceArea} onChange={setServiceArea} />
+
+      {roleForm && (
+        <Card title="More about this role">
+          <p className="text-body text-text-muted">
+            Quick extras citizens see on your card. Skip optional fields if they don&rsquo;t apply.
+          </p>
+          <div className="mt-3">
+            <DynamicForm
+              schema={roleForm}
+              values={roleAnswers}
+              onChange={setRoleAnswers}
+              identityId={identity?.id ?? null}
+              roleLabel={PROVIDER_ROLE_LABELS[role!]}
+            />
+          </div>
+        </Card>
+      )}
 
       <Card tone="governance">
         <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">

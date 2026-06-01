@@ -277,6 +277,11 @@ import {
   PROVIDER_IDENTITY_STATUSES
 } from '../phase1/provider-identity.mjs';
 import {
+  validateRoleAnswers,
+  getProviderRoleForm,
+  PROVIDER_ROLE_FORMS
+} from '../phase1/provider-role-forms.mjs';
+import {
   haversineMeters,
   distanceBand,
   rankProviders,
@@ -1593,6 +1598,20 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             });
             return;
           }
+          // Phase 12.1b.3 — optional role-answer values; validated
+          // against the canonical role schema before creating the
+          // provider record.
+          let providerRoleAnswers = null;
+          if (Object.prototype.hasOwnProperty.call(body, 'roleAnswerValues')) {
+            const verdict = validateRoleAnswers(body.roleKind, body.roleAnswerValues);
+            if (!verdict.ok) {
+              jsonResponse(response, 400, {
+                error: { code: 'invalid_role_answers', errors: verdict.errors }
+              });
+              return;
+            }
+            providerRoleAnswers = verdict.envelope;
+          }
           let provider;
           try {
             provider = createProviderIdentity({
@@ -1602,7 +1621,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
               serviceArea: body.serviceArea,
               ratePaisePerHour: body.ratePaisePerHour,
               ratePaisePerService: body.ratePaisePerService,
-              description: body.description
+              description: body.description,
+              roleAnswers: providerRoleAnswers
             });
           } catch (err) {
             jsonResponse(response, 400, {
@@ -1648,6 +1668,41 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
+        // Phase 12.1b.3 — when the FE submits raw `roleAnswerValues`,
+        // re-validate against the canonical role schema before
+        // accepting. The FE may also submit a pre-built envelope
+        // via `roleAnswers` (used by tests / admin tooling); the
+        // re-validation path is mandatory when raw values arrive.
+        let roleAnswers;
+        if (Object.prototype.hasOwnProperty.call(body, 'roleAnswerValues')) {
+          const verdict = validateRoleAnswers(existing.roleKind, body.roleAnswerValues);
+          if (!verdict.ok) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_role_answers', errors: verdict.errors }
+            });
+            return;
+          }
+          roleAnswers = verdict.envelope;
+        } else if (Object.prototype.hasOwnProperty.call(body, 'roleAnswers')) {
+          // Pre-built envelope path — verify the envelope's values
+          // against the schema so a misbehaving caller cannot
+          // smuggle ad-hoc keys.
+          const candidate = body.roleAnswers;
+          if (candidate != null && typeof candidate !== 'object') {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_role_answers', errors: { __schema: 'not_object' } }
+            });
+            return;
+          }
+          const verdict = validateRoleAnswers(existing.roleKind, candidate?.values ?? null);
+          if (!verdict.ok) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_role_answers', errors: verdict.errors }
+            });
+            return;
+          }
+          roleAnswers = candidate == null ? null : verdict.envelope;
+        }
         let next;
         try {
           next = updateProviderProfile(existing, {
@@ -1655,7 +1710,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             serviceArea: body.serviceArea,
             ratePaisePerHour: body.ratePaisePerHour,
             ratePaisePerService: body.ratePaisePerService,
-            description: body.description
+            description: body.description,
+            roleAnswers
           });
         } catch (err) {
           jsonResponse(response, 400, {
@@ -1664,6 +1720,25 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         await store.saveProviderIdentity(next);
+        // Phase 12.1b.3 — emit an audit-trail event so a future
+        // operator console can answer "what did this provider
+        // change and when?" The payload carries the field names
+        // (not values) that were updated, preserving pointer-not-
+        // payload.
+        const updatedFields = [];
+        if (body.displayName !== undefined) updatedFields.push('displayName');
+        if (body.serviceArea !== undefined) updatedFields.push('serviceArea');
+        if (body.ratePaisePerHour !== undefined) updatedFields.push('ratePaisePerHour');
+        if (body.ratePaisePerService !== undefined) updatedFields.push('ratePaisePerService');
+        if (body.description !== undefined) updatedFields.push('description');
+        if (roleAnswers !== undefined) updatedFields.push('roleAnswers');
+        await store.appendLedger({
+          type: 'provider_identity.updated',
+          providerIdentityId: next.providerIdentityId,
+          rootIdentityId: next.rootIdentityId,
+          updatedFields,
+          at: next.updatedAt
+        });
         jsonResponse(response, 200, { providerIdentity: next });
         return;
       }
@@ -1745,6 +1820,28 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           reason: body.reason ?? null
         });
         jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // Phase 12.1b.3 — public read of the per-role light form
+      // schemas. Citizens / FE renderers fetch the schema for the
+      // role they're onboarding so the substrate stays the single
+      // source of truth.
+      if (request.method === 'GET' && url.pathname === '/api/provider-role-forms') {
+        jsonResponse(response, 200, { forms: PROVIDER_ROLE_FORMS });
+        return;
+      }
+      const roleFormMatch = /^\/api\/provider-role-forms\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && roleFormMatch) {
+        const roleKind = decodeURIComponent(roleFormMatch[1]);
+        const schema = getProviderRoleForm(roleKind);
+        if (!schema) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_role_kind', message: 'no light-form schema registered for that role.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { form: schema });
         return;
       }
 

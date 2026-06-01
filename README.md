@@ -152,6 +152,36 @@ Implemented pieces:
 
 ---
 
+## 📝 2026-06-01 — Phase 12.1b.3 shipped: SLM-C light dynamic forms
+
+Third of four 12.1b AI-orchestration sub-phases. Light = no docs,
+no OCR, no KYC. Just the small structured extras that help a
+citizen find the right provider beyond {name, rate, area}.
+Provider Onboarding now renders a "More about this role" Card
+with per-role light fields (vehicle type + plate region + AC for
+cab-driver; can-cook + languages + about-you for household-help;
+etc.) and an SLM "Suggest with my SLM" chip on freeform fields
+that lets the provider tap to accept — never auto-fills.
+
+- **ADR 0139** — BE + FE.
+- Generic substrate at `src/phase0/dynamic-form.mjs`; per-role
+  schemas at `src/phase1/provider-role-forms.mjs`. Reusable for
+  future BookingComposer + ConsentSheet.
+- New optional `roleAnswers` field on providerIdentity, NOT
+  echoed by publicProviderRecord (citizen privacy tested).
+- New `provider_identity.updated` ledger event carrying field
+  names only (pointer-not-payload).
+- SLM suggest UX: tap-to-accept only; hidden when no SLM
+  installed; tiered rate limit. Layered on the existing wllama
+  runtime so weights aren't loaded twice.
+- Tests: **1035/1035 Node** + **105/105 vitest**.
+- Bundle: 577 → 592 KB / 168 KB gzipped (+15 KB).
+
+**Next: Phase 12.1b.4** SLM-D negotiation agent, OR Phase 12.2
+wave-1 KYC wizard (Aadhaar OCR + DigiLocker + operator review).
+
+---
+
 ## 📴 2026-06-01 — Phase 12.1b.2 shipped: SLM-B offline-first decisioning + queued sync
 
 Second of four 12.1b AI-orchestration sub-phases. Bharat OS now

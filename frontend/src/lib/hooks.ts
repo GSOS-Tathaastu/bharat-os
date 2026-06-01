@@ -1975,6 +1975,8 @@ export interface CreateProviderIdentityInput {
   ratePaisePerService?: number;
   serviceArea?: ServiceArea | null;
   description?: string | null;
+  // Phase 12.1b.3 — optional per-role light form answers.
+  roleAnswerValues?: Record<string, unknown> | null;
 }
 
 export function useCreateProviderIdentity() {
@@ -1991,7 +1993,8 @@ export function useCreateProviderIdentity() {
             ratePaisePerHour: input.ratePaisePerHour,
             ratePaisePerService: input.ratePaisePerService,
             serviceArea: input.serviceArea,
-            description: input.description
+            description: input.description,
+            roleAnswerValues: input.roleAnswerValues ?? null
           })
         }
       ),

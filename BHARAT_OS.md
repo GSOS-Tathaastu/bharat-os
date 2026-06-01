@@ -2139,7 +2139,7 @@ on top of the four earlier:
 | **12.1b.1** ✅ | **SHIPPED 2026-06-01 (ADR 0137).** SLM-A vernacular intent parser. On-device wllama parses intent → structured annotation; deterministic substrate remains source of truth; verdict ledger events. Citizens with no SLM installed see no change. | ✅ shipped |
 | **12.1b.2** ✅ | **SHIPPED 2026-06-01 (ADR 0138).** SLM-B offline-first decisioning + queued sync. Ledger-backed idempotency (3 event types, no new SQL table, scope-generic), per-identity IndexedDB queue, Web Locks single-flight drainer, OfflineQueuePill + QueuedIntentsPanel. Scope: orchestrations only — bookings/consents/flags deferred to 12.1b.3. | ✅ shipped |
 | **12.1b.2.x** | Bookings/consents/flags offline queue + queue-feedback UX batch + 17 more Indic languages. | ~1 wk |
-| **12.1b.3** | SLM-C on-device dynamic forms (per-role onboarding wizard). | ~1 wk |
+| **12.1b.3** ✅ | **SHIPPED 2026-06-01 (ADR 0139).** SLM-C light dynamic forms. Schema-driven DynamicForm renderer + per-role light schemas for 4 wave-1 roles + SLM tap-to-accept suggest chip. New `roleAnswers` field on providerIdentity (NOT echoed to public). New `provider_identity.updated` ledger event. | ✅ shipped |
 | **12.1b.4** | SLM-D on-device negotiation agent for marketplace. | ~1 wk |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
 | **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
@@ -2201,6 +2201,54 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1b.3 — SHIPPED 2026-06-01 (ADR 0139).** SLM-C light
+  dynamic forms. Generic schema-driven `<DynamicForm/>` renderer
+  (controlled component, schema-driven, inline per-field error
+  codes, dependsOn gating) + per-role light field schemas for the
+  4 wave-1 roles (cab-driver / personal-driver / household-help /
+  labourers) + SLM "suggest" chip on freeform text fields. NEW
+  optional `roleAnswers: {schemaVersion, values} | null` field on
+  providerIdentity — NOT echoed by publicProviderRecord (citizen
+  privacy tested). NEW `provider_identity.updated` ledger event
+  emits on every profile mutation with `updatedFields` (field
+  NAMES only — pointer-not-payload). NEW GET
+  /api/provider-role-forms (+ /:roleKind) serves the canonical
+  schemas. BE re-validates `roleAnswerValues` via
+  `validateRoleAnswers` before persistence; returns per-key
+  canonical error codes on failure. SLM suggest: tap-to-accept
+  ONLY (never auto-fills), hidden when no SLM installed, tiered
+  rate limit (6 per field per 60s + 30 global per 5min), inflight
+  singleton. Substrates extracted as CORE shared:
+  `src/phase0/dynamic-form.mjs` (FIELD_KINDS + VALIDATORS
+  registry + validateAnswers with dependsOn gating + 4KB payload
+  cap + 24-field schema cap) reusable for future BookingComposer
+  + ConsentSheet; `src/phase1/provider-role-forms.mjs` for the
+  per-role schemas (forward-compat: wave-2 roles pass through
+  with null envelope). FE mirrors:
+  `frontend/src/lib/dynamic-form.ts` + `provider-role-forms.ts`
+  with vitest parity snapshot guarding the field-kind +
+  validator-name + role-key sets. `frontend/src/lib/use-slm-field-suggest.ts`
+  layered on Phase 9.0c wllama runtime (no second model load).
+  `frontend/src/components/forms/{DynamicForm, SlmSuggestChip,
+  index}` barrel. ProviderOnboarding gained "More about this
+  role" Card with the DynamicForm when a schema exists.
+  Process: 4-Explore-agent understanding workflow → 3-lens × 2-
+  judge design workflow (both judges picked C with overrides:
+  wave-1 only, no ledger event for SLM accept, new roleAnswers
+  field over JSON-in-description hack, BE re-validates on save,
+  add provider_identity.updated ledger event — judge 2
+  correctly flagged it didn't exist before). Tests: 1035/1035
+  Node (+27 covering pure validators + per-role schemas + HTTP
+  integration + binding grep + ledger event emission + citizen
+  privacy) + 105/105 vitest (+13 parity + per-role sanity).
+  Bundle main 577 → 592 KB / 168 KB gzipped (+15 KB).
+  DEFERRED: file uploads, KYC level elevation, Aadhaar/
+  DigiLocker integration, operator review console FE, wave-2
+  schemas (substrate ready), BookingComposer/ConsentSheet
+  refactor onto DynamicForm, adversarial review (substrate is
+  binding-grep'd + HTTP-tested + parity-guarded). Next: Phase
+  12.1b.4 SLM-D negotiation agent OR Phase 12.2 wave-1 KYC
+  wizard.
 - **Phase 12.1b.2 — SHIPPED 2026-06-01 (ADR 0138).** SLM-B
   offline-first decisioning + queued sync. Citizens in poor-
   connectivity India can now type an intent while offline;

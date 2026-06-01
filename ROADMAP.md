@@ -398,6 +398,61 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.1b.3 — SLM-C light dynamic forms ✅ SHIPPED 2026-06-01
+- **ADR 0139** — third of four 12.1b sub-phases.
+- **Generic substrate** at `src/phase0/dynamic-form.mjs`:
+  FIELD_KINDS (text/longtext/select/multiselect/boolean/integer);
+  VALIDATORS registry (non-empty, max-length, int-range, one-of,
+  plate-region, boolean-required-true); validateAnswers with
+  dependsOn gating; 4 KB payload cap + 24-field schema cap.
+  Forward-compat: empty schema validates pass-through.
+- **Per-role schemas** at `src/phase1/provider-role-forms.mjs`
+  for the 4 wave-1 roles. Wave-2 (kirana / skilled-trades)
+  passes through with null envelope until their routes light up.
+- **NEW roleAnswers field** on providerIdentity (typed
+  `{schemaVersion, values}` envelope). NOT echoed by
+  publicProviderRecord — citizen privacy tested via HTTP
+  integration.
+- **NEW provider_identity.updated ledger event** — pointer-not-
+  payload (carries `updatedFields` names, not values). Judge
+  panel correctly flagged this didn't exist before; now it
+  does.
+- **API**: POST routes validate `roleAnswerValues` via
+  `validateRoleAnswers` before persistence (BE re-validation;
+  FE-only validation is a smuggling vector). NEW GET
+  /api/provider-role-forms (+ /:roleKind) serves the canonical
+  schemas to FE consumers.
+- **SLM suggest UX**: tap-to-accept ONLY (never auto-fills),
+  hidden when no SLM installed, tiered rate limit (6/field/60s
+  + 30 global/5min), inflight singleton. Layered on Phase 9.0c
+  wllama runtime (no second model load).
+- **FE substrate**: `frontend/src/lib/dynamic-form.ts` +
+  `provider-role-forms.ts` hand-mirrored with vitest parity
+  snapshot. `frontend/src/components/forms/{DynamicForm,
+  SlmSuggestChip, index}` barrel. ProviderOnboarding gained
+  "More about this role" Card with the renderer when a schema
+  exists for the role.
+- Process: 4-Explore-agent understanding workflow →
+  3-lens × 2-judge design workflow. Both judges picked C with
+  overrides:
+  - Wave-1 only (no dead schemas).
+  - NO ledger event for SLM accept (analogous to autocomplete).
+  - NEW roleAnswers field over JSON-in-description hack.
+  - BE re-validates on save.
+  - ADD provider_identity.updated ledger event.
+  - Renderer in `components/forms/` not `dynamic-form/`.
+- Tests: **1035/1035 Node** (+27) + **105/105 vitest** (+13).
+  tsc clean.
+- Bundle: main 577 → 592 KB / 168 KB gzipped (+15 KB). wllama
+  lazy chunk unchanged.
+- **Deferred**: file uploads, KYC level elevation, Aadhaar/
+  DigiLocker integration, operator review console FE, wave-2
+  schemas (substrate ready), BookingComposer/ConsentSheet
+  refactor onto DynamicForm, adversarial review (substrate is
+  binding-grep'd + HTTP-tested + parity-guarded).
+- **Next**: Phase 12.1b.4 SLM-D negotiation agent, OR Phase
+  12.2 wave-1 KYC wizard.
+
 #### Phase 12.1b.2 — SLM-B offline-first decisioning + queued sync ✅ SHIPPED 2026-06-01
 - **ADR 0138** — second of four 12.1b sub-phases. Bharat OS
   now works in poor-connectivity India.

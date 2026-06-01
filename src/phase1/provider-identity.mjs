@@ -298,6 +298,12 @@ export function createProviderIdentity({
   ratePaisePerHour = 0,
   ratePaisePerService = 0,
   description = null,
+  // Phase 12.1b.3 — optional per-role light form envelope
+  // (`{schemaVersion, values}`). Caller must validate via
+  // src/phase1/provider-role-forms.mjs::validateRoleAnswers before
+  // passing in; this function only stores the verified envelope.
+  // Null when the role has no schema or the citizen skipped it.
+  roleAnswers = null,
   createdAt = nowIso()
 } = {}) {
   const root = assertNonEmptyString(rootIdentityId, 'rootIdentityId', 160);
@@ -322,6 +328,7 @@ export function createProviderIdentity({
     ratePaisePerHour: hourly,
     ratePaisePerService: perService,
     description: desc,
+    roleAnswers: roleAnswers && typeof roleAnswers === 'object' ? roleAnswers : null,
     kycLevel: 'none',
     kycAttestation: null,
     status: 'draft',
@@ -459,6 +466,12 @@ export function updateProviderProfile(provider, {
   ratePaisePerHour,
   ratePaisePerService,
   description,
+  // Phase 12.1b.3 — optional roleAnswers envelope. When provided,
+  // it MUST already be validated via validateRoleAnswers (the API
+  // handler does this before calling here). When omitted, the
+  // existing answers are preserved; when explicitly null, the
+  // record is cleared.
+  roleAnswers,
   at = nowIso()
 } = {}) {
   const updates = { updatedAt: at };
@@ -486,6 +499,12 @@ export function updateProviderProfile(provider, {
   }
   if (description !== undefined) {
     updates.description = description == null ? null : String(description).slice(0, 600);
+  }
+  if (roleAnswers !== undefined) {
+    // Caller is responsible for shape validation. Storing as-is
+    // (or null to clear). publicProviderRecord does NOT echo this
+    // field — answers are owner-readable, not citizen-readable.
+    updates.roleAnswers = roleAnswers == null ? null : roleAnswers;
   }
   return { ...provider, ...updates };
 }
