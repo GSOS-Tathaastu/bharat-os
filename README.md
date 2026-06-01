@@ -152,6 +152,67 @@ Implemented pieces:
 
 ---
 
+## 🛡 2026-06-01 — Phase 13.1 shipped: SLM-F on-device PII redactor (regex-primary + SLM-secondary)
+
+Second SLM USP feature. Citizens type intents + notes that
+often carry Indian PII (PAN, Aadhaar, mobile, GSTIN,
+account, DL, RC, ABHA, UPI, email, PIN). Before that text
+leaves the device, the chip says **"🛡 Check for PII before
+sending"** — tap, see structured detected spans, tick what
+to mask, tap Apply, see the textarea rewrite itself with
+PAN ending kept + first 5 letters Xed. The whole flow runs
+on-device. DevTools Network panel stays empty.
+
+- **ADR 0151** — hybrid architecture: regex-primary
+  (deterministic, synchronous, always available even with
+  no SLM installed — honours the Phase 9.0b lazy-load
+  contract) + SLM-secondary (context augmentation via
+  Phase 13.0.0a shared runtime).
+- **11 PII regexes** with per-kind deterministic mask
+  shapers (`ABCDE1234F` → `XXXXX1234F`, `1234 5678 9012`
+  → `XXXX XXXX 9012`, `+91 9876543210` → `+91 9XXXXXXX10`).
+  Account regex has 24-char context-window guard requiring
+  `a/c|account|bank` preceding the digits to suppress
+  order-ID false positives.
+- **SLM second pass** prompts the on-device model for
+  context-only spans with strict KEY:value-per-span format
+  + anti-hallucination guard (drops spans where
+  `text.slice(start,end) !== raw`).
+- **Wired into both boundary surfaces** — chip on
+  CitizenIntent (below SLM-A "Check my understanding") AND
+  CitizenNotes create-sheet (above Save). Apply rewrites
+  textarea BEFORE handleSend / handleCreate runs.
+- **§15 Send/Save foot-gun gate** — `window.confirm` if
+  citizen scanned, found PII, dismissed the sheet, and is
+  about to dispatch raw PII.
+- **Pre-step refactor**: extracted `slm-parse-helpers.ts`
+  (clipLine, clampConfidence, djb2Hash) — doc-summariser
+  re-exports the first two; ADR 0149 vitest pins green.
+- **New shared component** `CooldownCountdown.tsx` —
+  live-decrementing ticker reusable for SLM-D / SLM-E
+  migration when those phases drop the frozen-snapshot
+  cooldown labels.
+- **Adversarial review** (3 lenses + triage): **6 MUST_FIX
+  + 12 SHOULD_FIX + 21 defer**; all 6 must + 6 key should
+  fixed in-phase. M1 mergeSpans regex-wins-on-overlap
+  correctness (two-pass regex-first); M2 maskMobile
+  digit-vs-char-index bug; M3 PiiReviewSheet prevResult
+  re-seed (was keyset-equality); M4 nested-Sheet Escape
+  bug on /notes; M5 cooldownUntil wall-clock + ticker
+  component; M6 Send-side confirm gate. S1+S2+S3 regex
+  coverage gaps. S8 Map cleanup. S9 runtime snapshot.
+  S12 piiRedactor.reset on send success.
+- **Pure FE, zero BE changes**. Mirrors Phase 10.6 + 13.0
+  precedents. FE-BE parity binding answered explicitly in
+  ADR 0151: transparent handleSend integration +
+  `piiRedactionAnnotation` envelope + offline-queue replay
+  redaction all land in Phase 13.2.
+- **API_INTEGRATIONS.md impact**: zero new external API.
+- **Tests**: vitest 201 → **309** (+108 SLM-F cases).
+  Node 1217 unchanged. tsc clean.
+
+---
+
 ## ⚙️ 2026-06-01 — Phase 13.0.0a shipped: shared wllama runtime singleton (prereq for SLM-F/G/H)
 
 The Phase 13.0 adversarial review caught a latent lie — the
@@ -395,11 +456,11 @@ smartphones is captured as a binding.
   integration + 7 adversarial-fix cases). Vitest 138
   unchanged. tsc clean. Build green. Bundle unchanged.
 
-**Next: Phase 13.0.1** (PDF.js upload — needs npm-dep
-approval) OR **Phase 13.0.2** (persistence as MemoryRecord +
-`doc.summarised` pointer-not-payload ledger event) OR
-**Phase 13.1 SLM-F** (PII redactor) OR **Phase 14 Sahayak**.
-Direction flexible.
+**Next: Phase 13.2** (transparent handleSend integration +
+`piiRedactionAnnotation` envelope + offline-queue replay
+redaction) OR **Phase 13.3 SLM-G** (on-device personalization)
+OR **Phase 13.0.1** (PDF.js upload — needs npm-dep approval)
+OR **Phase 14 Sahayak**. Direction flexible.
 
 ---
 

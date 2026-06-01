@@ -1226,7 +1226,15 @@ picked "minimum onboarding load, maximum coverage"):
   picker + streaming on /labs. Deferred to 13.0.1 (PDF.js
   upload — needs npm-dep approval) and 13.0.2 (MemoryRecord
   persistence + `doc.summarised` pointer-not-payload ledger).
-- [ ] **F.** On-device PII redactor on outgoing actions.
+- [x] **F.** On-device PII redactor on outgoing actions.
+  **Phase 13.1 shipped 2026-06-01 (ADR 0151)** —
+  regex-primary (11 Indian PII kinds: PAN/Aadhaar/mobile/
+  GSTIN/account/DL/RC/ABHA/UPI/email/PIN) + SLM-secondary
+  context augmentation. Chip on CitizenIntent + CitizenNotes;
+  Apply rewrites textarea before handleSend/handleCreate
+  fires. Deferred to 13.2: transparent handleSend integration
+  + `piiRedactionAnnotation` envelope + offline-queue replay
+  redaction.
 - [ ] **G.** On-device personalization (preferences never leave
   device).
 - [ ] **H.** On-device skill agents for Indian tasks

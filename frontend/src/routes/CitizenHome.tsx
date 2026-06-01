@@ -19,6 +19,9 @@ import {
 } from '@/lib/hooks';
 import { isVoiceIntentSupported, VoiceIntentSession } from '@/lib/voice-intent';
 import { useSlmIntentParser } from '@/lib/use-slm-intent-parser';
+import { useSlmPiiRedactor } from '@/lib/use-slm-pii-redactor';
+import { PiiReviewSheet } from '@/components/PiiReviewSheet';
+import { CooldownCountdown } from '@/components/CooldownCountdown';
 import { actionTypeFriendlyLabel, type ParsedIntent } from '@/lib/intent-parser';
 import { useSmartSendIntent } from '@/lib/use-send-intent-smart';
 import { OfflineQueuePill } from '@/components/OfflineQueuePill';
@@ -190,6 +193,32 @@ function CitizenIntent() {
   const slmParser = useSlmIntentParser({ identityId: identity?.id });
   const [parsedIntent, setParsedIntent] = useState<ParsedIntent | null>(null);
 
+  // Phase 13.1 — on-device PII redactor. Regex-primary +
+  // SLM-secondary. The chip is available even without SLM
+  // installed (regex floor); the sheet opens with the merged
+  // span list and lets the citizen pick what to mask BEFORE
+  // handleSend runs.
+  const piiRedactor = useSlmPiiRedactor({ identityId: identity?.id });
+  const [piiSheetOpen, setPiiSheetOpen] = useState(false);
+  async function handleCheckPii() {
+    const result = await piiRedactor.scan(text);
+    if (result) setPiiSheetOpen(true);
+  }
+  function handlePiiApply(maskedText: string) {
+    setText(maskedText);
+    piiRedactor.markApplied();
+    // The annotation gate already invalidates on any text change,
+    // so a setText after Apply clears any stale SLM-A annotation
+    // via the existing onChange handler in the textarea (line ~348
+    // — `if (parsedFromText != null && next !== parsedFromText)`).
+    // We replicate that here because setText() doesn't fire onChange.
+    if (parsedFromText != null && maskedText !== parsedFromText) {
+      setParsedIntent(null);
+      setParsedFromText(null);
+      slmParser.reset();
+    }
+  }
+
   // Phase 12.1b.1 — keep a reference to the EXACT text the user
   // parsed so the annotation gate matches it byte-for-byte. Any
   // textarea edit clears parsedIntent before handleSend can attach
@@ -211,6 +240,24 @@ function CitizenIntent() {
     if (!identity || !intentText.trim()) {
       show('Type or pick what you want to do.', 'error');
       return;
+    }
+    // Phase 13.1 adversarial fix M6 — Send foot-gun gate. The chip
+    // promised "Check for PII before sending"; if the citizen
+    // scanned, saw N spans, dismissed the sheet, and now hits Send,
+    // surface a confirm so the trust theatre is honest.
+    if (
+      piiRedactor.hasPendingPii &&
+      piiRedactor.lastResult &&
+      piiRedactor.lastResult.scannedText === intentText
+    ) {
+      const n = piiRedactor.lastResult.mergedSpans.length;
+      const ok = window.confirm(
+        `You found ${n} potential PII item${n === 1 ? '' : 's'} but haven't masked any of them. Send anyway?`
+      );
+      if (!ok) {
+        setPiiSheetOpen(true);
+        return;
+      }
     }
     // MF-1 (adversarial fix) — don't attach a stale annotation when:
     //   • voice interim is still pending (user sees text + interim
@@ -248,6 +295,10 @@ function CitizenIntent() {
             setParsedFromText(null);
             slmParser.reset();
           }
+          // Phase 13.1 adversarial fix S12 — clear stale PII scan
+          // state so the chip doesn't keep showing "Found N — review"
+          // against text that has already been dispatched.
+          piiRedactor.reset();
         } else if (result.kind === 'queued') {
           // SF-3 (adversarial fix) — present-progressive copy that
           // mirrors the QueuedIntentsPanel "queued — not yet on
@@ -262,6 +313,7 @@ function CitizenIntent() {
           setParsedIntent(null);
           setParsedFromText(null);
           slmParser.reset();
+          piiRedactor.reset();
         } else if (result.kind === 'queue_full') {
           show('Queue is full. Open the queue tab to clear old intents.', 'error');
         } else if (result.kind === 'crypto_unavailable') {
@@ -452,6 +504,63 @@ function CitizenIntent() {
             or send without it &mdash; your intent will still route.
           </p>
         )}
+        {/* Phase 13.1 — Check for PII chip. Always visible when the
+            citizen has typed something — regex floor works without
+            SLM, SLM augments when installed. */}
+        {text.trim().length > 2 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCheckPii}
+              disabled={
+                piiRedactor.status.kind === 'loading' ||
+                piiRedactor.status.kind === 'scanning'
+              }
+              className="rounded-sm border border-trust-100 bg-trust-50 px-3 py-1 text-caption font-semibold text-trust-700 transition-colors hover:bg-trust-100 disabled:opacity-50"
+            >
+              {piiRedactor.status.kind === 'loading'
+                ? `Loading on-device model ${piiRedactor.status.progress}%…`
+                : piiRedactor.status.kind === 'scanning'
+                  ? 'Scanning on-device…'
+                  : '🛡 Check for PII before sending'}
+            </button>
+            {piiRedactor.lastResult && piiRedactor.lastResult.scannedText === text && (
+              <Badge
+                variant={
+                  piiRedactor.lastResult.mergedSpans.length === 0
+                    ? 'trust'
+                    : 'pending'
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => setPiiSheetOpen(true)}
+                  className="cursor-pointer"
+                >
+                  {piiRedactor.lastResult.mergedSpans.length === 0
+                    ? 'Looks clean'
+                    : `Found ${piiRedactor.lastResult.mergedSpans.length} — review`}
+                </button>
+              </Badge>
+            )}
+            {piiRedactor.status.kind === 'cooling-down' && (
+              <CooldownCountdown cooldownUntil={piiRedactor.status.cooldownUntil} />
+            )}
+            {piiRedactor.status.kind === 'error' && (
+              <span className="text-caption text-error">
+                {piiRedactor.status.message}
+              </span>
+            )}
+          </div>
+        )}
+        <PiiReviewSheet
+          open={piiSheetOpen}
+          onClose={() => setPiiSheetOpen(false)}
+          currentText={text}
+          result={piiRedactor.lastResult}
+          onApply={handlePiiApply}
+        />
+
         <div className="mt-4 flex gap-2">
           <Action onClick={() => handleSend()} disabled={sendBusy}>
             {sendIntent.isPending ? 'Sending…' : autoRetrying ? 'Re-sending after consent…' : 'Send'}

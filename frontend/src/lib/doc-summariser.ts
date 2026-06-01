@@ -27,6 +27,12 @@
 //     prefixed POL-DEMO-. Vitest sanity-greps would reject real-
 //     shaped PAN/Aadhaar in fixtures.
 
+// Phase 13.1 — shared parser helpers extracted to slm-parse-helpers.
+// Re-exported here so existing doc-summariser consumers (including
+// the Phase 13.0 vitest pins) keep working unchanged.
+import { clipLine, clampConfidence } from './slm-parse-helpers';
+export { clipLine, clampConfidence };
+
 export const DOC_SUMMARISER_PROTOCOL_VERSION = 'bos.phase13.doc-summariser.v1';
 
 export type DocKind =
@@ -178,22 +184,6 @@ const LANGUAGE_RE = /^\s*LANGUAGE\s*[:=]\s*(.+)$/im;
 const CONFIDENCE_RE = /^\s*CONFIDENCE\s*[:=]\s*(-?[\d.]+)/im;
 const RISK_FLAG_RE = /^\s*RISK_FLAG\s*[:=]\s*([a-z]+)/im;
 const DOC_KIND_RE = /^\s*DOC_KIND\s*[:=]\s*([a-z_]+)/im;
-
-function clampConfidence(s: string | undefined): number {
-  if (!s) return 0.5;
-  const n = Number(s);
-  if (!Number.isFinite(n)) return 0.5;
-  if (n < 0) return 0;
-  if (n > 1) return Math.min(1, n / 100);
-  return n;
-}
-
-function clipLine(s: string | undefined, max: number): string | null {
-  if (!s) return null;
-  const trimmed = s.replace(/^["'`\s]+/, '').replace(/["'`\s]+$/, '').split('\n')[0].trim();
-  if (!trimmed) return null;
-  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
-}
 
 function coerceLanguage(raw: string | undefined): DocLanguage {
   if (!raw) return 'Other';

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
 import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { useInstalledSlms } from './hooks';
+import { djb2Hash } from './slm-parse-helpers';
 import {
   buildDocSummaryPrompt,
   parseDocSummaryCompletion,
@@ -59,18 +60,6 @@ export interface SlmDocSummariserResult {
 
 interface UseOptions {
   identityId: string | null | undefined;
-}
-
-// Stable, small, deterministic hash for the per-doc rate-limit key.
-// djb2 — no crypto needed; collision is harmless (the cost is "one
-// genuine paste hits the same cooling window as a similar paste",
-// which is fine for the rate-limit intent).
-function djb2Hash(input: string): string {
-  let h = 5381;
-  for (let i = 0; i < input.length; i += 1) {
-    h = ((h << 5) + h) ^ input.charCodeAt(i);
-  }
-  return (h >>> 0).toString(16);
 }
 
 export function useSlmDocSummariser({ identityId }: UseOptions) {

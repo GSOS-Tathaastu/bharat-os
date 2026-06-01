@@ -8,6 +8,9 @@ import {
   type MemorySensitivity,
   type MemorySummary
 } from '@/lib/hooks';
+import { useSlmPiiRedactor } from '@/lib/use-slm-pii-redactor';
+import { PiiReviewSheet } from '@/components/PiiReviewSheet';
+import { CooldownCountdown } from '@/components/CooldownCountdown';
 
 // Phase 12.0.2 — /app/citizen/notes — personal memory records.
 //
@@ -42,10 +45,40 @@ export function CitizenNotes() {
   const [openNote, setOpenNote] = useState<MemorySummary | null>(null);
   const [openPlaintext, setOpenPlaintext] = useState<string | null>(null);
 
+  // Phase 13.1 — on-device PII redactor on the note body.
+  const piiRedactor = useSlmPiiRedactor({ identityId: identity?.id });
+  const [piiSheetOpen, setPiiSheetOpen] = useState(false);
+  async function handleCheckPii() {
+    const result = await piiRedactor.scan(text);
+    if (result) setPiiSheetOpen(true);
+  }
+  function handlePiiApply(maskedText: string) {
+    setText(maskedText);
+    piiRedactor.markApplied();
+  }
+
   function handleCreate() {
     if (!identity || !text.trim()) {
       show('Write something to save.', 'error');
       return;
+    }
+    // Phase 13.1 adversarial fix M6 — Save-side gate. Notes are
+    // encrypted at rest, but citizen-intended redaction shouldn't
+    // be silently bypassed. If the citizen scanned, found PII, and
+    // dismissed without applying, confirm before persisting.
+    if (
+      piiRedactor.hasPendingPii &&
+      piiRedactor.lastResult &&
+      piiRedactor.lastResult.scannedText === text
+    ) {
+      const n = piiRedactor.lastResult.mergedSpans.length;
+      const ok = window.confirm(
+        `You found ${n} potential PII item${n === 1 ? '' : 's'} but haven't masked any of them. Save the note anyway?`
+      );
+      if (!ok) {
+        setPiiSheetOpen(true);
+        return;
+      }
     }
     create.mutate(
       {
@@ -60,6 +93,7 @@ export function CitizenNotes() {
           setLabel('');
           setSensitivity('personal');
           setCreateOpen(false);
+          piiRedactor.reset();
           show('Note saved + encrypted on this profile.', 'success');
         },
         onError: (err: Error) => show(err.message, 'error')
@@ -221,6 +255,54 @@ export function CitizenNotes() {
               ones can be shared with third parties under your control.
             </p>
           </div>
+          {/* Phase 13.1 — Check for PII chip on the note body. Regex
+              floor works without SLM; SLM augments when installed. */}
+          {text.trim().length > 2 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCheckPii}
+                disabled={
+                  piiRedactor.status.kind === 'loading' ||
+                  piiRedactor.status.kind === 'scanning'
+                }
+                className="rounded-sm border border-trust-100 bg-trust-50 px-3 py-1 text-caption font-semibold text-trust-700 transition-colors hover:bg-trust-100 disabled:opacity-50"
+              >
+                {piiRedactor.status.kind === 'loading'
+                  ? `Loading on-device model ${piiRedactor.status.progress}%…`
+                  : piiRedactor.status.kind === 'scanning'
+                    ? 'Scanning on-device…'
+                    : '🛡 Check for PII before saving'}
+              </button>
+              {piiRedactor.lastResult && piiRedactor.lastResult.scannedText === text && (
+                <Badge
+                  variant={
+                    piiRedactor.lastResult.mergedSpans.length === 0
+                      ? 'trust'
+                      : 'pending'
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPiiSheetOpen(true)}
+                    className="cursor-pointer"
+                  >
+                    {piiRedactor.lastResult.mergedSpans.length === 0
+                      ? 'Looks clean'
+                      : `Found ${piiRedactor.lastResult.mergedSpans.length} — review`}
+                  </button>
+                </Badge>
+              )}
+              {piiRedactor.status.kind === 'cooling-down' && (
+                <CooldownCountdown cooldownUntil={piiRedactor.status.cooldownUntil} />
+              )}
+              {piiRedactor.status.kind === 'error' && (
+                <span className="text-caption text-error">
+                  {piiRedactor.status.message}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex gap-2">
             <Action onClick={handleCreate} disabled={create.isPending}>
               {create.isPending ? 'Encrypting + saving…' : 'Save note'}
@@ -231,6 +313,19 @@ export function CitizenNotes() {
           </div>
         </div>
       </Sheet>
+      {/* Phase 13.1 adversarial fix M4 — render PiiReviewSheet as a
+          SIBLING of the create-note Sheet (not nested children).
+          Nesting would have fired both Sheets' Escape listeners on
+          a single press (citizen loses the typed note) AND the
+          inner Sheet's unmount would re-enable body scroll while
+          the outer was still open. */}
+      <PiiReviewSheet
+        open={piiSheetOpen}
+        onClose={() => setPiiSheetOpen(false)}
+        currentText={text}
+        result={piiRedactor.lastResult}
+        onApply={handlePiiApply}
+      />
 
       {/* Read sheet */}
       <Sheet

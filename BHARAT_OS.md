@@ -2201,6 +2201,64 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.1 — SHIPPED 2026-06-01 (ADR 0151).** SLM-F
+  on-device PII redactor. Second SLM USP feature. Hybrid
+  architecture: **regex-primary (deterministic, synchronous,
+  always available even with no SLM installed) + SLM-secondary
+  (context augmentation via Phase 13.0.0a shared runtime)**.
+  NEW `frontend/src/lib/pii-detectors.ts` (~310 lines): 11
+  Indian-PII regexes (PAN / Aadhaar / mobile / GSTIN /
+  account / DL / RC / ABHA / UPI / email / PIN) + per-kind
+  deterministic mask shapers; `scanWithRegex` produces
+  non-overlapping spans validated against
+  `text.slice(start,end)===raw`; `applyMask` idempotent
+  rewrite. PROTOCOL_VERSION pinned. NEW `pii-redactor.ts`
+  (~270 lines): SLM prompt builder + completion parser with
+  anti-hallucination guard (drops SLM spans where offsets
+  don't reconstruct the substring) + 4 sample fixtures
+  (shopping / loan_intent / health_check / shop_kyc, demo-
+  persona PII only). NEW `use-slm-pii-redactor.ts` (~340
+  lines): composes `getSharedSlmRuntime`; per-text 3/60s +
+  global 8/5min rate limit; `mergeSpans` pure function
+  exports regex-wins-on-overlap merge (M1 fix uses two-pass
+  regex-first admit-SLM-without-overlap); always returns a
+  result even without SLM (regex floor); `markApplied` +
+  `hasPendingPii` drive the Send-side gate. NEW
+  `PiiReviewSheet.tsx` (~230 lines): per-span keep/mask
+  checkboxes (regex pre-checked, SLM unchecked), Mask all /
+  Keep all, preview, MF-3 staleness check. NEW
+  `CooldownCountdown.tsx`: shared live-decrementing ticker
+  (reusable for SLM-D/E migration). Wired into
+  **CitizenIntent** (chip below SLM-A "Check my
+  understanding") AND **CitizenNotes** create-sheet (chip
+  above Save). Apply rewrites textarea/body BEFORE
+  handleSend/handleCreate fires — orchestrator contract,
+  idempotency fingerprint, MF-3 byte-match guards, ledger
+  plumbing all unchanged. **§15 hardening**: Send/Save
+  foot-gun gate — `window.confirm` when citizen scanned,
+  found PII, dismissed sheet, and is about to dispatch raw
+  PII. Pure FE; zero BE changes. PRE-STEP refactor:
+  extracted `slm-parse-helpers.ts` (clipLine,
+  clampConfidence, djb2Hash) — doc-summariser re-exports
+  the first two; ADR 0149 vitest pins remain green.
+  **Adversarial review** (3 lenses + triage): **6 MUST_FIX
+  + 12 SHOULD_FIX + 21 defer**; all 6 must + 6 key should
+  fixed in-phase. M1 mergeSpans two-pass regex-first; M2
+  maskMobile digit-vs-char-index bug fix; M3 PiiReviewSheet
+  prevResult re-seed pattern (was keyset-equality leaving
+  stale ticks); M4 PiiReviewSheet hoisted sibling-of
+  create-note Sheet (nested Escape was closing both); M5
+  cooldownUntil wall-clock + CooldownCountdown ticker; M6
+  Send-side confirm gate. S1+S2+S3 regex coverage gaps
+  (Aadhaar/PAN dash separators; lowercase DL/RC/GSTIN). S8
+  perTextTimestamps Map cleanup. S9 runtime snapshot before
+  generate. S12 piiRedactor.reset on send success.
+  **API_INTEGRATIONS.md impact**: ZERO new external API.
+  Last-updated header bumped. Tests: vitest 201 → **309**
+  (+108 SLM-F cases). Node 1217 unchanged. tsc clean.
+  **Next**: Phase 13.2 (transparent handleSend integration +
+  piiRedactionAnnotation envelope + offline-queue replay
+  redaction) OR Phase 13.3 SLM-G (on-device personalization).
 - **Phase 13.0.0a — SHIPPED 2026-06-01 (ADR 0150).** Shared
   wllama runtime singleton. The booking-advisor header had
   been claiming the runtime was loaded at most once across
