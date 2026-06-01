@@ -20,6 +20,9 @@ import {
 import { isVoiceIntentSupported, VoiceIntentSession } from '@/lib/voice-intent';
 import { useSlmIntentParser } from '@/lib/use-slm-intent-parser';
 import { actionTypeFriendlyLabel, type ParsedIntent } from '@/lib/intent-parser';
+import { useSmartSendIntent } from '@/lib/use-send-intent-smart';
+import { OfflineQueuePill } from '@/components/OfflineQueuePill';
+import { QueuedIntentsPanel } from '@/components/QueuedIntentsPanel';
 
 const ACTION_TYPE_LABEL: Record<string, string> = {
   service_booking: 'Service booking (Bharat OS marketplace)',
@@ -75,6 +78,11 @@ function CitizenIntent() {
   const [grantOpen, setGrantOpen] = useState(false);
   const [autoRetrying, setAutoRetrying] = useState(false);
   const sendIntent = useSendIntent();
+  // Phase 12.1b.2 — smart send wraps the legacy mutation: on
+  // offline OR network failure, the intent is enqueued in IDB and
+  // a "queued" outcome is returned; on online + success, the
+  // orchestration lands as usual.
+  const smartSend = useSmartSendIntent();
   const grantConsent = useGrantConsent();
   const { data: recent = [] } = useRecentOrchestrations(identity?.id);
   const { data: briefData } = useDailyBrief(identity?.id);
@@ -222,24 +230,47 @@ function CitizenIntent() {
             generatedAt: new Date().toISOString()
           }
         : null;
-    sendIntent.mutate(
-      { identityId: identity.id, intentText, intentAnnotation: annotation },
-      {
-        onSuccess: (data) => {
-          setLastOutcome(data.orchestration);
-          // MF-3 (adversarial fix) — preserve the chip when the
-          // user is sending the same intent twice; only clear when
-          // text changed since parse so the citizen doesn't pay
-          // the parse cost again for a repeat-intent flow.
+    // Phase 12.1b.2 — smart send: queues to IDB if offline, posts
+    // with Idempotency-Key if online. The drainer in App.tsx replays
+    // queued items on the next online event.
+    (async () => {
+      try {
+        const result = await smartSend.send({
+          identityId: identity.id,
+          intentText,
+          intentAnnotation: annotation,
+          locale: 'en-IN'
+        });
+        if (result.kind === 'sent') {
+          setLastOutcome(result.orchestration);
           if (parsedFromText == null || text.trim() !== parsedFromText.trim()) {
             setParsedIntent(null);
             setParsedFromText(null);
             slmParser.reset();
           }
-        },
-        onError: (err: Error) => show(err.message, 'error')
+        } else if (result.kind === 'queued') {
+          // SF-3 (adversarial fix) — present-progressive copy that
+          // mirrors the QueuedIntentsPanel "queued — not yet on
+          // Bharat OS" phrasing so the citizen has one mental model.
+          show(
+            result.reason === 'offline'
+              ? "Saving offline — will send when you're back online."
+              : 'Connection blip — saving locally, will retry shortly.',
+            'success'
+          );
+          setText('');
+          setParsedIntent(null);
+          setParsedFromText(null);
+          slmParser.reset();
+        } else if (result.kind === 'queue_full') {
+          show('Queue is full. Open the queue tab to clear old intents.', 'error');
+        } else if (result.kind === 'crypto_unavailable') {
+          show('Your browser blocked secure crypto. Open Bharat OS over HTTPS.', 'error');
+        }
+      } catch (err) {
+        show((err as Error).message, 'error');
       }
-    );
+    })();
   }
 
   async function handleGrant(scopes: string[], ttlDays: number) {
@@ -298,6 +329,9 @@ function CitizenIntent() {
       </section>
 
       <DailyBriefCard onGrantConsent={handleGrantBriefConsent} />
+
+      {/* Phase 12.1b.2 — offline queue + connectivity status pill */}
+      <OfflineQueuePill identityId={identity?.id ?? null} />
 
       <Card>
         <div className="relative">
@@ -778,6 +812,25 @@ function CitizenTrust() {
   );
 }
 
+// Phase 12.1b.2 — Queue panel route. Reads the identity-scoped
+// offline queue + offers per-row Retry / Discard actions. Linked
+// from the OfflineQueuePill when items exist.
+function CitizenQueueRoute() {
+  const identity = useActiveIdentity();
+  if (!identity) return null;
+  return (
+    <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-4">
+      <header>
+        <h1 className="text-display font-semibold">My queue</h1>
+        <p className="mt-1 text-body text-text-muted">
+          Intents waiting to send. Stored on this phone only.
+        </p>
+      </header>
+      <QueuedIntentsPanel identityId={identity.id} />
+    </main>
+  );
+}
+
 export function CitizenHome() {
   return (
     <>
@@ -786,6 +839,7 @@ export function CitizenHome() {
         <Route path="home" element={<CitizenIntent />} />
         <Route path="notes" element={<CitizenNotes />} />
         <Route path="trust" element={<CitizenTrust />} />
+        <Route path="queue" element={<CitizenQueueRoute />} />
         <Route path="*" element={<CitizenIntent />} />
       </Routes>
       <Tabs items={TABS} />

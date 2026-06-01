@@ -152,6 +152,56 @@ Implemented pieces:
 
 ---
 
+## 📴 2026-06-01 — Phase 12.1b.2 shipped: SLM-B offline-first decisioning + queued sync
+
+Second of four 12.1b AI-orchestration sub-phases. Bharat OS now
+works in poor-connectivity India: a citizen who types an intent
+while offline sees an honest "Saving offline — will send when
+you're back online." toast; the intent persists on their phone in
+a per-identity IndexedDB queue; on reconnect the drainer replays
+it with a stable `Idempotency-Key`; the server returns either the
+cached response (if a duplicate POST happened on the way) or a
+fresh orchestration. Audit ledger remains the source of truth —
+worker fires exactly ONCE per real mutation, replays append a
+distinct marker event.
+
+- **ADR 0138** — BE + FE.
+- **Ledger-backed idempotency**: three new event types on the
+  existing append-only ledger (no new SQL table). Scope-generic
+  so 12.1b.3 wraps bookings/consents/flags with no refactor.
+- **Per-actor scoping** structural: stolen `Idempotency-Key`
+  cannot cross-replay another citizen's intent.
+- **Tamper tripwire**: same key + different payload → 409 +
+  separate ledger event.
+- **Per-identity IndexedDB** (`bharat-os-offline-<actorId>`) so
+  two profiles on the same device can't enumerate each other's
+  queue — judge-panel-flagged §15 binding requirement.
+- **Drainer**: sequential FIFO, `navigator.locks` single-flight
+  with promise-chain fallback for strict-mode safety. Each
+  row's idempotencyKey reused across all attempts.
+- **Surface**: `OfflineQueuePill` above the intent textarea
+  (4 honest states) + `/citizen/queue` route with
+  `QueuedIntentsPanel` ("N queued — not yet on Bharat OS"
+  verbatim copy + Retry / Discard).
+- **Adversarial review**: Audit ship_clean. 1 must-fix + 2
+  should-fix applied — SubtleCrypto + getRandomValues guards
+  (insecure-context honest error); stranded-`sending`-row
+  recovery; Web Locks fallback serialization; background drain
+  success toast.
+- Scope held to `POST /api/orchestrations` only. Bookings +
+  consents + flags + express-interest still online-only —
+  deferred to 12.1b.3 because they carry CAS/escrow/signed-
+  artifact concerns of their own.
+- Tests: **1008/1008 Node** + **92/92 vitest** (+11 including
+  SubtleCrypto guard). tsc clean. Bundle 565 → 577 KB / 163 KB
+  gzipped (+12 KB).
+
+**Next: Phase 12.1b.3** — bookings/consents/flags offline queue +
+queue-feedback UX batch + 17 more Indic languages, OR SLM-C
+on-device dynamic forms.
+
+---
+
 ## 🧠 2026-06-01 — Phase 12.1b.1 shipped: SLM-A vernacular intent parser — AI loop starts closing
 
 First of four 12.1b AI-orchestration sub-phases. Citizens with an

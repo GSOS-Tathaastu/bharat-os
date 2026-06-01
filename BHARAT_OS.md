@@ -2137,7 +2137,8 @@ on top of the four earlier:
 | **12.1a.1** ✅ | **SHIPPED 2026-06-01 (ADR 0135).** Marketplace discovery substrate + citizen browse. Discriminated-union geo schema (4dp persist, 2dp public emit), shared phase0/geo.mjs + FE geo lib (reusable for booking, mesh, audits), GET /api/marketplace/providers, POST /express-interest typed precedent row, /app/citizen/services/* nested routes, ProviderOnboarding ServiceAreaPicker. ONDC suppressed. | ✅ shipped |
 | **12.1a.2** ✅ | **SHIPPED 2026-06-01 (ADR 0136).** Booking + citizen-escrow + provider surface. 6-state CAS-guarded booking machine; lazy auto-release (4h pre-accept expiry + 24h after provider-marked-complete); rate snapshot immutability; bookkeeping-v1 funding via admin escrow deposit. /provider/* 5-tab surface; /citizen/services/bookings list + detail. Push on every transition. Extracted escrow-paise + provider-auth + booking-push + bubbleAt1dp as CORE substrates. ONDC still suppressed. | ✅ shipped |
 | **12.1b.1** ✅ | **SHIPPED 2026-06-01 (ADR 0137).** SLM-A vernacular intent parser. On-device wllama parses intent → structured annotation; deterministic substrate remains source of truth; verdict ledger events. Citizens with no SLM installed see no change. | ✅ shipped |
-| **12.1b.2** | SLM-B offline-first decisioning + queued sync. Cache consents, answer queries from local memory + 17 more Indic languages. | ~1 wk |
+| **12.1b.2** ✅ | **SHIPPED 2026-06-01 (ADR 0138).** SLM-B offline-first decisioning + queued sync. Ledger-backed idempotency (3 event types, no new SQL table, scope-generic), per-identity IndexedDB queue, Web Locks single-flight drainer, OfflineQueuePill + QueuedIntentsPanel. Scope: orchestrations only — bookings/consents/flags deferred to 12.1b.3. | ✅ shipped |
+| **12.1b.2.x** | Bookings/consents/flags offline queue + queue-feedback UX batch + 17 more Indic languages. | ~1 wk |
 | **12.1b.3** | SLM-C on-device dynamic forms (per-role onboarding wizard). | ~1 wk |
 | **12.1b.4** | SLM-D on-device negotiation agent for marketplace. | ~1 wk |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
@@ -2200,6 +2201,61 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1b.2 — SHIPPED 2026-06-01 (ADR 0138).** SLM-B
+  offline-first decisioning + queued sync. Citizens in poor-
+  connectivity India can now type an intent while offline;
+  it persists on their phone (per-identity IndexedDB,
+  `bharat-os-offline-<actorId>` so two profiles on one device
+  cannot enumerate each other's queue); on reconnect the
+  drainer replays it with a stable `Idempotency-Key` and the
+  server returns either the cached response (if a duplicate
+  POST happened on the way) or a fresh orchestration. Backend
+  substrate `src/phase0/idempotency.mjs` is **ledger-backed**
+  (no new SQL table) — three new event types
+  (`<scope>.idempotency_key_minted` / `.idempotent_replay` /
+  `.idempotency_key_reused_with_different_payload`) on the
+  existing append-only ledger. Replay returns cached response
+  body byte-for-byte; the orchestrator code path is NEVER
+  re-entered, so decision rows + skill preflights + push
+  notifications + escrow holds fire exactly ONCE per real
+  mutation (tested). Per-actor scoping is structural —
+  `findMintedRecord` compares (scope, actorId, key); stolen
+  keys cannot cross-replay. Same key + different request
+  fingerprint → 409 + tripwire ledger event (catches stolen-
+  key-with-different-payload attack). `withIdempotency` is
+  `scope`-generic so 12.1b.3 wraps bookings + consents + flags
+  by passing a different scope; no refactor needed. FE
+  substrate: `frontend/src/lib/offline-queue.ts` raw IDB
+  wrapper (no npm dep, ULID inline, 50-row + 7-day caps,
+  stranded-`sending`-row recovery sweep), `idempotency-key.ts`
+  (SubtleCrypto sha256 of actorId+intentText+annotation+
+  enqueueIso+nonce, with explicit insecure-context guards),
+  `use-online-status.ts` (navigator.onLine + HEAD /api/health
+  captive-portal probe), `use-queue-drainer.ts` (sequential
+  FIFO, Web Locks single-flight with module-promise fallback
+  for strict-mode safety, exponential backoff 1s/4s/16s/60s),
+  `use-send-intent-smart.ts` (offline→enqueue; online→POST
+  with Idempotency-Key; network blip→enqueue with
+  `network_error` reason). Surface: `OfflineQueuePill` above
+  intent textarea (4 states: hidden when online+empty / grey
+  "Offline" / amber "Queued (N)" / red "N didn't go through")
+  + `/citizen/queue` route with `QueuedIntentsPanel`
+  ("N queued — not yet on Bharat OS" verbatim copy + Retry /
+  Discard per row). Global drainer mounted in App.tsx fires
+  "Sent N queued intents" toast on successful background
+  drain. New GET/HEAD /api/health (`cache-control: no-store`).
+  Adversarial review verdicts — Audit: ship_clean. Safety:
+  ship_with_fixes (1 must-fix + 2 should-fix applied). UX:
+  ship_with_fixes (1 should-fix applied; rest deferred to
+  12.1b.3 queue-feedback batch). Tests: 1008/1008 Node (+15)
+  + 92/92 vitest (+11 including SubtleCrypto guard test).
+  Bundle main 565 → 577 KB / 163 KB gzipped (+12 KB). Scope
+  held to POST /api/orchestrations only — bookings + consents
+  + flags + express-interest still online-only, deferred to
+  12.1b.3 because they carry CAS/escrow/signed-artifact
+  concerns. Next: **Phase 12.1b.3** offline queue for
+  bookings/consents/flags + queue-feedback UX batch, OR
+  SLM-C dynamic forms.
 - **Phase 12.1b.1 — SHIPPED 2026-06-01 (ADR 0137).** SLM-A
   vernacular intent parser — first of four 12.1b AI-orchestration
   sub-phases. Citizens with an installed wllama SLM (Phase 9.0c)

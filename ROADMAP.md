@@ -398,6 +398,106 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.1b.2 — SLM-B offline-first decisioning + queued sync ✅ SHIPPED 2026-06-01
+- **ADR 0138** — second of four 12.1b sub-phases. Bharat OS
+  now works in poor-connectivity India.
+- **Ledger-backed idempotency** — no new SQL table. Three new
+  event types on the existing append-only ledger:
+  `<scope>.idempotency_key_minted` / `.idempotent_replay` /
+  `.idempotency_key_reused_with_different_payload`. Lookup
+  scans `listLedger({type, newestFirst: true, limit: 500})`;
+  matches typically at index 0–1 (retries happen within
+  seconds-to-minutes). Scope-generic — Phase 12.1b.3 wraps
+  bookings/consents/flags by passing a different `scope` arg,
+  no refactor required.
+- **Replay never re-enters orchestrator.** Worker closure
+  fires exactly ONCE per real mutation; decision rows + skill
+  preflights + push notifications + escrow holds + annotation
+  verdict events all fire once. Tested via a deliberate
+  duplicate-POST fixture.
+- **Per-actor scoping is structural.** `findMintedRecord`
+  compares (scope, actorId, idempotencyKey) — never key alone.
+  A stolen Idempotency-Key cannot cross-replay another
+  citizen's intent.
+- **Tamper tripwire.** Same key + different request fingerprint
+  → 409 `idempotency_key_reused_with_different_payload` + a
+  separate ledger event. The fingerprint check catches a
+  "stolen key + different intent text" attack.
+- **Key shape: 32 lowercase hex** computed FE-side as
+  `sha256(actorId + ':' + intentText + ':' +
+  canonicalize(intentAnnotation) + ':' + enqueueIso + ':' +
+  clientNonce).slice(0,32)`. Server rejects malformed (`400
+  idempotency_key_malformed`). Bare UUIDs not accepted — the
+  cryptographic determinism is the §15 tamper-evidence
+  property the substrate depends on.
+- **Per-identity IndexedDB** —
+  `bharat-os-offline-<sanitised actorId>` so two profiles on
+  the same device cannot enumerate each other's queue (judge
+  panel flagged as binding requirement). Raw IDB, no
+  `dexie`/`idb` dep; ULID inline. Caps: 50 rows + 7-day age-
+  out + 5 attempt max. Stranded-`sending`-row recovery sweep
+  (>5 min) at every drain start prevents permanent hang.
+- **Online detection** — `useOnlineStatus`: navigator.onLine
+  seed + online/offline events + HEAD `/api/health` every
+  30s **while offline** for captive-portal cases. Pure
+  `resolveOnlineState` exported for vitest. No service-worker
+  fetch interception — the §15 carveout that `/app/` SW
+  skips `/api/*` is preserved.
+- **Drainer** — `useQueueDrainer` mounted ONCE in App.tsx as
+  `<GlobalQueueDrainer/>`, gated on active identity.
+  Sequential FIFO. Single-flight via
+  `navigator.locks.request(LOCK_NAME, {ifAvailable: true})`
+  when available; module-level promise-chain fallback
+  serializes React strict-mode double-mounts and older
+  browsers. Row's idempotencyKey **reused across all
+  attempts** — recomputing per attempt would defeat the very
+  case idempotency exists for. Backoff 1s → 4s → 16s → 60s,
+  max 5 attempts. Transient errors revert row to `queued`;
+  hard 4xx → `failed_permanent`.
+- **Smart send** — `useSmartSendIntent`: offline → enqueue +
+  `{kind: 'queued', reason: 'offline'}`; online + success →
+  `{kind: 'sent', orchestration}`; online + network blip →
+  enqueue + `reason: 'network_error'`; queue full →
+  `{kind: 'queue_full'}`; insecure-context crypto missing →
+  `{kind: 'crypto_unavailable'}` (MF-1 adversarial fix).
+- **Surface** — `OfflineQueuePill` above the intent textarea
+  (4 states: hidden when online+empty / grey "Offline" /
+  amber "Queued (N) — will send when back online" / blue
+  "Sending queued (N)…" / red "N didn't go through"). New
+  `/citizen/queue` route with `QueuedIntentsPanel` —
+  verbatim "N queued — not yet on Bharat OS" copy (§15
+  no-silent-acceptance) + per-row Retry / Discard. Global
+  drainer fires "Sent N queued intents" toast on successful
+  background drain (SF-3 adversarial fix).
+- **Adversarial review** — Audit: **ship_clean**. Safety:
+  ship_with_fixes (1 must-fix + 2 should-fix applied). UX:
+  ship_with_fixes (1 should-fix applied; rest deferred to
+  12.1b.3 queue-feedback batch).
+- Applied:
+  - MF-1: SubtleCrypto + getRandomValues guards in
+    `idempotency-key.ts` + new `crypto_unavailable`
+    SmartSendResult arm + honest toast in CitizenHome.
+  - SF-1: stranded-`sending`-row recovery sweep (>5 min →
+    `queued`) at every drain start.
+  - SF-2: module-level promise chain serializes the Web Locks
+    fallback path so strict-mode double-mounts don't
+    interleave drains.
+  - SF-3: toast copy mirrors "queued — not yet on Bharat OS"
+    phrasing; global drainer dispatches background drain
+    success toast.
+- Tests: **1008/1008 Node** (+15 idempotency including
+  fingerprint mismatch, per-actor scoping, malformed-key,
+  HTTP integration, §15 binding grep) + **92/92 vitest**
+  (+11 — idempotency-key 8 cases including SubtleCrypto guard
+  + 3 online-status helper cases). tsc clean.
+- Bundle: main 565 → 577 KB / 163 KB gzipped (+12 KB for
+  idempotency-key + offline-queue + drainer + smart-send +
+  online-status + 2 new components). wllama lazy chunk
+  unchanged.
+- **Next**: Phase 12.1b.3 — bookings/consents/flags offline
+  queue + queue-feedback UX batch + 17 more Indic languages,
+  OR Phase 12.1b.3 SLM-C dynamic forms.
+
 #### Phase 12.1b.1 — SLM-A vernacular intent parser ✅ SHIPPED 2026-06-01
 - **ADR 0137** — first of four 12.1b AI-orchestration
   sub-phases. Marketplace + AI loop starts closing.
@@ -807,10 +907,13 @@ memos.
 - [x] Verdict ledger events for audit.
 - [x] CitizenHome chip + edit-invalidate + voice-interim guard.
 
-##### 12.1b.2 — SLM-B offline-first decisioning (~1 wk)
-- [ ] Vernacular intent → structured action across 17 more
-  Indic languages (Telugu, Kannada, Gujarati, Punjabi, Odia,
-  Assamese, Malayalam, Urdu, …).
+##### 12.1b.2 — SLM-B offline-first decisioning ✅ SHIPPED 2026-06-01 (ADR 0138)
+- [x] Ledger-backed idempotency (3 event types, no new SQL).
+- [x] Per-identity IndexedDB queue.
+- [x] Web Locks single-flight drainer.
+- [x] OfflineQueuePill + QueuedIntentsPanel.
+- [ ] 17 more Indic languages → deferred to 12.1b.3 with SLM
+      model-pack additions.
 - [ ] **B.** Offline-first decisioning + queued sync. Cache
   consents, answer queries from local memory.
 - [ ] **C.** On-device dynamic onboarding forms (SLM generates

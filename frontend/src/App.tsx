@@ -1,7 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useIdentityStore } from '@/lib/identity-store';
 import { useActiveIdentity } from '@/lib/hooks';
-import { ToastRoot } from '@/components/ui';
+import { useQueueDrainer } from '@/lib/use-queue-drainer';
+import { ToastRoot, useToast } from '@/components/ui';
 import { OnboardingPage } from '@/routes/Onboarding';
 import { WorkerHome } from '@/routes/WorkerHome';
 import { CitizenHome } from '@/routes/CitizenHome';
@@ -14,6 +15,20 @@ import { ProviderOnboardingPage } from '@/routes/ProviderOnboarding';
 import { SettingsPage } from '@/routes/Settings';
 import { SponsorSurface } from '@/routes/sponsor/SponsorSurface';
 import { TopBar } from '@/components/TopBar';
+
+// Phase 12.1b.2 — Mount the offline-queue drainer once at the
+// session level. Drainer is a no-op when there's no active
+// identity OR when offline; it auto-fires on offline→online
+// transitions and on first mount.
+function GlobalQueueDrainer() {
+  const identity = useActiveIdentity();
+  const show = useToast((s) => s.show);
+  useQueueDrainer(identity?.id ?? null, {
+    onDrainSuccess: (n: number) =>
+      show(`Sent ${n} queued intent${n === 1 ? '' : 's'}. Check your activity feed.`, 'success')
+  });
+  return null;
+}
 
 function ProtectedSurface({ children }: { children: React.ReactNode }) {
   const activeId = useIdentityStore((s) => s.activeIdentityId);
@@ -31,6 +46,7 @@ function ProtectedSurface({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <>
+      <GlobalQueueDrainer />
       <Routes>
         <Route path="/" element={<OnboardingPage />} />
         <Route

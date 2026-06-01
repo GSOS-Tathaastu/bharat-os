@@ -25,6 +25,10 @@ import {
   buildIntentAnnotationLedgerEvent
 } from './intent-annotation.mjs';
 import {
+  withIdempotency,
+  IdempotencyError
+} from './idempotency.mjs';
+import {
   createMemoryRecord,
   memoryProvenance,
   memorySummary,
@@ -3655,6 +3659,29 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
+      // Phase 12.1b.2 — captive-portal-aware health probe. Cheap
+      // GET that the FE useOnlineStatus hook polls on a 30s
+      // interval ONLY while offline so it can detect the
+      // "navigator.onLine says yes but a wifi captive portal is
+      // hijacking us" case + decide when to drain the queue.
+      // GET (HEAD also accepted via Node's http.IncomingMessage).
+      if (parts[0] === 'api' && parts[1] === 'health' && parts.length === 2) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          return methodNotAllowed(response, ['GET', 'HEAD']);
+        }
+        response.setHeader('cache-control', 'no-store');
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        const payload = JSON.stringify({ ok: true, at: new Date().toISOString() }) + '\n';
+        if (request.method === 'HEAD') {
+          response.writeHead(200);
+          response.end();
+        } else {
+          response.writeHead(200);
+          response.end(payload);
+        }
+        return;
+      }
+
       if (parts[0] === 'api' && parts[1] === 'orchestrations' && parts.length === 2) {
         if (request.method === 'GET') {
           jsonResponse(response, 200, { orchestrations: await store.listOrchestrations() });
@@ -3662,6 +3689,13 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         }
         if (request.method === 'POST') {
           const body = await readRequestJson(request);
+          // Phase 12.1b.2 — Idempotency-Key from header. Lower-case
+          // canonical match per the substrate's 32-hex contract.
+          const headers = request.headers || {};
+          const idempotencyKey = (
+            headers['idempotency-key'] ??
+            headers['Idempotency-Key']
+          ) || null;
           const consents = await store.listConsents();
           const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
           const flags = await store.listFlagReports();
@@ -3709,70 +3743,115 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             };
           }
 
-          const orchestration = orchestrateIntent(augmentedBody, consents, {
-            execute: Boolean(body.execute),
-            publicRecords,
-            flags
-          });
-          await store.saveDecision(orchestration.decision);
-          await store.saveSkillPreflight(orchestration.skillPreflight);
-          if (orchestration.execution) {
-            await store.saveToolExecution(orchestration.execution);
-          }
-          await store.saveOrchestration(orchestration);
+          // Phase 12.1b.2 — wrap the orchestration work in
+          // `withIdempotency` so a citizen's offline queue can
+          // replay safely. On replay (same actorId + key +
+          // matching request fingerprint) the substrate returns
+          // the cached response body and the orchestrator code
+          // path is NEVER re-entered — so downstream effects
+          // (decision rows, skill preflight, push notifications,
+          // escrow holds) fire exactly ONCE per real mutation.
+          //
+          // The request body excludes the daily_brief signals
+          // augmentation (server-side enrichment) and the
+          // intentAnnotation echo (already validated) when
+          // computing the fingerprint, so a citizen replaying the
+          // same intent text + locale always matches.
+          let idempotencyOutcome;
+          try {
+            idempotencyOutcome = await withIdempotency(
+              store,
+              {
+                scope: 'orchestration.create',
+                actorId: body.actorId,
+                idempotencyKey,
+                requestBody: {
+                  intentText: body.intentText ?? '',
+                  actorId: body.actorId ?? '',
+                  locale: body.locale ?? 'en-IN',
+                  actionType: body.actionType ?? null,
+                  intentAnnotation: intentAnnotation
+                }
+              },
+              async () => {
+                const orchestration = orchestrateIntent(augmentedBody, consents, {
+                  execute: Boolean(body.execute),
+                  publicRecords,
+                  flags
+                });
+                await store.saveDecision(orchestration.decision);
+                await store.saveSkillPreflight(orchestration.skillPreflight);
+                if (orchestration.execution) {
+                  await store.saveToolExecution(orchestration.execution);
+                }
+                await store.saveOrchestration(orchestration);
 
-          // Phase 12.1b.1 — record the SLM-vs-substrate verdict on
-          // the ledger so the citizen + operator can audit how often
-          // the on-device parse agrees with the deterministic parse.
-          // Verdict is recorded regardless of whether the annotation
-          // was present; 'absent' / 'server_only' show no SLM was
-          // installed; 'agreed' / 'disagreed' compare interpretations.
-          const verdict = compareIntentAnnotation(
-            intentAnnotation,
-            orchestration.actionRequest?.actionType ?? null
-          );
-          if (verdict !== 'absent') {
-            await store.appendLedger(
-              buildIntentAnnotationLedgerEvent({
-                orchestrationId: orchestration.orchestrationId,
-                annotation: intentAnnotation,
-                serverActionType: orchestration.actionRequest?.actionType ?? null,
-                verdict,
-                at: orchestration.createdAt
-              })
+                // Phase 12.1b.1 — record the SLM-vs-substrate
+                // verdict on the ledger. Fires exactly ONCE per
+                // real mutation because we're inside the
+                // worker closure.
+                const verdict = compareIntentAnnotation(
+                  intentAnnotation,
+                  orchestration.actionRequest?.actionType ?? null
+                );
+                if (verdict !== 'absent') {
+                  await store.appendLedger(
+                    buildIntentAnnotationLedgerEvent({
+                      orchestrationId: orchestration.orchestrationId,
+                      annotation: intentAnnotation,
+                      serverActionType: orchestration.actionRequest?.actionType ?? null,
+                      verdict,
+                      at: orchestration.createdAt
+                    })
+                  );
+                }
+
+                // §13A #7 — auto-sign trust attestation. Same
+                // worker closure → fires ONCE.
+                let signedAttestation = null;
+                if (
+                  body.actionType === 'trust_attestation' &&
+                  orchestration.execution?.toolReceipt?.toolId ===
+                    'trust_passport_attestation' &&
+                  orchestration.execution.status === 'completed'
+                ) {
+                  const subject = await store.readIdentity(body.actorId).catch(() => null);
+                  if (subject) {
+                    signedAttestation = signTrustAttestation(
+                      orchestration.execution.toolReceipt,
+                      subject
+                    );
+                    await store.saveAttestation(signedAttestation);
+                  }
+                }
+
+                return {
+                  ok: true,
+                  orchestration,
+                  attestation: signedAttestation
+                };
+              }
             );
-          }
-
-          // §13A #7 — when the just-executed action minted a trust
-          // attestation, auto-sign it with the subject's identity and
-          // persist to the attestations index so the verifier flow
-          // (`/api/attestations/:id` + `/verify/`) can read it back.
-          // Phase 2b moves the signing step to the device hardware
-          // keystore; here it happens on the server because the
-          // private key is server-stored (see ADR 0066's demo-mode
-          // warning).
-          let signedAttestation = null;
-          if (
-            body.actionType === 'trust_attestation' &&
-            orchestration.execution?.toolReceipt?.toolId ===
-              'trust_passport_attestation' &&
-            orchestration.execution.status === 'completed'
-          ) {
-            const subject = await store.readIdentity(body.actorId).catch(() => null);
-            if (subject) {
-              signedAttestation = signTrustAttestation(
-                orchestration.execution.toolReceipt,
-                subject
-              );
-              await store.saveAttestation(signedAttestation);
+          } catch (err) {
+            if (err instanceof IdempotencyError) {
+              jsonResponse(response, err.status, {
+                error: { code: err.code, message: err.message }
+              });
+              return;
             }
+            throw err;
           }
-
-          jsonResponse(response, 201, {
-            ok: true,
-            orchestration,
-            attestation: signedAttestation
-          });
+          // Surface the replay status on a response header so a
+          // future debugging / telemetry surface can detect it
+          // without parsing the body.
+          if (idempotencyOutcome.source === 'replay') {
+            response.setHeader('X-Bharat-Os-Idempotent-Replay', '1');
+          }
+          jsonResponse(
+            response,
+            idempotencyOutcome.source === 'replay' ? 200 : 201,
+            idempotencyOutcome.body
+          );
           return;
         }
         return methodNotAllowed(response, ['GET', 'POST']);
