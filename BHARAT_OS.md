@@ -1982,7 +1982,7 @@ shape of the risk.
 
 ---
 
-## 17. Current implementation status (snapshot — 2026-05-23)
+## 17. Current implementation status (snapshot — 2026-06-01)
 
 A living snapshot of how much of the canonical architecture (§6) and roadmap
 (§13) is actually built in the accompanying repository. This section is **not
@@ -2201,6 +2201,49 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.3 — SHIPPED 2026-06-01 (ADR 0148).** Wave-2
+  provider roles (`kirana` + `skilled-trades`) + GST
+  adapter. NEW `src/phase1/gst-adapter.mjs` (4th concrete
+  adapter composing the Phase 12.2.1 substrate; provider
+  allowlist `stub|sandbox|surepass|karza|gsp-direct`).
+  Wave-2 schemas wired in `provider-role-extras.mjs`:
+  kirana required `shopName` + `shopLicenseNumber` +
+  `shop_license` attachment, optional GSTIN / FSSAI /
+  yearsInBusiness; skilled-trades required ITI cert # +
+  institute + `iti_certificate` attachment, optional
+  yearsExperience / portfolioUrl. **NEW `pattern` +
+  `normalize` field-spec keys** — text-kind validator
+  honors per-field regex (GSTIN_RE, FSSAI_RE) and
+  upper-case normalisation, closing a HIGH adversarial
+  finding (citizens could type 15-char rubbish into
+  gstinNumber, BE silently accepted, verifier no-op'd,
+  operator saw garbage with no result). 4 new ATTACHMENT_
+  KINDS (`shop_license`, `gst_certificate`,
+  `iti_certificate`, `trade_portfolio`).
+  `verify-role-extras` endpoint merges Parivahan + GST
+  via `Promise.allSettled`; **empty-results guard** (400
+  `nothing_to_verify`, no persist, no ledger event) for
+  skilled-trades manual-only + kirana-without-GSTIN cases
+  — previously a misleading "verified at T by operator X"
+  with empty results would have been stamped. Operator
+  console now gates "Pre-verify" button on roles with a
+  configured verifier (label tracks adapter: Pre-verify
+  Parivahan / GST); skilled-trades renders "Manual review
+  only" tag instead. Generalised 502 message references
+  both BHARAT_OS_PARIVAHAN_MODE and BHARAT_OS_GST_MODE.
+  **§15 bindings**: cacheKey `gst:<sha256(GSTIN).slice(0,32)>`
+  (raw GSTIN never on cache/ledger); polite UA on every
+  call; stub-first default; deep-frozen schemas + closed
+  field allowlist. **Adversarial review** (3 lenses): 3
+  HIGH + 3 MED + 1 LOW; all HIGH + MED fixed in-phase.
+  **API_INTEGRATIONS.md §3.3 GST** flipped from
+  📋 Reserved → 🧪 Stub-only with full provisioning notes.
+  FE mirror (`role-extras-schema.ts`) extended with
+  `pattern?: RegExp` + `normalize?: 'upper'` interface
+  fields; client-side validator honors them; parity test
+  projects regex `.source` on both sides. Tests: Node
+  1199 → **1217** (+18 wave-2 + GST + adversarial-fix
+  cases); Vitest 140 → **146** (+6). tsc clean.
 - **Phase 12.2.7 — SHIPPED 2026-06-01 (ADR 0147).** FE
   "Link DigiLocker" card + KYC L1 wiring. Closes the FE-BE
   gap on Phase 12.2.6 (BE-only substrate now has a

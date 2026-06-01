@@ -71,12 +71,20 @@ export const ATTACHMENT_KINDS = Object.freeze([
   // KYC L1 wizard.
   'kyc_l1_selfie',
   'kyc_l1_id_proof',
-  // Per-role extras (Phase 12.2.4 reservations).
+  // Per-role extras (Phase 12.2.4 wave-1).
   'vehicle_registration',
   'driving_licence',
   'police_verification',
   'employer_reference',
   'contractor_attestation',
+  // Per-role extras (Phase 12.3 wave-2). kirana shop owners
+  // upload shop_license (mandatory) + optional gst_certificate;
+  // skilled-trades upload iti_certificate (mandatory) + optional
+  // trade_portfolio.
+  'shop_license',
+  'gst_certificate',
+  'iti_certificate',
+  'trade_portfolio',
   // Generic — composable into any future surface without a
   // substrate update. Operator review should treat 'misc' as
   // un-typed evidence and prompt the citizen to re-categorise

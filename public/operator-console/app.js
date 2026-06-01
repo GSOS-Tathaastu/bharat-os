@@ -1693,16 +1693,23 @@ function renderProviderKycReview(items) {
           ).join(' ')
         : '';
       const canAttestRoleExtras = Boolean(rx) && !rxa;
-      // Phase 12.2.5 — Parivahan verification button + badges.
-      // The button is enabled whenever there's a role-extras
-      // submission to verify; running it again overwrites the
-      // prior result so the operator can re-check after a
-      // citizen edits.
+      // Phase 12.2.5 — adapter verification button + badges.
+      // Phase 12.3 fix — gate the button on roles that actually
+      // expose automated-verification fields. skilled-trades is
+      // manual-review-only (no ITI verifier) so we don't lie
+      // about pre-verification being available.
+      const ROLES_WITH_VERIFIER = ['cab-driver', 'personal-driver', 'kirana'];
+      const VERIFIER_LABEL_BY_ROLE = {
+        'cab-driver': 'Pre-verify (Parivahan)',
+        'personal-driver': 'Pre-verify (Parivahan)',
+        'kirana': 'Pre-verify (GST)'
+      };
       const rxv = p.roleExtrasVerifications;
-      const canVerifyRoleExtras = Boolean(rx);
-      const verifyButton = rx
-        ? `<button data-role-extras-verify="${escapeHtml(p.providerIdentityId)}" ${canVerifyRoleExtras ? '' : 'disabled'} type="button">Pre-verify (Parivahan)</button>`
-        : '';
+      const roleHasVerifier = rx && ROLES_WITH_VERIFIER.includes(rx.role);
+      const canVerifyRoleExtras = Boolean(rx) && roleHasVerifier;
+      const verifyButton = rx && roleHasVerifier
+        ? `<button data-role-extras-verify="${escapeHtml(p.providerIdentityId)}" ${canVerifyRoleExtras ? '' : 'disabled'} type="button">${escapeHtml(VERIFIER_LABEL_BY_ROLE[rx.role])}</button>`
+        : (rx ? `<span class="muted small" title="this role has no automated verifier — cross-check the uploaded document and attest manually.">Manual review only</span>` : '');
       // Phase 12.2.5 adversarial fix UX-Q1+Q2 — color + symbol
       // per status. Stub provider tagged inline so the operator
       // doesn't mistake demo results for real verifications.

@@ -1215,9 +1215,9 @@ picked "minimum onboarding load, maximum coverage"):
   verification + references. **Phase 12.2.4.**
 
 #### Phase 12.3+ — Remaining provider roles (~3 wks)
-- [ ] `kirana` (shop license + GST optional).
-- [ ] `skilled-trades` (ITI cert + portfolio + Trust Passport
-  feedback loop).
+- [x] `kirana` (shop license + GST optional). **Phase 12.3.**
+- [x] `skilled-trades` (ITI cert + portfolio + Trust Passport
+  feedback loop). **Phase 12.3.**
 
 #### Phase 13.x — SLM USP features (~6 wks)
 - [ ] **E.** On-device document summariser (electricity bill /

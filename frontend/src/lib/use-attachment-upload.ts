@@ -26,6 +26,10 @@ export const ATTACHMENT_KINDS = [
   'police_verification',
   'employer_reference',
   'contractor_attestation',
+  'shop_license',
+  'gst_certificate',
+  'iti_certificate',
+  'trade_portfolio',
   'misc'
 ] as const;
 

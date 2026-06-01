@@ -370,8 +370,10 @@ async function seedActiveProvider(store, { rootId, role = 'cab-driver', kycLevel
   // Phase 12.2.4 — wave-1 roles now need role-extras attestation
   // before activation. Synthesize a stub envelope so marketplace
   // discovery tests don't have to model the citizen wizard.
-  const WAVE_1 = ['cab-driver', 'personal-driver', 'labourers', 'household-help'];
-  if (WAVE_1.includes(role)) {
+  // Phase 12.3 — all roles (wave-1 + wave-2) now require
+  // role-extras attestation before activation.
+  const REQUIRES_EXTRAS = ['cab-driver', 'personal-driver', 'labourers', 'household-help', 'kirana', 'skilled-trades'];
+  if (REQUIRES_EXTRAS.includes(role)) {
     p = recordRoleExtrasSubmission({ ...p, status: 'draft' }, {
       schemaVersion: 1, role, answers: { stub: 'stub' }, attachments: {}
     });
@@ -546,9 +548,10 @@ test('EC-3: rankProviders falls back to DEFAULT when radius is 0', async () => {
 
 test('EC-1: updateProviderProfile refuses to null serviceArea on active provider', async () => {
   const { updateProviderProfile } = await import('../../src/phase1/provider-identity.mjs');
-  // Phase 12.2.4 — use a wave-2 role (kirana) so this test
-  // doesn't have to model role-extras attestation; the field
-  // under test is serviceArea, not the activation chain.
+  // Phase 12.3 — every role requires role-extras attestation
+  // before activation now. Synthesize a minimal stub envelope
+  // so the field under test (serviceArea) still gets a chance
+  // to assert.
   let p = createProviderIdentity({
     rootIdentityId: 'r',
     roleKind: 'kirana',
@@ -556,6 +559,13 @@ test('EC-1: updateProviderProfile refuses to null serviceArea on active provider
     serviceArea: { kind: 'point-radius', center: { lat: 18.5, lng: 73.85 }, radiusMeters: 5000, source: 'manual' }
   });
   p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+  p = recordRoleExtrasSubmission(p, {
+    schemaVersion: 1, role: 'kirana',
+    answers: { shopName: 'X', shopLicenseNumber: 'L1' },
+    attachments: {}
+  });
+  p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+  p = attestRoleExtras(p, { level: 'basic', operatorId: 'op:test' });
   p = transitionProviderStatus(p, 'active', { operatorId: 'op:test' });
   assert.throws(
     () => updateProviderProfile(p, { serviceArea: null }),

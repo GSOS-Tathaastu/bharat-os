@@ -15,11 +15,10 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 12.2.7 — citizen-facing
-"Link DigiLocker" surface shipped at the top of the KYC L1
-wizard. The substrate goes end-to-end FE → BE → operator
-review in stub mode now. Live mode awaits partner
-credentials.)
+Last updated: 2026-06-01 (Phase 12.3 — wave-2 provider
+roles `kirana` + `skilled-trades` shipped. GSTN adapter
+flipped from Reserved → Stub-only at §3.3. Live mode
+awaits GSP partnership or commercial-wrapper credentials.)
 
 ## Legend
 
@@ -153,20 +152,31 @@ credentials.)
   `BHARAT_OS_PAN_VERIFY_TOKEN`.
 - **Phase**: Reserved.
 
-### 3.3 GST verification (GSTN) 📋 Reserved
+### 3.3 GST verification (GSTN) 🧪 Stub-only
 
-- **Why**: Phase 12.3+ `kirana` provider role needs GST
-  validation when present.
+- **Adapter**: [src/phase1/gst-adapter.mjs](../src/phase1/gst-adapter.mjs)
+  — composes `createAdapter` (Phase 12.2.1).
+- **Why**: Phase 12.3 `kirana` provider role accepts an
+  optional GSTIN. The adapter checks shape with
+  `GSTIN_RE` (`^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$`)
+  before calling upstream, and the operator console gates
+  attestation on the per-field badge.
 - **Upstream**: GSTN public API at
-  `https://services.gst.gov.in/services/api/`
-- **Cost**: Free with partner registration; GSP
-  (GST Suvidha Provider) license preferred.
-- **To provision**: GSP partnership through CDAC, OR
-  commercial wrapper (same vendors as PAN).
-- **Env**: `BHARAT_OS_GST_VERIFY_MODE`,
-  `BHARAT_OS_GST_VERIFY_PROVIDER`,
-  `BHARAT_OS_GST_VERIFY_TOKEN`.
-- **Phase**: Reserved (Phase 12.3+).
+  `https://services.gst.gov.in/services/api/`. Provider
+  allowlist: `stub | sandbox | surepass | karza | gsp-direct`.
+- **Cost**: GSTN direct is free with GSP partnership;
+  commercial wrappers ~₹2-3 per check.
+- **To go live**: GSP (GST Suvidha Provider) partnership
+  via CDAC takes 2-4 weeks, OR commercial wrapper
+  (Surepass / Karza) for MVP (one-day signup).
+- **Env**: `BHARAT_OS_GST_MODE` (defaults to `stub`),
+  `BHARAT_OS_GST_PROVIDER`,
+  `BHARAT_OS_GST_TOKEN`.
+- **Posture**: cacheKey = `gst:<sha256(GSTIN).slice(0,32)>`
+  — raw GSTIN never lands on the cache key or ledger
+  (only field IDs + status). Polite UA shipped.
+- **Phase shipped**: 12.3 (stub-only; live path needs
+  partner provisioning).
 
 ## 4. Payments + rails
 
@@ -330,8 +340,9 @@ priority order:
    PCI/aggregator agreement.
 5. **PAN verification** (Surepass) — required to upgrade
    from "last-4 only" PAN. ~2 days.
-6. **GST verification** — required for `kirana` role
-   (Phase 12.3+). ~3 days.
+6. **GST verification** — stub-only adapter shipped
+   (Phase 12.3, `kirana` role). Live needs GSP partnership
+   (2-4 wks) OR Surepass / Karza wrapper (~3 days).
 7. **ABDM / ABHA** — required for full health passport in
    the React app. ~2 weeks including HIU registration.
 8. **ONDC bridge** — strategic; not blocking. ~1 week.

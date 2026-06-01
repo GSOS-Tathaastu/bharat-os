@@ -45,6 +45,14 @@ export const ROLE_EXTRAS_NOTES_MAX = 240;
 export const ROLE_EXTRAS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const ROLE_EXTRAS_NUMBER_MAX = 1_000;
 
+// Phase 12.3 adversarial fix — field-level regex patterns
+// citizens MUST conform to. Without these, any 16-char rubbish
+// passed shape validation and landed in answers; the verifier
+// silently no-op'd and the operator saw garbage with no
+// verification result.
+export const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
+export const FSSAI_RE = /^[0-9]{14}$/;
+
 // Roles in this map MUST submit role extras before activation.
 // Roles NOT in this map can still submit role extras (the schema
 // is empty) but the substrate doesn't gate on it. For wave-1 all
@@ -121,6 +129,43 @@ export const PROVIDER_ROLE_EXTRAS = deepFreezeSchemas(Object.freeze({
       { id: 'noticePeriodDays', label: 'Notice period (days)', kind: 'integer', min: 0, max: 90 }
     ]),
     requiredAttachmentKinds: Object.freeze(['police_verification', 'employer_reference'])
+  }),
+  // Phase 12.3 — wave-2 roles.
+  //
+  // kirana — shopkeeper / general store owner. Shop license is
+  // mandatory; GST is optional (many small shops are below the
+  // ₹40L turnover threshold). When citizen provides GSTIN the
+  // GST adapter pre-verifies it against the GSTN API (stub for
+  // now; live with GSP partnership).
+  'kirana': Object.freeze({
+    schemaVersion: 1,
+    required: Object.freeze([
+      { id: 'shopName', label: 'Shop name', kind: 'text', maxLen: ROLE_EXTRAS_FIELD_MAX },
+      { id: 'shopLicenseNumber', label: 'Shop license / trade license number', kind: 'text', maxLen: 32 }
+    ]),
+    optional: Object.freeze([
+      { id: 'gstinNumber', label: 'GSTIN (15 chars; leave blank if below threshold)', kind: 'text', maxLen: 15, pattern: GSTIN_RE, normalize: 'upper' },
+      { id: 'fssaiLicenseNumber', label: 'FSSAI license number (14 digits)', kind: 'text', maxLen: 14, pattern: FSSAI_RE },
+      { id: 'yearsInBusiness', label: 'Years in business (0-99)', kind: 'integer', min: 0, max: 99 }
+    ]),
+    requiredAttachmentKinds: Object.freeze(['shop_license'])
+  }),
+  // skilled-trades — electrician / plumber / carpenter / etc.
+  // ITI certificate is mandatory (proves vocational training).
+  // No government API for ITI verification; operator manually
+  // cross-checks the cert image against typed institute name +
+  // certificate number.
+  'skilled-trades': Object.freeze({
+    schemaVersion: 1,
+    required: Object.freeze([
+      { id: 'itiCertificateNumber', label: 'ITI certificate number', kind: 'text', maxLen: 32 },
+      { id: 'itiInstituteName', label: 'ITI institute name', kind: 'text', maxLen: ROLE_EXTRAS_FIELD_MAX }
+    ]),
+    optional: Object.freeze([
+      { id: 'yearsExperience', label: 'Years of trade experience (0-50)', kind: 'integer', min: 0, max: 50 },
+      { id: 'portfolioUrl', label: 'Portfolio URL (Instagram / YouTube link)', kind: 'text', maxLen: 240 }
+    ]),
+    requiredAttachmentKinds: Object.freeze(['iti_certificate'])
   })
 }));
 
@@ -159,7 +204,20 @@ function validateFieldValue(spec, raw) {
           spec.id
         );
       }
-      return s;
+      // Phase 12.3 adversarial fix — per-field pattern check.
+      // Specs may carry { pattern: <RegExp>, normalize: 'upper' }
+      // to coerce + validate against a stable shape (GSTIN,
+      // FSSAI, etc.). Without this, citizens typed garbage
+      // through any text field and the BE silently no-op'd.
+      const normalized = spec.normalize === 'upper' ? s.toUpperCase() : s;
+      if (spec.pattern && !spec.pattern.test(normalized)) {
+        throw new RoleExtrasValidationError(
+          `${spec.id}_pattern_invalid`,
+          `${spec.id} does not match the expected format.`,
+          spec.id
+        );
+      }
+      return normalized;
     }
     case 'date': {
       const s = String(raw).trim();

@@ -7,16 +7,18 @@ import {
 } from './role-extras-schema';
 
 describe('role-extras schema', () => {
-  it('exports all 4 wave-1 schemas', () => {
+  it('exports wave-1 + wave-2 schemas (6 total)', () => {
     expect(Object.keys(ROLE_EXTRAS_SCHEMAS).sort()).toEqual([
-      'cab-driver', 'household-help', 'labourers', 'personal-driver'
+      'cab-driver', 'household-help', 'kirana', 'labourers', 'personal-driver', 'skilled-trades'
     ]);
   });
 
-  it('roleRequiresExtras true for wave-1', () => {
+  it('roleRequiresExtras true for wave-1 + wave-2', () => {
     expect(roleRequiresExtras('cab-driver')).toBe(true);
     expect(roleRequiresExtras('household-help')).toBe(true);
-    expect(roleRequiresExtras('kirana')).toBe(false);
+    expect(roleRequiresExtras('kirana')).toBe(true);
+    expect(roleRequiresExtras('skilled-trades')).toBe(true);
+    expect(roleRequiresExtras('made-up-role')).toBe(false);
     expect(roleRequiresExtras(null)).toBe(false);
   });
 
@@ -90,5 +92,44 @@ describe('validateRoleExtrasClientSide', () => {
     });
     expect(r.ok).toBe(false);
     expect(r.firstFieldError?.code).toBe('yearsAtPriorEmployer_out_of_range');
+  });
+
+  // Phase 12.3 adversarial fix — GSTIN + FSSAI shape regex.
+  it('rejects malformed GSTIN on kirana (Phase 12.3 fix)', () => {
+    const r = validateRoleExtrasClientSide(ROLE_EXTRAS_SCHEMAS['kirana'], {
+      shopName: 'Sharma Provision Store',
+      shopLicenseNumber: 'SHOP-001',
+      gstinNumber: 'notarealgstin12'
+    });
+    expect(r.ok).toBe(false);
+    expect(r.fieldErrors.gstinNumber).toBe('gstinNumber_pattern_invalid');
+  });
+
+  it('accepts a valid GSTIN (case-tolerant, normalised to upper)', () => {
+    const r = validateRoleExtrasClientSide(ROLE_EXTRAS_SCHEMAS['kirana'], {
+      shopName: 'Sharma Provision Store',
+      shopLicenseNumber: 'SHOP-001',
+      gstinNumber: '27aapfu0939f1zv'
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('rejects malformed FSSAI (must be 14 digits)', () => {
+    const r = validateRoleExtrasClientSide(ROLE_EXTRAS_SCHEMAS['kirana'], {
+      shopName: 'Sharma Provision Store',
+      shopLicenseNumber: 'SHOP-001',
+      fssaiLicenseNumber: '12345'
+    });
+    expect(r.ok).toBe(false);
+    expect(r.fieldErrors.fssaiLicenseNumber).toBe('fssaiLicenseNumber_pattern_invalid');
+  });
+
+  it('accepts valid 14-digit FSSAI', () => {
+    const r = validateRoleExtrasClientSide(ROLE_EXTRAS_SCHEMAS['kirana'], {
+      shopName: 'Sharma Provision Store',
+      shopLicenseNumber: 'SHOP-001',
+      fssaiLicenseNumber: '12345678901234'
+    });
+    expect(r.ok).toBe(true);
   });
 });

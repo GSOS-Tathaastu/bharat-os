@@ -46,10 +46,10 @@ const TINY_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0
 
 // ─── Substrate ────────────────────────────────────────────────────
 
-test('protocol version + frozen role list', () => {
+test('protocol version + frozen role list (wave-1 + wave-2)', () => {
   assert.equal(PROVIDER_ROLE_EXTRAS_PROTOCOL_VERSION, 'bos.phase12.provider-role-extras.v0');
   assert.deepEqual([...ROLES_REQUIRING_EXTRAS].sort(), [
-    'cab-driver', 'household-help', 'labourers', 'personal-driver'
+    'cab-driver', 'household-help', 'kirana', 'labourers', 'personal-driver', 'skilled-trades'
   ]);
 });
 
@@ -63,13 +63,15 @@ test('every wave-1 role has a schema with required + attachments', () => {
   }
 });
 
-test('roleRequiresExtras true for wave-1, false otherwise', () => {
+test('roleRequiresExtras true for wave-1 + wave-2; false for unknown', () => {
   assert.equal(roleRequiresExtras('cab-driver'), true);
   assert.equal(roleRequiresExtras('personal-driver'), true);
   assert.equal(roleRequiresExtras('labourers'), true);
   assert.equal(roleRequiresExtras('household-help'), true);
-  assert.equal(roleRequiresExtras('kirana'), false);
-  assert.equal(roleRequiresExtras('skilled-trades'), false);
+  // Phase 12.3 — wave-2 roles flipped from false to true.
+  assert.equal(roleRequiresExtras('kirana'), true);
+  assert.equal(roleRequiresExtras('skilled-trades'), true);
+  assert.equal(roleRequiresExtras('made-up-role'), false);
   assert.equal(roleRequiresExtras(null), false);
 });
 
@@ -202,6 +204,34 @@ test('validateRoleExtras refuses bad date shape + invalid calendar date', async 
     validateRoleExtras('cab-driver', { answers: { ...baseOk, insuranceExpiryDate: '2026-02-31' }, attachments: att }),
     (e) => e.code === 'insuranceExpiryDate_date_invalid'
   );
+});
+
+test('validateRoleExtras rejects malformed GSTIN + FSSAI on kirana (Phase 12.3 pattern enforcement)', async () => {
+  const baseOk = { shopName: 'Sharma Provision Store', shopLicenseNumber: 'SHOP-001' };
+  const att = { shop_license: `bos:att:${sha256Hex(TINY_JPEG).slice(0, 32)}` };
+  // Garbage GSTIN (within length cap, wrong shape) must be rejected.
+  await assert.rejects(
+    validateRoleExtras('kirana', {
+      answers: { ...baseOk, gstinNumber: 'notarealgstin12' },
+      attachments: att
+    }),
+    (e) => e.code === 'gstinNumber_pattern_invalid'
+  );
+  // Garbage FSSAI must be rejected.
+  await assert.rejects(
+    validateRoleExtras('kirana', {
+      answers: { ...baseOk, fssaiLicenseNumber: '12345' },
+      attachments: att
+    }),
+    (e) => e.code === 'fssaiLicenseNumber_pattern_invalid'
+  );
+  // Valid GSTIN (lowercase) gets normalised to upper and accepted.
+  const out = await validateRoleExtras('kirana', {
+    answers: { ...baseOk, gstinNumber: '27aapfu0939f1zv', fssaiLicenseNumber: '12345678901234' },
+    attachments: att
+  });
+  assert.equal(out.answers.gstinNumber, '27AAPFU0939F1ZV', 'GSTIN must be normalised to upper');
+  assert.equal(out.answers.fssaiLicenseNumber, '12345678901234');
 });
 
 test('attachmentVerifier rejects foreign-owned blob', async () => {

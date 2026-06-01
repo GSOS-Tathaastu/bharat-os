@@ -160,12 +160,13 @@ test('attestProviderKyc refuses kycLevel none', () => {
   );
 });
 
-test('transitionProviderStatus enforces valid transitions', () => {
-  // Phase 12.2.4 — wave-2 role 'kirana' has no role-extras
-  // schema, so this test exercises ONLY the KYC guard
-  // independent of the new role-extras activation guard.
-  // Wave-1 role activation is covered separately in
-  // role-extras.test.mjs.
+test('transitionProviderStatus enforces valid transitions', async () => {
+  // Phase 12.3 — every wave-1 + wave-2 role now requires
+  // role-extras attestation before activation. Synthesize a
+  // minimal stub envelope so this test can exercise the KYC
+  // gate independently.
+  const { recordRoleExtrasSubmission: recordRoleExtras, attestRoleExtras: attestExtras } =
+    await import('../../src/phase1/provider-identity.mjs');
   let p = createProviderIdentity({
     rootIdentityId: 'bos:person:abc',
     roleKind: 'kirana',
@@ -193,6 +194,15 @@ test('transitionProviderStatus enforces valid transitions', () => {
     /cannot activate provider without KYC/
   );
   p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+  // Phase 12.3 — add role-extras submission + attestation so
+  // activation gate doesn't fire.
+  p = recordRoleExtras(p, {
+    schemaVersion: 1, role: 'kirana',
+    answers: { shopName: 'X', shopLicenseNumber: 'Y' },
+    attachments: {}
+  });
+  p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+  p = attestExtras(p, { level: 'basic', operatorId: 'op:test' });
   p = transitionProviderStatus(p, 'active', { operatorId: 'op:test' });
   assert.equal(p.status, 'active');
   assert.ok(p.activatedAt);
@@ -526,6 +536,48 @@ test('admin KYC attest + transition: draft → submitted → active', async () =
       const kycBody = await kyc.json();
       assert.equal(kycBody.providerIdentity.status, 'submitted');
       assert.equal(kycBody.providerIdentity.kycLevel, 'basic');
+
+      // Phase 12.3 — submit role-extras + attest before
+      // activation (every role requires both now). The kirana
+      // schema requires a `shop_license` attachment; upload a
+      // tiny JPEG first.
+      const tinyJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+      const att = await fetch(`${baseUrl}/api/attachments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          actingRootIdentityId: root.id,
+          mimeType: 'image/jpeg',
+          kind: 'shop_license',
+          bytesBase64: tinyJpeg.toString('base64')
+        })
+      });
+      const attBody = await att.json();
+      const shopLicenseId = attBody.attachment.attachmentId;
+      const submit = await fetch(
+        `${baseUrl}/api/provider-identities/${encodeURIComponent(providerIdentity.providerIdentityId)}/submit-role-extras`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-bharat-os-acting-identity': root.id
+          },
+          body: JSON.stringify({
+            answers: { shopName: 'X', shopLicenseNumber: 'L1' },
+            attachments: { shop_license: shopLicenseId }
+          })
+        }
+      );
+      assert.equal(submit.status, 200, 'submit-role-extras succeeds');
+      const attestExtras = await fetch(
+        `${baseUrl}/api/admin/provider-identities/${encodeURIComponent(providerIdentity.providerIdentityId)}/attest-role-extras`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
+          body: JSON.stringify({ level: 'basic' })
+        }
+      );
+      assert.equal(attestExtras.status, 200, 'attest-role-extras succeeds');
 
       // Transition to active.
       const activate = await fetch(

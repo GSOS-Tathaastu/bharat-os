@@ -152,6 +152,61 @@ Implemented pieces:
 
 ---
 
+## 🏪 2026-06-01 — Phase 12.3 shipped: wave-2 provider roles (kirana + skilled-trades) + GST adapter
+
+`kirana` (shopkeeper) and `skilled-trades` (electrician /
+plumber / carpenter / ITI-trained) provider roles are
+LIVE in the substrate. The marketplace now covers all 6
+intended wave-1 + wave-2 roles. GST is the 4th external-
+adapter integration (after Nominatim, India Post, and
+Parivahan) and the **first one with a real tax-authority
+upstream** (GSTN via GSP partnership or commercial
+wrapper).
+
+- **ADR 0148** — `src/phase1/gst-adapter.mjs` composes
+  the Phase 12.2.1 substrate. Provider allowlist `stub |
+  sandbox | surepass | karza | gsp-direct`. Default mode
+  stub. `cacheKey = gst:<sha256(GSTIN).slice(0,32)>` —
+  raw GSTIN NEVER lands on cache key or ledger.
+- **Wave-2 schemas** — kirana required shop name +
+  shop-license # + shop-license attachment; optional
+  GSTIN / FSSAI / years-in-business. skilled-trades
+  required ITI cert # + institute + ITI cert attachment;
+  optional years-experience / portfolio URL.
+- **HIGH adversarial fix — GSTIN + FSSAI pattern
+  enforcement.** Field specs now carry `pattern: RegExp`
+  + `normalize: 'upper'`. Before this, citizens could
+  type any ≤15-char rubbish into gstinNumber, the BE
+  silently accepted it, the verifier no-op'd on shape,
+  and the operator saw a stored garbage GSTIN with no
+  verification result. Now BE rejects on shape at
+  submit time; FE mirror enforces the same regex for
+  immediate UX feedback.
+- **HIGH adversarial fix — empty-results guard.** The
+  `verify-role-extras` endpoint now returns 400
+  `nothing_to_verify` instead of silently stamping a
+  misleading "verified at T by operator X" with empty
+  results. Triggers for skilled-trades (no automated
+  verifier) and kirana-without-GSTIN.
+- **HIGH adversarial fix — operator console honesty.**
+  "Pre-verify" button is now gated on roles with a
+  configured adapter (label tracks the adapter:
+  Parivahan / GST); skilled-trades shows a "Manual
+  review only" tag instead. Previously the button
+  rendered unconditionally for every submitted role.
+- **MED adversarial fixes** — `Promise.allSettled`
+  defensive merge (so one adapter throwing doesn't
+  collapse the other's good result); generalised 502
+  message references both `BHARAT_OS_PARIVAHAN_MODE`
+  and `BHARAT_OS_GST_MODE`; **API_INTEGRATIONS.md §3.3
+  GST flipped 📋 Reserved → 🧪 Stub-only** with full
+  partner-provisioning notes.
+- **Tests**: Node 1199 → **1217** (+18 wave-2 + GST +
+  adversarial-fix cases). Vitest 140 → **146** (+6).
+  tsc clean.
+
+---
+
 ## 🔗 2026-06-01 — Phase 12.2.7 shipped: FE "Link DigiLocker" card + KYC L1 wiring (closes FE-BE gap from 12.2.6)
 
 The Phase 12.2.6 DigiLocker substrate now goes end-to-end —
@@ -254,9 +309,8 @@ smartphones is captured as a binding.
   integration + 7 adversarial-fix cases). Vitest 138
   unchanged. tsc clean. Build green. Bundle unchanged.
 
-**Next: Phase 12.2.7** (FE wizard "Link DigiLocker" button +
-browser-redirect flow) OR **Phase 12.3+** (wave-2 provider
-roles: `kirana`, `skilled-trades`) OR **Phase 14 Sahayak**
+**Next: Phase 12.4** (provider-side discovery filters /
+booking surfaces for wave-2 roles) OR **Phase 14 Sahayak**
 (if the user wants to prioritise rural reach). Direction
 flexible.
 

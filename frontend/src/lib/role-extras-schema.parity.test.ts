@@ -12,10 +12,12 @@ function projectFE(schema: typeof ROLE_EXTRAS_SCHEMAS[string]) {
   return {
     schemaVersion: schema.schemaVersion,
     required: schema.required.map((s) => ({
-      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null
+      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null,
+      pattern: s.pattern?.source ?? null, normalize: s.normalize ?? null
     })),
     optional: schema.optional.map((s) => ({
-      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null
+      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null,
+      pattern: s.pattern?.source ?? null, normalize: s.normalize ?? null
     })),
     requiredAttachmentKinds: schema.requiredAttachments.map((a) => a.kind).sort()
   };
@@ -27,6 +29,8 @@ interface BeFieldSpec {
   maxLen?: number;
   min?: number;
   max?: number;
+  pattern?: RegExp;
+  normalize?: string;
 }
 
 interface BeSchema {
@@ -40,10 +44,12 @@ function projectBE(schema: BeSchema) {
   return {
     schemaVersion: schema.schemaVersion,
     required: schema.required.map((s) => ({
-      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null
+      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null,
+      pattern: s.pattern?.source ?? null, normalize: s.normalize ?? null
     })),
     optional: schema.optional.map((s) => ({
-      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null
+      id: s.id, kind: s.kind, maxLen: s.maxLen ?? null, min: s.min ?? null, max: s.max ?? null,
+      pattern: s.pattern?.source ?? null, normalize: s.normalize ?? null
     })),
     requiredAttachmentKinds: [...schema.requiredAttachmentKinds].sort()
   };

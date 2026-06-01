@@ -17,6 +17,12 @@ export interface RoleExtrasFieldSpec {
   maxLen?: number;
   min?: number;
   max?: number;
+  // Phase 12.3 adversarial fix — per-field regex pattern. Both
+  // FE and BE check; FE gives the citizen immediate feedback.
+  pattern?: RegExp;
+  // 'upper' coerces the input to uppercase before regex test +
+  // submission (GSTIN expected uppercase).
+  normalize?: 'upper';
 }
 
 export interface RoleExtrasAttachmentSlot {
@@ -99,6 +105,36 @@ export const ROLE_EXTRAS_SCHEMAS: Record<string, RoleExtrasSchema> = {
       { kind: 'police_verification', label: 'Police verification certificate', helper: 'State PCC scan or photo.', acceptMode: 'image+pdf' },
       { kind: 'employer_reference', label: 'Prior employer reference', helper: 'Letter, message screenshot, or signed slip.', acceptMode: 'image+pdf' }
     ]
+  },
+  // Phase 12.3 — wave-2 roles.
+  'kirana': {
+    schemaVersion: 1,
+    required: [
+      { id: 'shopName', label: 'Shop name', kind: 'text', maxLen: 120 },
+      { id: 'shopLicenseNumber', label: 'Shop license / trade license number', kind: 'text', maxLen: 32 }
+    ],
+    optional: [
+      { id: 'gstinNumber', label: 'GSTIN (15 chars; leave blank if below threshold)', kind: 'text', maxLen: 15, pattern: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, normalize: 'upper' },
+      { id: 'fssaiLicenseNumber', label: 'FSSAI license number (14 digits)', kind: 'text', maxLen: 14, pattern: /^[0-9]{14}$/ },
+      { id: 'yearsInBusiness', label: 'Years in business (0-99)', kind: 'integer', min: 0, max: 99 }
+    ],
+    requiredAttachments: [
+      { kind: 'shop_license', label: 'Shop / trade license', helper: 'Photo or scan of the shop license certificate.', acceptMode: 'image+pdf' }
+    ]
+  },
+  'skilled-trades': {
+    schemaVersion: 1,
+    required: [
+      { id: 'itiCertificateNumber', label: 'ITI certificate number', kind: 'text', maxLen: 32 },
+      { id: 'itiInstituteName', label: 'ITI institute name', kind: 'text', maxLen: 120 }
+    ],
+    optional: [
+      { id: 'yearsExperience', label: 'Years of trade experience (0-50)', kind: 'integer', min: 0, max: 50 },
+      { id: 'portfolioUrl', label: 'Portfolio URL (Instagram / YouTube link)', kind: 'text', maxLen: 240 }
+    ],
+    requiredAttachments: [
+      { kind: 'iti_certificate', label: 'ITI certificate', helper: 'Photo or scan of your vocational training certificate.', acceptMode: 'image+pdf' }
+    ]
   }
 };
 
@@ -149,6 +185,10 @@ function validateField(spec: RoleExtrasFieldSpec, raw: string | number): { ok: t
       const s = String(raw).trim();
       const cap = spec.maxLen ?? 120;
       if (s.length === 0 || s.length > cap) return { ok: false, code: `${spec.id}_too_long` };
+      const normalized = spec.normalize === 'upper' ? s.toUpperCase() : s;
+      if (spec.pattern && !spec.pattern.test(normalized)) {
+        return { ok: false, code: `${spec.id}_pattern_invalid` };
+      }
       return { ok: true };
     }
     case 'date': {

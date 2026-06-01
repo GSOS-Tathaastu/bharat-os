@@ -454,6 +454,48 @@ test('POST verify-role-extras returns 502 + skips ledger when all results are ve
   }
 });
 
+test('POST verify-role-extras returns 400 nothing_to_verify for skilled-trades (manual-only, Phase 12.3 adversarial fix)', async () => {
+  process.env.BHARAT_OS_ADMIN_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  try {
+    await withApiServer(async ({ baseUrl, store }) => {
+      // Seed a skilled-trades provider with a valid role-extras
+      // submission. The two adapters have nothing to verify
+      // here (no DL, no GSTIN); the endpoint must refuse to
+      // persist + emit an empty verification row.
+      const id = createIdentity({ displayName: 'Trades Test' });
+      await store.saveIdentity(id);
+      let p = createProviderIdentity({
+        rootIdentityId: id.id,
+        roleKind: 'skilled-trades',
+        displayName: 'Test Tradesperson',
+        serviceArea: { kind: 'point-radius', center: { lat: 18.5, lng: 73.8 }, radiusMeters: 5000 }
+      });
+      p = recordRoleExtrasSubmission(p, {
+        schemaVersion: 1, role: 'skilled-trades',
+        answers: { itiCertificateNumber: 'ITI-PUNE-12345', itiInstituteName: 'ITI Pune' },
+        attachments: { iti_certificate: 'bos:att:' + 'a'.repeat(32) }
+      });
+      await store.saveProviderIdentity(p);
+
+      const r = await fetch(`${baseUrl}/api/admin/provider-identities/${encodeURIComponent(p.providerIdentityId)}/verify-role-extras`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        }
+      });
+      assert.equal(r.status, 400);
+      const body = await r.json();
+      assert.equal(body.error.code, 'nothing_to_verify');
+      // No ledger event emitted for the manual-only outcome.
+      const events = await store.listLedger({ type: 'provider_identity.role_extras_verified' });
+      assert.equal(events.length, 0, 'manual-only roles must NOT pollute the audit trail');
+    });
+  } finally {
+    delete process.env.BHARAT_OS_ADMIN_TOKEN;
+  }
+});
+
 test('POST verify-role-extras unknown provider → 404', async () => {
   process.env.BHARAT_OS_ADMIN_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   try {

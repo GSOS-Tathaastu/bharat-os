@@ -295,6 +295,10 @@ import {
   verifyRoleExtrasFields
 } from '../phase1/parivahan-adapter.mjs';
 import {
+  createGstAdapter,
+  verifyGstFields
+} from '../phase1/gst-adapter.mjs';
+import {
   generateState,
   buildAuthorizeUrl,
   exchangeCodeForToken,
@@ -755,6 +759,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
   // Default stub; live mode requires both BHARAT_OS_PARIVAHAN_MODE=live
   // AND a configured provider via BHARAT_OS_PARIVAHAN_PROVIDER.
   const parivahanAdapter = parivahan || createParivahanAdapter({ store });
+  // Phase 12.3 — GST adapter singleton. Default stub; live mode
+  // requires BHARAT_OS_GST_MODE=live + BHARAT_OS_GST_PROVIDER.
+  const gstAdapter = createGstAdapter({ store });
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -2180,15 +2187,40 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         // available.
         const digilockerLink = await store.readDigiLockerLink(existing.rootIdentityId).catch(() => null);
         let results;
-        try {
-          results = await verifyRoleExtrasFields(parivahanAdapter, {
+        // Phase 12.3 adversarial fix — Promise.allSettled so an
+        // un-caught throw in ONE adapter doesn't collapse the
+        // other adapter's good result. The per-adapter helpers
+        // currently never throw (they wrap adapter.call in
+        // try/catch + envelope), but this is defensive against
+        // future un-caught throws (parse, pre-check).
+        const settled = await Promise.allSettled([
+          verifyRoleExtrasFields(parivahanAdapter, {
             role: existing.roleExtrasSubmission.role,
             answers: existing.roleExtrasSubmission.answers,
             digilockerLink
-          });
-        } catch (err) {
-          jsonResponse(response, 502, {
-            error: { code: 'verifier_failed', message: err && err.message ? err.message : 'verifier failed.' }
+          }),
+          verifyGstFields(gstAdapter, {
+            role: existing.roleExtrasSubmission.role,
+            answers: existing.roleExtrasSubmission.answers
+          })
+        ]);
+        const parivahanResults = settled[0].status === 'fulfilled' ? settled[0].value : {};
+        const gstResults = settled[1].status === 'fulfilled' ? settled[1].value : {};
+        results = { ...parivahanResults, ...gstResults };
+        // Phase 12.3 adversarial fix — empty-results guard.
+        // A role that exposes no automated-verification fields
+        // (eg skilled-trades manual-only) or a citizen who skipped
+        // every optional field produces results={}. Persisting
+        // an empty verification row stamped with operator+time
+        // is misleading. 400 nothing_to_verify, no persist, no
+        // ledger event.
+        const resultEntries = Object.entries(results);
+        if (resultEntries.length === 0) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'nothing_to_verify',
+              message: 'no automated-verification fields for this role + submission. Manual review only.'
+            }
           });
           return;
         }
@@ -2198,13 +2230,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         // refuse to persist a row + emit a misleading ledger
         // event that looks like a real verification outcome.
         // Surface 502 so the operator knows the env / provider
-        // needs attention.
-        const resultEntries = Object.entries(results);
-        if (resultEntries.length > 0 && resultEntries.every(([, env]) => env && env.status === 'verifier_error')) {
+        // needs attention. Phase 12.3 fix — message generalised
+        // across adapters; the failedFields list tells the
+        // operator which provider(s) to investigate.
+        if (resultEntries.every(([, env]) => env && env.status === 'verifier_error')) {
           jsonResponse(response, 502, {
             error: {
               code: 'verifier_unavailable',
-              message: 'Parivahan adapter returned no usable verification — check BHARAT_OS_PARIVAHAN_MODE + provider env vars.',
+              message: 'role-extras verifier(s) returned no usable verification — check BHARAT_OS_PARIVAHAN_MODE / BHARAT_OS_GST_MODE + provider env vars.',
               failedFields: resultEntries.map(([k]) => k)
             }
           });
