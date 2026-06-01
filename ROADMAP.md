@@ -1054,6 +1054,41 @@ Tests: 1035 → **1053 Node** (+18 substrate + adapter + HTTP
 binding cases) + 115 → **119 vitest** (+4). tsc clean. Bundle
 main unchanged at 599 KB / 170 KB gzipped. **ADR 0141**.
 
+#### Phase 12.2.4 — Per-role heavy extras (wave-1) ✅ SHIPPED 2026-06-01
+
+Wave-1 onboarding loop closes. All 4 roles (cab-driver /
+personal-driver / labourers / household-help) get a
+role-specific verification step + parallel operator
+attestation. NEW src/phase1/provider-role-extras.mjs
+PROVIDER_ROLE_EXTRAS (closed schemas, deep-frozen),
+validateRoleExtras (schema_version_stale on drift). NEW
+roleExtrasSubmission + roleExtrasAttestation fields on
+providerIdentity; activation guard refuses on missing /
+stale schema / stale submission timestamp. Endpoints:
+POST submit-role-extras + admin attest-role-extras + GET
+schemas. Ledger events pointer-not-payload. FE wizard 5
+→ 6 steps; new RoleExtrasStep paints ALL errors at once;
+review step echoes typed answers. PhotoCapture: PDF
+magic-byte sniff. Operator console: per-kind View +
+attest pair. **Adversarial review** (4 lenses) surfaced
+27 findings; 11 high+med fixed in-phase. Tests: 1110 →
+**1142 Node** (+32) + 124 → **138 vitest** (+14). tsc
+clean. Bundle 618 → 628 KB / 175 → 177 KB gzipped
+(+10 KB). **ADR 0144**.
+
+#### Phase 12.2.5 — mParivahan / Sarathi / Vahan adapter (reserved)
+
+User-flagged need from Phase 12.2.4: real validation of
+DL # / vehicle reg # / commercial permit # against the
+official Government of India endpoints. Composes the
+Phase 12.2.1 external-adapter substrate (third concrete
+adapter after Nominatim + India Post PIN). Stub mode
+returns "valid" for demo; live mode hits
+parivahan.gov.in endpoints when sandbox keys are
+provisioned. Pre-validated badge replaces the operator's
+manual cross-check; failed verifications surface
+operator review notes inline.
+
 #### Phase 12.2.3 — Attachment CORE substrate + KYC L1 selfie/ID-proof ✅ SHIPPED 2026-06-01
 
 Binary blob substrate reused across KYC L1 (selfie + ID
@@ -1113,14 +1148,14 @@ Four roles share a common physical-service onboarding flow
 picked "minimum onboarding load, maximum coverage"):
 - [x] **Common KYC L1 substrate + wizard** — Phase 12.2.2.
 - [x] **Attachment CORE substrate + KYC L1 photo capture** — Phase 12.2.3.
-- [ ] `cab-driver` — own commercial vehicle (taxi/auto/ride-hail).
-  Extras: vehicle docs + commercial permit.
-- [ ] `personal-driver` — chauffeur for citizen's vehicle.
-  Extras: police verification + prior employer ref.
-- [ ] `labourers` — construction / loading / factory / farm
-  daily wage. Extras: sardar/contractor attestation.
-- [ ] `household-help` — maid + cook combined. Extras: police
-  verification + references.
+- [x] `cab-driver` — own commercial vehicle (taxi/auto/ride-hail).
+  Extras: vehicle docs + commercial permit. **Phase 12.2.4.**
+- [x] `personal-driver` — chauffeur for citizen's vehicle.
+  Extras: police verification + prior employer ref. **Phase 12.2.4.**
+- [x] `labourers` — construction / loading / factory / farm
+  daily wage. Extras: sardar/contractor attestation. **Phase 12.2.4.**
+- [x] `household-help` — maid + cook combined. Extras: police
+  verification + references. **Phase 12.2.4.**
 
 #### Phase 12.3+ — Remaining provider roles (~3 wks)
 - [ ] `kirana` (shop license + GST optional).

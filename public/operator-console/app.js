@@ -1681,8 +1681,30 @@ function renderProviderKycReview(items) {
       const exifWarn = (selfieBtn || idProofBtn)
         ? '<div class="muted small">⚠ Photos may carry EXIF / GPS — strip before forwarding.</div>'
         : '';
+      // Phase 12.2.4 — role-extras docs + attestation. Each
+      // attachment kind in roleExtrasSubmission.attachments
+      // becomes a view button. The "Attest role extras" pair
+      // sits next to the KYC attest buttons.
+      const rx = p.roleExtrasSubmission;
+      const rxa = p.roleExtrasAttestation;
+      const roleExtrasButtons = rx && rx.attachments
+        ? Object.entries(rx.attachments).map(([kind, attId]) =>
+            `<button data-kyc-view-attachment="${escapeHtml(attId)}" type="button">View ${escapeHtml(kind.replace(/_/g, ' '))}</button>`
+          ).join(' ')
+        : '';
+      const canAttestRoleExtras = Boolean(rx) && !rxa;
+      const roleExtrasAttestButtons = rx
+        ? `<div class="small">
+             <button data-role-extras-attest-basic="${escapeHtml(p.providerIdentityId)}" ${canAttestRoleExtras ? '' : 'disabled'} type="button">Attest role basic</button>
+             <button data-role-extras-attest-verified="${escapeHtml(p.providerIdentityId)}" ${canAttestRoleExtras ? '' : 'disabled'} type="button">Attest role verified</button>
+             ${rxa ? `<span class="muted">role=${escapeHtml(rxa.level)}</span>` : ''}
+           </div>`
+        : '';
       const attachmentButtons = (selfieBtn || idProofBtn)
         ? `<div class="small">${selfieBtn} ${idProofBtn}</div>${exifWarn}`
+        : '';
+      const roleExtrasAttachmentRow = roleExtrasButtons
+        ? `<div class="small">${roleExtrasButtons}</div>`
         : '';
       return `<tr>
         <td>${escapeHtml(p.displayName)}<br><span class="muted small">${escapeHtml(p.providerIdentityId)}</span></td>
@@ -1697,6 +1719,8 @@ function renderProviderKycReview(items) {
           <button data-kyc-attest-verified="${escapeHtml(p.providerIdentityId)}" ${canAttest ? '' : 'disabled'} type="button">Attest verified</button>
           <button data-kyc-activate="${escapeHtml(p.providerIdentityId)}" ${canActivate ? '' : 'disabled'} type="button">Activate</button>
           ${attachmentButtons}
+          ${roleExtrasAttestButtons}
+          ${roleExtrasAttachmentRow}
         </td>
       </tr>`;
     })
@@ -1854,6 +1878,41 @@ async function viewAttachment(attachmentId) {
   }
 }
 
+async function attestRoleExtras(providerIdentityId, level) {
+  const row = (state.providerKycReview || []).find((p) => p.providerIdentityId === providerIdentityId);
+  const rx = row && row.roleExtrasSubmission;
+  const ident = rx
+    ? `${row.displayName || providerIdentityId} role=${rx.role} (${rx.schemaVersion ? 'schema v' + rx.schemaVersion : ''})`
+    : providerIdentityId;
+  const confirmed = window.confirm(`Attest role extras for ${ident} at level=${level}?\n\nReview the role-specific documents above before confirming.`);
+  if (!confirmed) return;
+  const notes = window.prompt('Notes (optional — becomes part of the audit trail):', '');
+  if (notes === null) return;
+  const headers = readAdminHeaders();
+  if (!headers['Authorization']) {
+    window.alert('Paste an admin token in the topbar first.');
+    return;
+  }
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/admin/provider-identities/${encodeURIComponent(providerIdentityId)}/attest-role-extras`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ level, notes: notes.trim() || null, evidenceRefs: [] })
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    await loadProviderKycReview();
+  } catch (err) {
+    window.alert(`Attest role extras failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
 $('providerKycReviewTable').addEventListener('click', (event) => {
   const basic = event.target.closest('[data-kyc-attest-basic]');
   if (basic && !basic.disabled) { attestProviderKyc(basic.dataset.kycAttestBasic, 'basic'); return; }
@@ -1861,6 +1920,10 @@ $('providerKycReviewTable').addEventListener('click', (event) => {
   if (verified && !verified.disabled) { attestProviderKyc(verified.dataset.kycAttestVerified, 'verified'); return; }
   const activate = event.target.closest('[data-kyc-activate]');
   if (activate && !activate.disabled) { activateProvider(activate.dataset.kycActivate); return; }
+  const rxBasic = event.target.closest('[data-role-extras-attest-basic]');
+  if (rxBasic && !rxBasic.disabled) { attestRoleExtras(rxBasic.dataset.roleExtrasAttestBasic, 'basic'); return; }
+  const rxVerified = event.target.closest('[data-role-extras-attest-verified]');
+  if (rxVerified && !rxVerified.disabled) { attestRoleExtras(rxVerified.dataset.roleExtrasAttestVerified, 'verified'); return; }
   const view = event.target.closest('[data-kyc-view-attachment]');
   if (view) { viewAttachment(view.dataset.kycViewAttachment); }
 });

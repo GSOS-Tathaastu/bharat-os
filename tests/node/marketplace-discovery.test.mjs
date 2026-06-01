@@ -35,6 +35,8 @@ import {
 import {
   createProviderIdentity,
   attestProviderKyc,
+  recordRoleExtrasSubmission,
+  attestRoleExtras,
   transitionProviderStatus,
   publicProviderRecord,
   toPublicServiceArea,
@@ -365,6 +367,17 @@ async function seedActiveProvider(store, { rootId, role = 'cab-driver', kycLevel
     }
   });
   p = attestProviderKyc(p, { kycLevel, operatorId: 'op:test' });
+  // Phase 12.2.4 — wave-1 roles now need role-extras attestation
+  // before activation. Synthesize a stub envelope so marketplace
+  // discovery tests don't have to model the citizen wizard.
+  const WAVE_1 = ['cab-driver', 'personal-driver', 'labourers', 'household-help'];
+  if (WAVE_1.includes(role)) {
+    p = recordRoleExtrasSubmission({ ...p, status: 'draft' }, {
+      schemaVersion: 1, role, answers: { stub: 'stub' }, attachments: {}
+    });
+    p = attestProviderKyc(p, { kycLevel, operatorId: 'op:test' });
+    p = attestRoleExtras(p, { level: 'basic', operatorId: 'op:test' });
+  }
   p = transitionProviderStatus(p, 'active', { operatorId: 'op:test' });
   await store.saveProviderIdentity(p);
   return p;
@@ -533,9 +546,12 @@ test('EC-3: rankProviders falls back to DEFAULT when radius is 0', async () => {
 
 test('EC-1: updateProviderProfile refuses to null serviceArea on active provider', async () => {
   const { updateProviderProfile } = await import('../../src/phase1/provider-identity.mjs');
+  // Phase 12.2.4 — use a wave-2 role (kirana) so this test
+  // doesn't have to model role-extras attestation; the field
+  // under test is serviceArea, not the activation chain.
   let p = createProviderIdentity({
     rootIdentityId: 'r',
-    roleKind: 'cab-driver',
+    roleKind: 'kirana',
     displayName: 'X',
     serviceArea: { kind: 'point-radius', center: { lat: 18.5, lng: 73.85 }, radiusMeters: 5000, source: 'manual' }
   });

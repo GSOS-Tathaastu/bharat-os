@@ -40,6 +40,12 @@ interface Props {
   identityId: string;
   kind: AttachmentKind;
   captureMode?: 'environment' | 'user';
+  // Phase 12.2.4 — 'image+pdf' for document scans (vehicle RC,
+  // police clearance, employer reference letter). When 'image+pdf'
+  // is selected the `capture` attribute is dropped from the
+  // <input> so the file picker opens instead of forcing the
+  // camera (iOS Safari blocks file-picker when capture is set).
+  acceptMode?: 'image' | 'image+pdf';
   helper?: string;
   existingAttachmentId?: string | null;
   onUploaded: (meta: AttachmentMeta) => void;
@@ -49,6 +55,7 @@ export function PhotoCapture({
   identityId,
   kind,
   captureMode = 'environment',
+  acceptMode = 'image',
   helper,
   existingAttachmentId,
   onUploaded
@@ -56,6 +63,12 @@ export function PhotoCapture({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // Phase 12.2.4 fix UX-2 — file.type can lie (Android often
+  // hands back 'application/octet-stream' for sideloaded PDFs).
+  // We sniff the first 4 magic bytes to decide whether to
+  // render a doc card vs <img>. Trusting only the OS MIME would
+  // break the PDF preview on common mobile browsers.
+  const [pendingIsPdf, setPendingIsPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Phase 12.2.3 fix UX-1 — when the wizard re-mounts with an
   // existingAttachmentId, fetch the blob via owner-auth and
@@ -63,6 +76,9 @@ export function PhotoCapture({
   // previously showed a static "Photo on file" badge with no
   // way for the citizen to verify it was the right photo.
   const [existingUrl, setExistingUrl] = useState<string | null>(null);
+  // Phase 12.2.4 — when the existing blob is a PDF, render a
+  // doc-card instead of attempting <img src>.
+  const [existingIsPdf, setExistingIsPdf] = useState(false);
   const upload = useAttachmentUpload();
 
   // Revoke any object URL the component owns before unmount or
@@ -101,6 +117,7 @@ export function PhotoCapture({
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
         setExistingUrl(url);
+        setExistingIsPdf(blob.type === 'application/pdf');
       } catch {
         // Aborted on unmount or network blip — surface nothing;
         // the "Captured" pill still tells the citizen something
@@ -118,13 +135,26 @@ export function PhotoCapture({
     };
   }, [existingUrl]);
 
-  function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
     setError(null);
     const file = e.target.files?.[0];
     if (!file) return;
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(URL.createObjectURL(file));
     setPendingFile(file);
+    // Phase 12.2.4 fix UX-2 — sniff magic bytes for PDF.
+    // file.type === 'application/pdf' is correct on iOS Safari
+    // and most Chrome flows, but Android often hands back
+    // 'application/octet-stream' for sideloaded PDFs. Reading
+    // the first 4 bytes lets the preview render the right card.
+    try {
+      const head = await file.slice(0, 4).arrayBuffer();
+      const view = new Uint8Array(head);
+      const isPdfMagic = view[0] === 0x25 && view[1] === 0x50 && view[2] === 0x44 && view[3] === 0x46;
+      setPendingIsPdf(isPdfMagic || file.type === 'application/pdf');
+    } catch {
+      setPendingIsPdf(file.type === 'application/pdf');
+    }
   }
 
   async function handleConfirm() {
@@ -142,6 +172,7 @@ export function PhotoCapture({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPendingFile(null);
+      setPendingIsPdf(false);
       if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'upload failed.';
@@ -154,6 +185,7 @@ export function PhotoCapture({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setPendingFile(null);
+    setPendingIsPdf(false);
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -180,11 +212,22 @@ export function PhotoCapture({
             </Action>
           </div>
           {existingUrl && (
-            <img
-              src={existingUrl}
-              alt="Captured"
-              className="mt-3 max-h-48 rounded-md border border-border object-contain"
-            />
+            existingIsPdf ? (
+              <a
+                href={existingUrl}
+                target="_blank"
+                rel="noopener"
+                className="mt-3 block rounded-md border border-border bg-surface p-3 text-body text-text hover:bg-trust-50"
+              >
+                📄 Open PDF document
+              </a>
+            ) : (
+              <img
+                src={existingUrl}
+                alt="Captured"
+                className="mt-3 max-h-48 rounded-md border border-border object-contain"
+              />
+            )
           )}
         </div>
       ) : null}
@@ -201,14 +244,25 @@ export function PhotoCapture({
 
       {pendingFile && previewUrl && (
         <>
-          <img
-            src={previewUrl}
-            alt="Preview"
-            className="max-h-64 rounded-md border border-border object-contain"
-          />
+          {pendingIsPdf ? (
+            <div className="rounded-md border border-border bg-surface p-4">
+              <p className="text-body text-text">
+                📄 <strong>{pendingFile.name || 'PDF document'}</strong>
+              </p>
+              <p className="mt-1 text-caption text-text-muted">
+                {(pendingFile.size / 1024).toFixed(1)} KB · ready to upload
+              </p>
+            </div>
+          ) : (
+            <img
+              src={previewUrl}
+              alt="Preview"
+              className="max-h-64 rounded-md border border-border object-contain"
+            />
+          )}
           <div className="flex flex-wrap gap-2">
             <Action onClick={handleConfirm} disabled={upload.isPending} type="button">
-              {upload.isPending ? 'Uploading…' : 'Use this photo'}
+              {upload.isPending ? 'Uploading…' : 'Use this'}
             </Action>
             <Action variant="ghost" onClick={handleDiscard} disabled={upload.isPending} type="button">
               Retake
@@ -220,8 +274,13 @@ export function PhotoCapture({
       <input
         ref={fileRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
-        capture={captureMode}
+        accept={acceptMode === 'image+pdf'
+          ? 'image/jpeg,image/png,image/webp,application/pdf'
+          : 'image/jpeg,image/png,image/webp'}
+        // Phase 12.2.4 — drop `capture` for image+pdf so the file
+        // picker opens (iOS Safari blocks file-picker when capture
+        // is set; rear-cam can't take a PDF).
+        capture={acceptMode === 'image+pdf' ? undefined : captureMode}
         className="hidden"
         onChange={handlePick}
       />

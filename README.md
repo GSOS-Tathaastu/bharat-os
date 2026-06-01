@@ -152,6 +152,81 @@ Implemented pieces:
 
 ---
 
+## 🪪 2026-06-01 — Phase 12.2.4 shipped: per-role heavy extras (wave-1) + operator attestation flow
+
+The wave-1 onboarding loop closes. All 4 wave-1 provider roles
+(cab-driver / personal-driver / labourers / household-help)
+now have a role-specific verification step in the citizen
+wizard + a parallel attestation flow on the operator side.
+Composes the KYC L1 + Attachment CORE substrates that landed in
+Phase 12.2.2 + 12.2.3.
+
+- **ADR 0144** — `src/phase1/provider-role-extras.mjs` exports
+  `PROVIDER_ROLE_EXTRAS` (4 closed schemas: required +
+  optional verification fields + required attachment kinds
+  per role). Field kinds: `text`, `date`, `phone` (India
+  10-digit 6-9 leading), `integer`. Schemas are **deep-frozen**
+  (adversarial fix); GET endpoint returns a `structuredClone`.
+- **provider-identity** gets two new optional fields:
+  `roleExtrasSubmission` (citizen-driven envelope) +
+  `roleExtrasAttestation` (operator-driven envelope, separate
+  from KYC attestation so the audit trail records WHICH
+  evidence chain — identity vs role — the operator reviewed).
+- **Endpoints**: POST `/api/provider-identities/:id/submit-role-extras`
+  (owner-auth, attachment ownership cross-check, ledger-
+  before-save), POST `/api/admin/provider-identities/:id/attest-role-extras`
+  (admin bearer), GET `/api/provider-role-extras-schemas`
+  (public schema map).
+- **Activation guard**: refuses wave-1 activation without
+  `roleExtrasAttestation`, with `attestedSchemaVersion <
+  submission.schemaVersion` (stale schema), or with
+  `attestedSubmittedAt !== submission.submittedAt` (citizen
+  re-submitted between operator review and attest — defense
+  in depth; substrate auto-clears attestation on re-submit
+  but the guard catches the out-of-band case).
+- **FE wizard 5 → 6 steps** (identity → selfie → idProof →
+  address → **roleExtras** → review). Wave-2 roles (kirana,
+  skilled-trades) keep the 5-step flow. `useEffect` snaps
+  step back into STEP_ORDER if roleKind changes mid-session.
+  New `<RoleExtrasStep/>` paints ALL failing fields at once
+  (no more jagged one-error-at-a-time UX).
+- **PhotoCapture** gets `acceptMode='image+pdf'` for document
+  scans + **magic-byte PDF sniff** (Android often returns
+  `application/octet-stream`; trusting `file.type` alone
+  broke the preview).
+- **Operator console**: per-kind View buttons per attachment,
+  "Attest role basic / verified" pair separate from KYC
+  attest, two-step confirm echoes role + schemaVersion.
+- **§15 bindings**: `provider_identity.role_extras_submitted` +
+  `role_extras_attested` ledger events carry field NAMES +
+  attachment ID handles + role + schemaVersion ONLY — never
+  the verification numbers / employer names. Owner-list
+  redacts values to "••••" (same posture as KYC L1
+  last-4). Schema-version drift caught loudly via
+  `schema_version_stale` (not silently overwritten).
+- **Adversarial review** — 4-lens parallel workflow surfaced
+  27 findings. 11 high+med fixed in-phase including the
+  deep-freeze bypass, schema-version silent overwrite, post-
+  KYC-attest lock-out, answers-swap race between review and
+  attest, stale-schema activation gap, role-swap dead-end,
+  PDF MIME trust, multi-error reveal, review-step value
+  echo, FE/BE schema parity snapshot test.
+- **Tests** — Node 1110 → **1142** (+32 substrate + endpoint
+  + binding-grep + adversarial-fix cases) + vitest 124 →
+  **138** (+14). tsc clean. Bundle 618 → 628 KB / 175 →
+  177 KB gzipped (+10 KB).
+
+**Next: Phase 12.2.5** — **mParivahan / Sarathi / Vahan
+adapter** composes the Phase 12.2.1 external-adapter
+substrate to AUTO-VERIFY the typed DL # / vehicle registration
+# / commercial permit # against the official Government of
+India endpoints. Stub mode returns "valid" for demo; live
+mode hits `parivahan.gov.in/rcDlStatus` and related (requires
+sandbox key registration). Operator's manual cross-check
+becomes a pre-validated badge.
+
+---
+
 ## 📸 2026-06-01 — Phase 12.2.3 shipped: Attachment CORE substrate + KYC L1 selfie/ID-proof photos
 
 The binary blob substrate Phase 12.2.4 per-role extras and Phase

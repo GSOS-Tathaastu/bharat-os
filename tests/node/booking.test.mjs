@@ -26,8 +26,33 @@ import {
   createProviderIdentity,
   attestProviderKyc,
   transitionProviderStatus,
-  updateProviderProfile
+  updateProviderProfile,
+  recordRoleExtrasSubmission,
+  attestRoleExtras
 } from '../../src/phase1/provider-identity.mjs';
+import { roleRequiresExtras, getRoleExtrasSchema } from '../../src/phase1/provider-role-extras.mjs';
+
+// Phase 12.2.4 — wave-1 roles now require a role-extras
+// attestation before activation. Tests that just want an
+// "active provider" past KYC use this helper to satisfy the
+// substrate guard with stub envelopes; the values don't matter
+// for the booking flow, they just need to be schema-valid.
+function fakeRoleExtrasEnvelope(role) {
+  const schema = getRoleExtrasSchema(role);
+  if (!schema) return null;
+  const answers = {};
+  for (const spec of schema.required) {
+    answers[spec.id] = spec.kind === 'integer' ? 1
+      : spec.kind === 'phone' ? '9876543210'
+      : spec.kind === 'date' ? '2026-12-31'
+      : 'TEST-VALUE';
+  }
+  const attachments = {};
+  for (const kind of schema.requiredAttachmentKinds) {
+    attachments[kind] = `bos:att:${'a'.repeat(32)}`;
+  }
+  return { schemaVersion: schema.schemaVersion, role, answers, attachments };
+}
 import {
   createBooking,
   acceptBooking,
@@ -95,6 +120,16 @@ function makeActiveProvider({ rootIdentityId, role = 'cab-driver', ratePaisePerS
     }
   });
   p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+  // Phase 12.2.4 — wave-1 roles need a role-extras attestation
+  // too. Synthesize one for tests so the activation guard
+  // passes without coupling every booking test to the full
+  // citizen wizard flow.
+  if (roleRequiresExtras(role)) {
+    const env = fakeRoleExtrasEnvelope(role);
+    p = recordRoleExtrasSubmission({ ...p, status: 'draft' }, env);
+    p = attestProviderKyc(p, { kycLevel: 'basic', operatorId: 'op:test' });
+    p = attestRoleExtras(p, { level: 'basic', operatorId: 'op:test' });
+  }
   p = transitionProviderStatus(p, 'active', { operatorId: 'op:test' });
   return p;
 }

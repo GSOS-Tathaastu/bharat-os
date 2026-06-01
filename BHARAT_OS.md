@@ -2201,6 +2201,54 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.4 — SHIPPED 2026-06-01 (ADR 0144).** Per-role
+  heavy extras (wave-1) + operator attestation flow. Closes
+  the wave-1 onboarding loop: all 4 roles (cab-driver /
+  personal-driver / labourers / household-help) now have a
+  role-specific verification step in the citizen wizard +
+  parallel operator attestation. NEW
+  `src/phase1/provider-role-extras.mjs` PROVIDER_ROLE_EXTRAS
+  map (4 closed schemas: required + optional fields +
+  required attachment kinds per role). Field kinds: text,
+  date, phone (India 10-digit), integer. **Deep-frozen**
+  (adversarial fix PII-Q4 — initial Object.freeze was
+  shallow). GET endpoint returns `structuredClone` so
+  callers can't mutate via the public response.
+  validateRoleExtras emits **schema_version_stale** loudly
+  (adversarial fix PII-Q6 — was silently overwriting). NEW
+  fields on providerIdentity: roleExtrasSubmission +
+  roleExtrasAttestation. recordRoleExtrasSubmission now
+  accepts draft OR submitted (adversarial fix L2-1 — was
+  locked out post-KYC-attest); always clears any prior
+  attestation. attestRoleExtras pins attestedSchemaVersion
+  + attestedSubmittedAt (adversarial fix L2-2 — without the
+  timestamp anchor a citizen could swap answers between
+  review and attest). Activation guard refuses on missing
+  attestation OR stale schema version OR stale submission
+  timestamp. NEW endpoints: POST submit-role-extras +
+  POST admin attest-role-extras + GET schemas. NEW ledger
+  events provider_identity.role_extras_submitted +
+  .role_extras_attested — pointer-not-payload (field names
+  + attachment IDs + role + schemaVersion, NEVER values).
+  selfProviderRecord redacts verification numbers to "••••";
+  publicProviderRecord doesn't echo either field. FE: wizard
+  5 → **6 steps** (identity → selfie → idProof → address →
+  **roleExtras** → review), useEffect snaps step on roleKind
+  change (UX-3 fix). NEW RoleExtrasStep paints ALL failing
+  fields at once (UX-1 fix); review step echoes typed
+  answers (UX-6 fix). PhotoCapture acceptMode='image+pdf'
+  + **magic-byte PDF sniff** (UX-2 fix — Android often hands
+  back octet-stream). Operator console: per-kind View
+  buttons + Attest role basic/verified pair separate from
+  KYC attest. NEW vitest FE/BE schema parity snapshot test
+  (UX-4 fix). Adversarial review surfaced 27 findings; 11
+  high+med fixed in-phase. **User-flagged need**: real
+  validation of DL # / vehicle reg # against mParivahan /
+  Sarathi / Vahan endpoints — RESERVED as Phase 12.2.5
+  (composes Phase 12.2.1 external-adapter substrate).
+  Tests: 1110 → **1142 Node** (+32) + 124 → **138 vitest**
+  (+14). tsc clean. Bundle main 618 → 628 KB / 175 → 177 KB
+  gzipped (+10 KB).
 - **Phase 12.2.3 — SHIPPED 2026-06-01 (ADR 0143).** Attachment
   CORE substrate + KYC L1 selfie / ID-proof wiring + operator
   view of citizen-captured photos. NEW

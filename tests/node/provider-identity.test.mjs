@@ -161,9 +161,14 @@ test('attestProviderKyc refuses kycLevel none', () => {
 });
 
 test('transitionProviderStatus enforces valid transitions', () => {
+  // Phase 12.2.4 — wave-2 role 'kirana' has no role-extras
+  // schema, so this test exercises ONLY the KYC guard
+  // independent of the new role-extras activation guard.
+  // Wave-1 role activation is covered separately in
+  // role-extras.test.mjs.
   let p = createProviderIdentity({
     rootIdentityId: 'bos:person:abc',
-    roleKind: 'cab-driver',
+    roleKind: 'kirana',
     displayName: 'Ravi',
     // Phase 12.1a.1 — submitted state machine guard requires
     // a discoverable point-radius serviceArea.
@@ -492,7 +497,7 @@ test('admin KYC attest + transition: draft → submitted → active', async () =
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ roleKind: 'cab-driver', displayName: 'Ravi', serviceArea: { kind: 'point-radius', center: { lat: 18.5204, lng: 73.8567 }, radiusMeters: 5000, source: 'manual' } })
+          body: JSON.stringify({ roleKind: 'kirana', displayName: 'Ravi', serviceArea: { kind: 'point-radius', center: { lat: 18.5204, lng: 73.8567 }, radiusMeters: 5000, source: 'manual' } })
         }
       );
       const { providerIdentity } = await create.json();

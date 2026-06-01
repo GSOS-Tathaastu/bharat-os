@@ -29,14 +29,22 @@ import {
   useActiveIdentity,
   useProviderIdentities,
   useSubmitKycLevel1,
+  useSubmitRoleExtras,
   type ProviderIdentity
 } from '@/lib/hooks';
 import { usePincodeLookup, isValidPincode } from '@/lib/use-pincode-lookup';
 import { PhotoCapture } from '@/components/forms/PhotoCapture';
+import { RoleExtrasStep } from '@/components/forms/RoleExtrasStep';
+import {
+  getRoleExtrasSchema,
+  roleRequiresExtras,
+  validateRoleExtrasClientSide
+} from '@/lib/role-extras-schema';
 
-type Step = 'identity' | 'selfie' | 'idProof' | 'address' | 'review';
+type Step = 'identity' | 'selfie' | 'idProof' | 'address' | 'roleExtras' | 'review';
 
-const STEP_ORDER: Step[] = ['identity', 'selfie', 'idProof', 'address', 'review'];
+const STEP_ORDER_WITH_EXTRAS: Step[] = ['identity', 'selfie', 'idProof', 'address', 'roleExtras', 'review'];
+const STEP_ORDER_NO_EXTRAS: Step[] = ['identity', 'selfie', 'idProof', 'address', 'review'];
 
 interface FormState {
   fullLegalName: string;
@@ -50,6 +58,10 @@ interface FormState {
   // submission references the IDs.
   selfieAttachmentId: string | null;
   idProofAttachmentId: string | null;
+  // Phase 12.2.4 — per-role extras (only set when the role
+  // requires them per role-extras-schema.ts).
+  roleExtrasValues: Record<string, string>;
+  roleExtrasAttachmentIds: Record<string, string>;
 }
 
 const EMPTY: FormState = {
@@ -59,7 +71,9 @@ const EMPTY: FormState = {
   addressPinCode: '',
   addressLine: '',
   selfieAttachmentId: null,
-  idProofAttachmentId: null
+  idProofAttachmentId: null,
+  roleExtrasValues: {},
+  roleExtrasAttachmentIds: {}
 };
 
 function trimToMax(s: string, max: number): string {
@@ -115,6 +129,18 @@ export function KycLevel1Page() {
     if (hydratedRef.current) return;
     if (!provider?.kycLevel1Submission) return;
     const s = provider.kycLevel1Submission;
+    // Phase 12.2.4 — also pre-fill role-extras (refs + values).
+    // Verification number values are redacted to "••••" on the
+    // owner-list endpoint; we skip those (forcing the citizen to
+    // re-type) for the same reason last-4 IDs aren't pre-filled.
+    const rx = provider.roleExtrasSubmission;
+    const rxValues: Record<string, string> = {};
+    if (rx && rx.answers) {
+      for (const [k, v] of Object.entries(rx.answers)) {
+        if (typeof v === 'string' && v !== '••••') rxValues[k] = v;
+        else if (typeof v === 'number') rxValues[k] = String(v);
+      }
+    }
     setForm({
       fullLegalName: s.fullLegalName,
       aadhaarLast4: /^[0-9]{4}$/.test(s.aadhaarLast4) ? s.aadhaarLast4 : '',
@@ -126,7 +152,9 @@ export function KycLevel1Page() {
       // re-take the photos. The citizen can still tap
       // "Replace" on each PhotoCapture to upload again.
       selfieAttachmentId: s.selfieAttachmentId || null,
-      idProofAttachmentId: s.idProofAttachmentId || null
+      idProofAttachmentId: s.idProofAttachmentId || null,
+      roleExtrasValues: rxValues,
+      roleExtrasAttachmentIds: (rx && rx.attachments) ? { ...rx.attachments } : {}
     });
     hydratedRef.current = true;
   }, [provider?.kycLevel1Submission]);
@@ -156,6 +184,27 @@ export function KycLevel1Page() {
   }, [provider]);
 
   const submitMutation = useSubmitKycLevel1();
+  const roleExtrasMutation = useSubmitRoleExtras();
+
+  // Phase 12.2.4 — wizard step order depends on whether the role
+  // requires extras. Wave-2 roles (kirana, skilled-trades) skip
+  // the extras step entirely so the 5-step flow stays clean.
+  const STEP_ORDER = provider && roleRequiresExtras(provider.roleKind)
+    ? STEP_ORDER_WITH_EXTRAS
+    : STEP_ORDER_NO_EXTRAS;
+  const extrasSchema = provider ? getRoleExtrasSchema(provider.roleKind) : null;
+
+  // Phase 12.2.4 adversarial fix UX-3 — when the role changes
+  // mid-session (citizen edited roleKind on the profile, or the
+  // provider record refetched after a server change), the
+  // current `step` may no longer exist in STEP_ORDER. Without
+  // this snap the header shows "Step 0 of 5" and the wizard
+  // dead-ends.
+  useEffect(() => {
+    if (!STEP_ORDER.includes(step)) {
+      setStep('identity');
+    }
+  }, [STEP_ORDER, step]);
 
   function setField<K extends keyof FormState>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -179,6 +228,14 @@ export function KycLevel1Page() {
     if (!effectiveCity || !effectiveState) return false;
     return true;
   }
+  function canAdvanceFromRoleExtras(): boolean {
+    if (!extrasSchema) return true;
+    const v = validateRoleExtrasClientSide(extrasSchema, form.roleExtrasValues);
+    if (!v.ok) return false;
+    return extrasSchema.requiredAttachments.every(
+      (slot) => /^bos:att:[0-9a-f]{32}$/.test(form.roleExtrasAttachmentIds[slot.kind] || '')
+    );
+  }
 
   async function handleSubmit() {
     if (!identity?.id || !providerId || !effectiveCity || !effectiveState) return;
@@ -196,7 +253,24 @@ export function KycLevel1Page() {
         selfieAttachmentId: form.selfieAttachmentId,
         idProofAttachmentId: form.idProofAttachmentId
       });
-      show('KYC submitted. An operator will review and elevate your provider profile.', 'success');
+      // Phase 12.2.4 — when the role requires extras, submit them
+      // in the same wizard finish so the operator review queue
+      // sees both envelopes together.
+      if (provider && extrasSchema && roleRequiresExtras(provider.roleKind)) {
+        // Trim text values, leave non-string values alone.
+        const cleanedAnswers: Record<string, string> = {};
+        for (const [k, v] of Object.entries(form.roleExtrasValues)) {
+          const trimmed = typeof v === 'string' ? v.trim() : v;
+          if (trimmed !== '' && trimmed != null) cleanedAnswers[k] = trimmed;
+        }
+        await roleExtrasMutation.mutateAsync({
+          rootIdentityId: identity.id,
+          providerIdentityId: providerId,
+          answers: cleanedAnswers,
+          attachments: form.roleExtrasAttachmentIds
+        });
+      }
+      show('Submitted. An operator will review and elevate your provider profile.', 'success');
       navigate(returnTo);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Submission failed.';
@@ -452,11 +526,43 @@ export function KycLevel1Page() {
             <Action variant="ghost" onClick={() => setStep('idProof')}>
               Back
             </Action>
-            <Action onClick={() => setStep('review')} disabled={!canAdvanceFromAddress()}>
-              Review
+            <Action
+              onClick={() => setStep(extrasSchema ? 'roleExtras' : 'review')}
+              disabled={!canAdvanceFromAddress()}
+            >
+              {extrasSchema ? 'Next: role docs' : 'Review'}
             </Action>
           </div>
         </Card>
+      )}
+
+      {step === 'roleExtras' && provider && extrasSchema && identity && (
+        <>
+          <RoleExtrasStep
+            role={provider.roleKind}
+            identityId={identity.id}
+            schema={extrasSchema}
+            values={form.roleExtrasValues}
+            attachmentIds={form.roleExtrasAttachmentIds}
+            onValueChange={(id, next) =>
+              setForm((p) => ({ ...p, roleExtrasValues: { ...p.roleExtrasValues, [id]: next } }))
+            }
+            onAttachmentUploaded={(kind, meta) =>
+              setForm((p) => ({
+                ...p,
+                roleExtrasAttachmentIds: { ...p.roleExtrasAttachmentIds, [kind]: meta.attachmentId }
+              }))
+            }
+          />
+          <div className="mt-4 flex justify-between">
+            <Action variant="ghost" onClick={() => setStep('address')}>
+              Back
+            </Action>
+            <Action onClick={() => setStep('review')} disabled={!canAdvanceFromRoleExtras()}>
+              Review
+            </Action>
+          </div>
+        </>
       )}
 
       {step === 'review' && effectiveCity && effectiveState && (
@@ -484,17 +590,43 @@ export function KycLevel1Page() {
             <dd className="text-body text-text">
               {form.idProofAttachmentId ? <Badge variant="trust">Captured</Badge> : <span className="text-text-muted">Not captured</span>}
             </dd>
+            {extrasSchema && (
+              <>
+                {/* Phase 12.2.4 fix UX-6 — echo every typed
+                    answer so the citizen can verify before
+                    submitting. Optional fields are shown only
+                    when filled. */}
+                {[...extrasSchema.required, ...extrasSchema.optional].map((spec) => {
+                  const raw = form.roleExtrasValues[spec.id];
+                  if (raw == null || raw === '') return null;
+                  return (
+                    <>
+                      <dt key={spec.id + '-dt'} className="text-caption text-text-muted">{spec.label}</dt>
+                      <dd key={spec.id + '-dd'} className="text-body text-text">{raw}</dd>
+                    </>
+                  );
+                })}
+                <dt className="text-caption text-text-muted">Role-specific docs</dt>
+                <dd className="text-body text-text">
+                  {extrasSchema.requiredAttachments.every(
+                    (slot) => /^bos:att:[0-9a-f]{32}$/.test(form.roleExtrasAttachmentIds[slot.kind] || '')
+                  )
+                    ? <Badge variant="trust">All captured ({extrasSchema.requiredAttachments.length})</Badge>
+                    : <span className="text-text-muted">Missing some</span>}
+                </dd>
+              </>
+            )}
           </dl>
           <p className="mt-4 text-caption text-text-muted">
             By submitting, you confirm these details match a government ID you can show
             an operator on request. Bharat OS only stores the last 4 digits.
           </p>
           <div className="mt-4 flex justify-between">
-            <Action variant="ghost" onClick={() => setStep('address')}>
+            <Action variant="ghost" onClick={() => setStep(extrasSchema ? 'roleExtras' : 'address')}>
               Back
             </Action>
-            <Action onClick={handleSubmit} disabled={submitMutation.isPending}>
-              {submitMutation.isPending ? 'Submitting…' : 'Submit for review'}
+            <Action onClick={handleSubmit} disabled={submitMutation.isPending || roleExtrasMutation.isPending}>
+              {(submitMutation.isPending || roleExtrasMutation.isPending) ? 'Submitting…' : 'Submit for review'}
             </Action>
           </div>
         </Card>

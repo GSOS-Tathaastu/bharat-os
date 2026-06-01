@@ -1968,6 +1968,11 @@ export interface ProviderIdentity {
   // a root-owner or admin endpoint. On the owner-list endpoint,
   // last-4 + address-line are redacted to "••••".
   kycLevel1Submission?: KycLevel1Submission | null;
+  // Phase 12.2.4 — per-role heavy extras. Same lifecycle as KYC
+  // L1; verification numbers redacted to "••••" on the
+  // owner-list projection.
+  roleExtrasSubmission?: RoleExtrasSubmissionEnvelope | null;
+  roleExtrasAttestation?: RoleExtrasAttestation | null;
   kycLevel: ProviderKycLevel;
   status: ProviderIdentityStatus;
   createdAt: string;
@@ -2111,6 +2116,55 @@ export function useSubmitKycLevel1() {
             stateFromPincode: input.stateFromPincode,
             selfieAttachmentId: input.selfieAttachmentId ?? null,
             idProofAttachmentId: input.idProofAttachmentId ?? null
+          })
+        }
+      ),
+    onSuccess: (_data, { rootIdentityId, providerIdentityId }) => {
+      qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
+      qc.invalidateQueries({ queryKey: ['provider-identity', providerIdentityId] });
+    }
+  });
+}
+
+// ─── Phase 12.2.4 — citizen-driven role extras submission ──────────
+
+export interface RoleExtrasSubmissionEnvelope {
+  schemaVersion: number;
+  role: string;
+  answers: Record<string, string | number>;
+  attachments: Record<string, string>;
+  submittedAt: string;
+}
+
+export interface RoleExtrasAttestation {
+  level: 'basic' | 'verified';
+  operatorId: string;
+  evidenceRefs: string[];
+  notes: string | null;
+  attestedAt: string;
+  attestedSchemaVersion: number;
+}
+
+export interface SubmitRoleExtrasInput {
+  rootIdentityId: string;
+  providerIdentityId: string;
+  answers: Record<string, string | number>;
+  attachments: Record<string, string>;
+}
+
+export function useSubmitRoleExtras() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SubmitRoleExtrasInput) =>
+      api<{ providerIdentity: ProviderIdentity }>(
+        `/api/provider-identities/${encodeURIComponent(input.providerIdentityId)}/submit-role-extras`,
+        {
+          method: 'POST',
+          headers: { 'X-Bharat-OS-Acting-Identity': input.rootIdentityId },
+          body: JSON.stringify({
+            actingRootIdentityId: input.rootIdentityId,
+            answers: input.answers,
+            attachments: input.attachments
           })
         }
       ),

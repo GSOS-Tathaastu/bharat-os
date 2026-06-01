@@ -50,6 +50,7 @@
 //     balance (§13B + memory/service-booking-native-not-ola-uber).
 
 import { sha256Hex, stableStringify } from '../phase0/core.mjs';
+import { ROLES_REQUIRING_EXTRAS } from './provider-role-extras.mjs';
 
 export const PROVIDER_IDENTITY_PROTOCOL_VERSION = 'bos.phase12.provider-identity.v0';
 
@@ -239,6 +240,101 @@ export function submitKycLevel1(provider, fields, { at = nowIso() } = {}) {
       submittedAt: at
     },
     updatedAt: at
+  };
+}
+
+// Phase 12.2.4 — Persist a validated role-extras envelope on the
+// draft providerIdentity. The substrate validation happens BEFORE
+// this call (the API handler runs `validateRoleExtras` with the
+// attachment-ownership cross-check); this function just stamps
+// the envelope onto the record.
+//
+// Idempotent: re-submitting overwrites the prior envelope and
+// updates submittedAt. Schema version mismatches (citizen on stale
+// client posts an older schemaVersion) are surfaced as an error
+// to the caller so the FE can re-render the new wizard.
+export function recordRoleExtrasSubmission(provider, validatedEnvelope, { at = nowIso() } = {}) {
+  // Phase 12.2.4 adversarial fix L2-1 — allow submission on
+  // draft OR submitted. attestProviderKyc auto-promotes draft
+  // → submitted, so requiring draft locked out citizens whose
+  // operator cleared KYC before the citizen completed role
+  // extras. Active / suspended / revoked are still terminal.
+  if (!provider || (provider.status !== 'draft' && provider.status !== 'submitted')) {
+    const err = new Error('Role extras can only be submitted while the provider is in draft or submitted.');
+    err.code = 'invalid_status_for_role_extras';
+    throw err;
+  }
+  if (!validatedEnvelope || typeof validatedEnvelope !== 'object') {
+    const err = new Error('validated envelope is required.');
+    err.code = 'envelope_required';
+    throw err;
+  }
+  return {
+    ...provider,
+    roleExtrasSubmission: {
+      ...validatedEnvelope,
+      submittedAt: at
+    },
+    // Phase 12.2.4 fix L2-2 — a fresh submission clears any
+    // prior attestation. Without this, the operator's old
+    // attestation would silently apply to the new answers the
+    // operator never reviewed.
+    roleExtrasAttestation: null,
+    updatedAt: at
+  };
+}
+
+// Phase 12.2.4 — Operator attestation envelope, parallel to
+// `kycAttestation` but specific to the role-extras body.
+// Recorded separately so the audit trail shows WHICH evidence
+// chain the operator reviewed: KYC L1 (Aadhaar/PAN/address) vs
+// role extras (DL/RC/PCC/etc.).
+//
+// The substrate refuses attestation when the role doesn't have a
+// schema (wave-1 covers 4 roles; future roles need a substrate
+// update before they can be attested at this layer).
+export const ROLE_EXTRAS_ATTESTATION_LEVELS = ['basic', 'verified'];
+
+export function attestRoleExtras(provider, {
+  level,
+  operatorId,
+  evidenceRefs = [],
+  notes = null,
+  attestedAt = nowIso()
+} = {}) {
+  if (!provider) {
+    throw new Error('provider is required.');
+  }
+  if (!ROLE_EXTRAS_ATTESTATION_LEVELS.includes(level)) {
+    throw new Error(`level must be one of: ${ROLE_EXTRAS_ATTESTATION_LEVELS.join(', ')}.`);
+  }
+  if (!provider.roleExtrasSubmission) {
+    const err = new Error('cannot attest role extras — no submission on record.');
+    err.code = 'no_role_extras_submission';
+    throw err;
+  }
+  const op = assertNonEmptyString(operatorId, 'operatorId', 160);
+  const notesTrim = notes == null ? null : String(notes).slice(0, 600);
+  const envelope = {
+    level,
+    operatorId: op,
+    evidenceRefs: Array.isArray(evidenceRefs) ? evidenceRefs.slice(0, 20) : [],
+    notes: notesTrim,
+    attestedAt,
+    // Pin the schemaVersion the operator attested AGAINST. If
+    // the schema bumps later, downstream consumers can recognise
+    // a stale attestation and force a re-review.
+    attestedSchemaVersion: Number(provider.roleExtrasSubmission.schemaVersion) || 1,
+    // Phase 12.2.4 fix L2-2 — anchor the EXACT submission
+    // timestamp the operator reviewed. If the citizen
+    // re-submits between review and attest, the activation
+    // guard refuses (submission.submittedAt !== attestedSubmittedAt).
+    attestedSubmittedAt: provider.roleExtrasSubmission.submittedAt || null
+  };
+  return {
+    ...provider,
+    roleExtrasAttestation: envelope,
+    updatedAt: attestedAt
   };
 }
 
@@ -493,6 +589,13 @@ export function createProviderIdentity({
     // review consumes this field via the admin queue; never exposed
     // by publicProviderRecord.
     kycLevel1Submission: null,
+    // Phase 12.2.4 — per-role heavy extras envelope. Citizen
+    // submits via /onboarding/kyc-level-1 step 5 (wave-1 roles);
+    // operator attests separately from KYC L1.
+    // Shape: {schemaVersion, role, answers:{...}, attachments:{kind: id}, submittedAt}
+    // or null. Never echoed by publicProviderRecord.
+    roleExtrasSubmission: null,
+    roleExtrasAttestation: null,
     kycLevel: 'none',
     kycAttestation: null,
     status: 'draft',
@@ -584,6 +687,40 @@ export function transitionProviderStatus(provider, nextStatus, {
   // §15: cannot activate without KYC attestation.
   if (nextStatus === 'active' && provider.kycLevel === 'none') {
     throw new Error('cannot activate provider without KYC attestation.');
+  }
+  // Phase 12.2.4: cannot activate a role that requires extras
+  // without a role-extras attestation. Wave-1 covers all 4
+  // roles (cab-driver / personal-driver / labourers /
+  // household-help); the substrate refuses activation until
+  // the operator has signed off on the role-specific evidence
+  // chain (DL/RC/PCC/etc.) separately from the KYC L1 chain.
+  if (nextStatus === 'active' && ROLES_REQUIRING_EXTRAS.includes(provider.roleKind)) {
+    if (!provider.roleExtrasAttestation) {
+      const err = new Error('cannot activate provider without role-extras attestation.');
+      err.code = 'role_extras_attestation_required';
+      throw err;
+    }
+    // Phase 12.2.4 fix L2-5 — attestation schemaVersion must
+    // cover the current submission. A citizen who re-submitted
+    // against a bumped substrate schema after attest gets a
+    // stale attestation; refuse activation until re-reviewed.
+    const sub = provider.roleExtrasSubmission;
+    const attest = provider.roleExtrasAttestation;
+    if (sub && Number(sub.schemaVersion) > Number(attest.attestedSchemaVersion)) {
+      const err = new Error('role-extras attestation is stale (schema version drift); re-review required.');
+      err.code = 'role_extras_attestation_stale_schema';
+      throw err;
+    }
+    // Phase 12.2.4 fix L2-2 — attestation must anchor the
+    // EXACT submission timestamp. Submission edits after attest
+    // invalidate the attestation (recordRoleExtrasSubmission
+    // also clears it; this guard catches the post-restore /
+    // out-of-band case).
+    if (sub && attest.attestedSubmittedAt && sub.submittedAt !== attest.attestedSubmittedAt) {
+      const err = new Error('role-extras attestation does not cover the current submission; re-review required.');
+      err.code = 'role_extras_attestation_stale_submission';
+      throw err;
+    }
   }
   // Phase 12.1a.1: cannot submit a draft without a discoverable
   // serviceArea (point-radius with finite center). Forces existing
@@ -750,6 +887,22 @@ export function selfProviderRecord(provider) {
       : null,
     kycLevel: provider.kycLevel,
     kycAttestation: provider.kycAttestation,
+    // Phase 12.2.4 — role extras + attestation. The submission's
+    // `answers` block carries verification numbers (DL #, PCC #,
+    // employer name). Those are PII-adjacent; we redact them on
+    // the owner-list projection (same defense-in-depth as
+    // last-4 IDs on KYC L1). The attachment refs stay (substrate
+    // handles).
+    roleExtrasSubmission: provider.roleExtrasSubmission
+      ? {
+        schemaVersion: provider.roleExtrasSubmission.schemaVersion,
+        role: provider.roleExtrasSubmission.role,
+        answers: redactRoleExtrasAnswers(provider.roleExtrasSubmission.answers),
+        attachments: provider.roleExtrasSubmission.attachments || {},
+        submittedAt: provider.roleExtrasSubmission.submittedAt
+      }
+      : null,
+    roleExtrasAttestation: provider.roleExtrasAttestation,
     status: provider.status,
     createdAt: provider.createdAt,
     submittedAt: provider.submittedAt,
@@ -759,6 +912,24 @@ export function selfProviderRecord(provider) {
     updatedAt: provider.updatedAt,
     lastTransition: provider.lastTransition
   };
+}
+
+// Phase 12.2.4 — owner-list redaction for verification numbers
+// (DL #, PCC #, etc.). Same posture as KYC L1 last-4 redaction:
+// the values live on the record but the citizen sees "••••" in
+// the wizard edit-mode (they re-type to confirm). The operator
+// admin queue gets the raw values via the un-projected list.
+function redactRoleExtrasAnswers(answers) {
+  if (!answers || typeof answers !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(answers)) {
+    if (typeof v === 'string' && v.length > 0) {
+      out[k] = '••••';
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export function canAcceptBookings(provider) {

@@ -274,11 +274,21 @@ import {
   publicProviderRecord,
   selfProviderRecord,
   submitKycLevel1,
+  recordRoleExtrasSubmission,
+  attestRoleExtras,
+  ROLE_EXTRAS_ATTESTATION_LEVELS,
   KycLevel1ValidationError,
   PROVIDER_ROLE_KINDS,
   PROVIDER_KYC_LEVELS,
   PROVIDER_IDENTITY_STATUSES
 } from '../phase1/provider-identity.mjs';
+import {
+  validateRoleExtras,
+  RoleExtrasValidationError,
+  getRoleExtrasSchema,
+  roleRequiresExtras,
+  PROVIDER_ROLE_EXTRAS
+} from '../phase1/provider-role-extras.mjs';
 import {
   validateRoleAnswers,
   getProviderRoleForm,
@@ -1917,6 +1927,176 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         });
         await store.saveProviderIdentity(next);
         jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // ── Phase 12.2.4 — Per-role heavy extras (wave-1) ─────────────
+      //
+      // POST /api/provider-identities/:id/submit-role-extras
+      //   Citizen-driven. Validates the role-specific envelope
+      //   (verification fields + required attachment kinds);
+      //   verifies each attachment is owned by the same root
+      //   identity; persists; emits a pointer-not-payload ledger
+      //   event.
+      //
+      // POST /api/admin/provider-identities/:id/attest-role-extras
+      //   Operator-only. Separate envelope from KYC L1
+      //   attestation — the audit trail records which evidence
+      //   chain (identity vs role) the operator reviewed.
+      //
+      // §15: ledger event payload carries field NAMES + attachment
+      //   ID handles only. The verification numbers (DL #, PCC #,
+      //   employer name) stay on the record.
+      const provIdRoleExtrasMatch = /^\/api\/provider-identities\/([^/]+)\/submit-role-extras$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdRoleExtrasMatch) {
+        const providerIdentityId = decodeURIComponent(provIdRoleExtrasMatch[1]);
+        const body = await readRequestJson(request);
+        const existing = await checkProviderOwnerAuth(request, response, {
+          store,
+          providerIdentityId,
+          body,
+          requestId
+        });
+        if (!existing) return;
+        if (!roleRequiresExtras(existing.roleKind)) {
+          jsonResponse(response, 400, {
+            error: { code: 'role_extras_not_required', message: `role ${existing.roleKind} has no extras schema.` }
+          });
+          return;
+        }
+        let envelope;
+        try {
+          envelope = await validateRoleExtras(existing.roleKind, {
+            answers: body.answers,
+            attachments: body.attachments
+          }, {
+            // Phase 12.2.4 — verifier closure: ownership +
+            // existence cross-check against the attachment
+            // substrate. A citizen cannot reference another
+            // citizen's vehicle RC.
+            attachmentVerifier: async (attachmentId) => {
+              const att = await store.readAttachment(attachmentId, {
+                rootIdentityId: existing.rootIdentityId
+              }).catch(() => null);
+              return Boolean(att);
+            }
+          });
+        } catch (err) {
+          if (err instanceof RoleExtrasValidationError) {
+            jsonResponse(response, 400, {
+              error: { code: err.code, message: err.message, field: err.field }
+            });
+            return;
+          }
+          throw err;
+        }
+        // Optimistic concurrency re-read (mirror the Phase 12.2.2
+        // KYC L1 pattern — parallel operator action between
+        // read and save).
+        const fresh = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!fresh) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        if (
+          fresh.status !== existing.status ||
+          fresh.updatedAt !== existing.updatedAt
+        ) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'provider_concurrent_change',
+              message: 'provider state changed in parallel; reload and try again.',
+              observed: { status: fresh.status }
+            }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = recordRoleExtrasSubmission(existing, envelope, { at: new Date().toISOString() });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: err.code || 'invalid_role_extras', message: err.message }
+          });
+          return;
+        }
+        // Ledger BEFORE save — same posture as KYC L1.
+        await store.appendLedger({
+          type: 'provider_identity.role_extras_submitted',
+          providerIdentityId: next.providerIdentityId,
+          rootIdentityId: next.rootIdentityId,
+          role: envelope.role,
+          schemaVersion: envelope.schemaVersion,
+          submittedAnswerFields: Object.keys(envelope.answers),
+          submittedAttachmentKinds: Object.keys(envelope.attachments),
+          attachmentIds: Object.values(envelope.attachments),
+          at: next.updatedAt
+        });
+        await store.saveProviderIdentity(next);
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // Operator: attest role extras.
+      const provIdAttestRoleExtrasMatch =
+        /^\/api\/admin\/provider-identities\/([^/]+)\/attest-role-extras$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdAttestRoleExtrasMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const operator = auth.operator;
+        const providerIdentityId = decodeURIComponent(provIdAttestRoleExtrasMatch[1]);
+        const body = await readRequestJson(request);
+        const existing = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        if (!ROLE_EXTRAS_ATTESTATION_LEVELS.includes(body.level)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_level', message: `level must be one of: ${ROLE_EXTRAS_ATTESTATION_LEVELS.join(', ')}.` }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = attestRoleExtras(existing, {
+            level: body.level,
+            operatorId: operator,
+            evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+            notes: body.notes ?? null,
+            attestedAt: new Date().toISOString()
+          });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: err.code || 'invalid_attestation', message: err.message }
+          });
+          return;
+        }
+        await store.appendLedger({
+          type: 'provider_identity.role_extras_attested',
+          providerIdentityId: next.providerIdentityId,
+          rootIdentityId: next.rootIdentityId,
+          role: next.roleExtrasSubmission?.role,
+          level: body.level,
+          operatorId: operator,
+          attestedSchemaVersion: next.roleExtrasAttestation.attestedSchemaVersion,
+          at: next.updatedAt
+        });
+        await store.saveProviderIdentity(next);
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // GET /api/provider-role-extras-schemas — public read for
+      // the wizard. Phase 12.2.4 adversarial fix PII-Q4 — return
+      // a structured clone so a caller can't depend on (or
+      // accidentally mutate) the substrate's frozen objects.
+      if (request.method === 'GET' && url.pathname === '/api/provider-role-extras-schemas') {
+        jsonResponse(response, 200, { schemas: structuredClone(PROVIDER_ROLE_EXTRAS) });
         return;
       }
 
@@ -4103,6 +4283,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/attachments/:id  (Phase 12.2.3 — owner OR admin fetch; content-addressed immutable cache)',
             'DELETE /api/attachments/:id  (Phase 12.2.3 — owner delete)',
             'POST /api/provider-identities/:providerIdentityId/submit-kyc-l1  (Phase 12.2.2 — citizen-driven KYC L1 submission)',
+            'POST /api/provider-identities/:providerIdentityId/submit-role-extras  (Phase 12.2.4 — citizen-driven role-specific extras)',
+            'POST /api/admin/provider-identities/:providerIdentityId/attest-role-extras  (Phase 12.2.4 — operator attestation of role extras)',
+            'GET /api/provider-role-extras-schemas  (Phase 12.2.4 — closed schema map for the wizard)',
             'GET /api/admin/provider-identities?status&roleKind&limit  (Phase 12.2.2 — operator KYC review queue)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',
             'GET /api/marketplace/bookings/:bookingId  (Phase 12.1a.2 — party-aware projection)',
