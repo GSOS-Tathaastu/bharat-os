@@ -15,10 +15,13 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 12.3 — wave-2 provider
-roles `kirana` + `skilled-trades` shipped. GSTN adapter
-flipped from Reserved → Stub-only at §3.3. Live mode
-awaits GSP partnership or commercial-wrapper credentials.)
+Last updated: 2026-06-01 (Phase 13.0 — SLM-E on-device
+document summariser shipped. **Zero new external-API
+dependencies** by design: the document never leaves the
+device. No edits to the integrations list below — the SLM
+USP arc adds capability without partner credentials. Doc
+arc still tracks the parallel revenue-lines Phase 13.x
+items: §4.1 UPI rails and §4.2 IFSC lookup.)
 
 ## Legend
 

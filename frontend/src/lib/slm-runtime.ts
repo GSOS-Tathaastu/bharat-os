@@ -116,14 +116,21 @@ export async function loadSlmRuntime(opts: LoadOptions): Promise<SlmRuntime> {
   };
 
   const wllama = new Wllama(pathConfig, {
+    // Phase 13.0 adversarial fix SF-2 — when logger is 'silent',
+    // suppress warn/error too. wllama's default sends those to
+    // console.warn / console.error, and on tokenisation /
+    // context-window errors the underlying llama.cpp can emit a
+    // slice of the offending prompt. The doc-summariser passes
+    // citizen-pasted document text in its prompt — letting that
+    // leak to DevTools console would violate §15 bytes-never-leak.
     logger:
       opts.logger === 'console'
         ? console
         : {
             debug: () => {},
             log: () => {},
-            warn: console.warn,
-            error: console.error
+            warn: () => {},
+            error: () => {}
           },
     suppressNativeLog: true
   });

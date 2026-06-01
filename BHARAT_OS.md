@@ -2201,6 +2201,63 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.0 — SHIPPED 2026-06-01 (ADR 0149).** SLM-E
+  on-device document summariser (demo cut v1) — first
+  feature in the Phase 13.x SLM USP arc. NEW
+  `frontend/src/lib/doc-summariser.ts` (~290 lines): pure
+  prompt builder + line-regex parser + 6 DocKinds
+  (electricity_bill / form_16 / tncs / insurance /
+  lender_doc / generic) + per-kind bias-hint map + 6
+  scrubbed sample fixtures. Protocol version pinned
+  `bos.phase13.doc-summariser.v1`. NEW
+  `use-slm-doc-summariser.ts` (~260 lines): first SLM
+  consumer in the repo to pass `onToken` — streams tokens
+  into a `partialText` state for the perceived-latency
+  pitch beat (first token in ~2s, full output in <20s on a
+  mid-tier laptop). Two-tier rate limit (per-doc 2/60s +
+  global 6/5min — tighter than booking-advisor's 3/12
+  because summariser maxTokens 384 is 4x heavier). NEW
+  `DocSummariserPanel.tsx` (~225 lines): Card with 6-pill
+  picker, 6000-char textarea, Try sample / Clear actions,
+  permanent green "Stays on this device · 0 bytes uploaded"
+  badge, live streamed `<pre>` kept visible through the
+  ready transition, SummaryChipBlock with TITLE / TLDR /
+  bullets / language / confidence / risk-flag. Returns
+  `null` when no SLM installed (honest empty state binding).
+  Mounted into `/labs` with `key={identity?.id ?? 'anon'}`
+  so a shared-device identity flip forces full remount +
+  unmount cleanup (citizen B never inherits citizen A's
+  pasted bytes). Zero BE changes — pure FE feature; mirrors
+  Phase 10.6 SLM-hint precedent. **§15 bindings**:
+  bytes-never-leave-device (no fetch, no console echo —
+  SF-2 makes `loadSlmRuntime({ logger: 'silent' })` actually
+  silence warn+error in `slm-runtime.ts`); echo guardrail
+  on `DOC_KIND` (parser coerces to caller-supplied
+  expected); allowlist on RISK_FLAG + LANGUAGE; sample
+  fixtures use demo-persona PII conventions (PAN ending
+  0000, consumer numbers DEMO-, policy POL-DEMO-); vitest
+  sanity-greps reject real-shaped PAN/Aadhaar in fixtures.
+  **Adversarial review** (3 lenses + triage) surfaced **5
+  MUST_FIX + 6 SHOULD_FIX + 12 defer**; all 11 must/should
+  applied in-phase. MF-1 key-on-identity remount (shared-
+  device cross-citizen state leak), MF-2 generic error
+  message + honest `no_blob` Card branch, MF-3 streamed
+  `<pre>` kept visible after `status='ready'` so the
+  on-device pitch beat survives the chip-render frame,
+  MF-4 `inflightRef` carries `docKey` so a second
+  `summarise()` with different (kind, text) doesn't get
+  silently aliased to the first call's result, MF-5
+  cooling-down auto-exits via `setTimeout(retryInMs)` so
+  the CTA isn't permanently disabled. **API_INTEGRATIONS.md
+  impact**: ZERO new external API. The whole point of the
+  USP is that the document never leaves the device. Last-
+  updated header bumped to 2026-06-01. Tests: vitest 146 →
+  **193** (+47 doc-summariser cases); Node 1217 unchanged
+  (FE-only). tsc clean. **Next**: Phase 13.0.1 (PDF.js
+  upload — needs npm-dep approval) OR Phase 13.0.2
+  (persistence as MemoryRecord + `doc.summarised`
+  pointer-not-payload ledger event) OR Phase 13.1 SLM-F
+  PII redactor.
 - **Phase 12.3 — SHIPPED 2026-06-01 (ADR 0148).** Wave-2
   provider roles (`kirana` + `skilled-trades`) + GST
   adapter. NEW `src/phase1/gst-adapter.mjs` (4th concrete

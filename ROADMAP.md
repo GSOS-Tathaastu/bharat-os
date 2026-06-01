@@ -1220,8 +1220,12 @@ picked "minimum onboarding load, maximum coverage"):
   feedback loop). **Phase 12.3.**
 
 #### Phase 13.x — SLM USP features (~6 wks)
-- [ ] **E.** On-device document summariser (electricity bill /
-  Form 16 / T&Cs / insurance / lender docs).
+- [x] **E.** On-device document summariser (electricity bill /
+  Form 16 / T&Cs / insurance / lender docs). **Phase 13.0 demo
+  cut shipped 2026-06-01 (ADR 0149)** — paste-text-only, 6-pill
+  picker + streaming on /labs. Deferred to 13.0.1 (PDF.js
+  upload — needs npm-dep approval) and 13.0.2 (MemoryRecord
+  persistence + `doc.summarised` pointer-not-payload ledger).
 - [ ] **F.** On-device PII redactor on outgoing actions.
 - [ ] **G.** On-device personalization (preferences never leave
   device).

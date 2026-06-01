@@ -152,6 +152,59 @@ Implemented pieces:
 
 ---
 
+## 📄 2026-06-01 — Phase 13.0 shipped: SLM-E on-device document summariser (demo cut v1)
+
+The first feature in the Phase 13.x SLM USP arc. **Paste an
+Indian-paperwork document, tap Summarise, watch TITLE / TLDR
+/ 3 bullets stream in token-by-token while a green "Stays on
+this device · 0 bytes uploaded" badge holds.** DevTools
+Network tab stays empty throughout. This is the cleanest
+USP-in-90-seconds beat the company has shipped.
+
+- **ADR 0149** — `src/lib/doc-summariser.ts` (pure prompt
+  builder + line-regex parser), `use-slm-doc-summariser.ts`
+  (first onToken streaming consumer in the repo;
+  per-doc 2/60s + global 6/5min rate-limit;
+  `mountedRef` + `inflightRef` + unmount-cleanup),
+  `DocSummariserPanel.tsx` (6-pill picker + textarea +
+  streaming `<pre>` + structured chip block).
+- **6 doc kinds**: electricity bill, Form 16, T&Cs,
+  insurance policy, lender contract, other. Per-kind bias
+  hints inject 1-3 keywords into a single shared prompt
+  template — keeps SLM-F / SLM-G / SLM-H near-free to add
+  (new DocKind variant + one bias-hint entry).
+- **Protocol version pinned** `bos.phase13.doc-summariser.v1`.
+- **§15 bindings**: bytes-never-leave-device; `silent` logger
+  passed to `loadSlmRuntime` AND `slm-runtime.ts` updated
+  so the silent branch noops warn+error (otherwise a wllama
+  tokenisation error could echo prompt bytes to DevTools
+  console); echo guardrail coerces `DOC_KIND` to caller-
+  supplied expected; allowlist on `RISK_FLAG` + `LANGUAGE`;
+  6 sample fixtures use demo-persona PII (PAN ending 0000,
+  consumer DEMO-, policy POL-DEMO-); vitest sanity-greps
+  reject real-shaped PAN/Aadhaar in fixtures.
+- **Adversarial review** (3 lenses + triage): **5 MUST_FIX +
+  6 SHOULD_FIX + 12 defer**; all 11 must/should fixed
+  in-phase. MF-1 `key={identity.id}` on the panel so a
+  shared-device identity flip forces remount (citizen B
+  never sees citizen A's pasted bytes). MF-2 generic error
+  message + honest `no_blob` Card branch. MF-3 streamed
+  `<pre>` kept visible after `ready` so the pitch beat
+  survives the chip-render frame. MF-4 `inflightRef`
+  carries `docKey` (no silent aliasing across docKinds).
+  MF-5 cooling-down auto-exits via `setTimeout`.
+- **Pure FE, zero BE changes**. Mirrors Phase 10.6 SLM-hint
+  precedent. FE-BE parity binding answered explicitly in
+  ADR 0149: persistence + `doc.summarised` ledger event
+  land in Phase 13.0.2.
+- **API_INTEGRATIONS.md impact**: zero new external API. The
+  whole point of the USP is that the document never leaves
+  the device.
+- **Tests**: vitest 146 → **193** (+47 doc-summariser cases).
+  Node 1217 unchanged. tsc clean.
+
+---
+
 ## 🏪 2026-06-01 — Phase 12.3 shipped: wave-2 provider roles (kirana + skilled-trades) + GST adapter
 
 `kirana` (shopkeeper) and `skilled-trades` (electrician /
@@ -309,10 +362,11 @@ smartphones is captured as a binding.
   integration + 7 adversarial-fix cases). Vitest 138
   unchanged. tsc clean. Build green. Bundle unchanged.
 
-**Next: Phase 12.4** (provider-side discovery filters /
-booking surfaces for wave-2 roles) OR **Phase 14 Sahayak**
-(if the user wants to prioritise rural reach). Direction
-flexible.
+**Next: Phase 13.0.1** (PDF.js upload — needs npm-dep
+approval) OR **Phase 13.0.2** (persistence as MemoryRecord +
+`doc.summarised` pointer-not-payload ledger event) OR
+**Phase 13.1 SLM-F** (PII redactor) OR **Phase 14 Sahayak**.
+Direction flexible.
 
 ---
 

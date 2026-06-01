@@ -15,6 +15,7 @@ import {
 } from '@/lib/hooks';
 import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
+import { DocSummariserPanel } from '@/components/DocSummariserPanel';
 import { loadSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
@@ -308,6 +309,16 @@ export function LabsPage() {
           your device.
         </Evidence>
       </Card>
+
+      {/* Phase 13.0 adversarial fix MF-1 — key the panel on
+          identity.id so a shared-device identity flip forces a full
+          remount + unmount cleanup (unloads runtime, GCs lastResult
+          / partialText / refs). Prevents citizen B from inheriting
+          citizen A's pasted bytes on the same browser. */}
+      <DocSummariserPanel
+        key={identity?.id ?? 'anon'}
+        identityId={identity?.id}
+      />
 
       <FederatedRoundsCard
         installedPackIds={installedPackIds}
