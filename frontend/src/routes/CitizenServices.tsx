@@ -19,7 +19,7 @@ import {
 } from '@/lib/hooks';
 import { distanceBandLabel, round1, round4, type CityCentroid } from '@/lib/geo';
 import { useGeolocationCapture, LOCATION_CONSENT_COPY } from '@/lib/geolocation';
-import { LocationConsentSheet, CityPickerSheet } from '@/components/geo';
+import { LocationConsentSheet, CityPickerSheet, PickupAreaHint } from '@/components/geo';
 import {
   BookingCard,
   BookingStatusPill,
@@ -899,6 +899,7 @@ function CitizenBookingDetail() {
           <p className="text-body text-text">
             {b.pickupPoint.address || 'Pinned location'}
           </p>
+          <PickupAreaHint lat={b.pickupPoint.lat} lng={b.pickupPoint.lng} />
           <p className="mt-1 text-caption text-text-muted">
             {b.pickupPoint.lat.toFixed(4)}, {b.pickupPoint.lng?.toFixed(4)}
           </p>

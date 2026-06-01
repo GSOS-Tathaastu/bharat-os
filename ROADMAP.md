@@ -1033,6 +1033,27 @@ memos.
 Pattern reuse: each is `buildPrompt + parseCompletion` shape
 from Phase 10.6 labeling-slm-hint.
 
+#### Phase 12.2.1 — External-adapter substrate + OSM Nominatim ✅ SHIPPED 2026-06-01
+
+First real external-API integration. The substrate
+(`src/phase0/external-adapter.mjs::createAdapter`) is the
+factory every future adapter — DigiLocker, Aadhaar e-KYC, GST,
+UPI rails, NPCI — composes in ~100 lines. Owns stub-vs-live
+mode dispatch, LRU cache (pointer-not-payload), token-bucket
+rate limit, polite User-Agent, 6s timeout, audit-ledger
+emission (meta only — NEVER the body). First concrete adapter:
+`src/phase1/nominatim-geocoder.mjs` (OSM Nominatim policy:
+1 req/sec hard cap, polite UA with contact URL, 1dp bubble
+cache key, 24h TTL). `GET /api/geocode/reverse?lat&lng`
+returns `{mode, source, place: {label, suburb, city, state,
+countryCode, osmId}, latencyMs}`. FE `useReverseGeocode` hook
++ `<PickupAreaHint/>` component render "Near Shivajinagar,
+Pune" above the raw lat/lng on both branches of
+`ProviderBookingDetail` + `CitizenServices` booking detail.
+Tests: 1035 → **1053 Node** (+18 substrate + adapter + HTTP
+binding cases) + 115 → **119 vitest** (+4). tsc clean. Bundle
+main unchanged at 599 KB / 170 KB gzipped. **ADR 0141**.
+
 #### Phase 12.2 — Provider onboarding wave 1 (~2 wks)
 Four roles share a common physical-service onboarding flow +
 role-specific extras (founder picked "minimum onboarding load,

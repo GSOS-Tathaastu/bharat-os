@@ -281,6 +281,8 @@ import {
   getProviderRoleForm,
   PROVIDER_ROLE_FORMS
 } from '../phase1/provider-role-forms.mjs';
+import { createNominatimAdapter } from '../phase1/nominatim-geocoder.mjs';
+import { ExternalAdapterError } from './external-adapter.mjs';
 import {
   haversineMeters,
   distanceBand,
@@ -689,12 +691,17 @@ async function maybeReadControlPlane(store, controlPlaneId) {
   }
 }
 
-export function createPhase0ApiServer({ store, startedAt = new Date().toISOString() }) {
+export function createPhase0ApiServer({ store, startedAt = new Date().toISOString(), nominatim } = {}) {
   if (!store) {
     throw new Error('store is required.');
   }
 
   const limiter = createLimiter();
+  // Phase 12.2.1 — external-adapter singletons live on the
+  // server so the in-memory cache + rate-limit state persists
+  // across requests. The Nominatim instance is overridable for
+  // tests (so they can inject `liveFetch` + a stub mode).
+  const nominatimAdapter = nominatim || createNominatimAdapter({ store });
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -1994,6 +2001,56 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           roleKind: provider.roleKind,
           at
         });
+        return;
+      }
+
+      // ── Phase 12.2.1 — reverse geocoding ──────────────────────────
+      //
+      // GET /api/geocode/reverse?lat=<num>&lng=<num>
+      //   Wraps the OSM Nominatim adapter so the FE never has to know
+      //   the upstream URL, User-Agent, or rate-limit story. Returns a
+      //   stable {label, suburb, city, state, countryCode, osmId,
+      //   source} envelope. `source` is one of `stub|cache|live` so
+      //   the FE can decide whether to render a "live data" indicator.
+      //
+      //   Failure modes are HUMAN: rate-limit → 429 with retry-after,
+      //   network → 502, invalid input → 400. Never proxies the raw
+      //   upstream error message (that would leak Nominatim version
+      //   strings + sometimes IP traces).
+      if (request.method === 'GET' && url.pathname === '/api/geocode/reverse') {
+        const latParam = url.searchParams.get('lat');
+        const lngParam = url.searchParams.get('lng');
+        if (latParam == null || lngParam == null) {
+          jsonResponse(response, 400, {
+            error: { code: 'lat_lng_required', message: 'lat and lng query params are required.' }
+          });
+          return;
+        }
+        const startedMs = Date.now();
+        try {
+          const result = await nominatimAdapter.call({ lat: Number(latParam), lng: Number(lngParam) });
+          jsonResponse(response, 200, {
+            ok: true,
+            mode: result.mode,
+            source: result.source,
+            place: result.body,
+            latencyMs: Date.now() - startedMs,
+            at: new Date().toISOString()
+          });
+        } catch (err) {
+          if (err instanceof ExternalAdapterError) {
+            const status = err.code === 'rate_limited' ? 429
+              : err.code === 'adapter_invalid_request' ? 400
+              : err.status || 502;
+            jsonResponse(response, status, {
+              error: { code: err.code, message: err.message, adapter: 'osm-nominatim' }
+            });
+            return;
+          }
+          jsonResponse(response, 400, {
+            error: { code: 'geocode_failed', message: err && err.message ? err.message : 'reverse geocode failed.' }
+          });
+        }
         return;
       }
 
@@ -3528,6 +3585,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/admin/provider-identities/:providerIdentityId/transition  (operator status change)',
             'GET /api/marketplace/providers?lat&lng&radiusMeters&role&limit  (Phase 12.1a.1 — discovery)',
             'POST /api/marketplace/providers/:providerIdentityId/express-interest  (Phase 12.1a.1 — booking stub)',
+            'GET /api/geocode/reverse?lat&lng  (Phase 12.2.1 — OSM Nominatim reverse geocode; mode=stub|live)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',
             'GET /api/marketplace/bookings/:bookingId  (Phase 12.1a.2 — party-aware projection)',
             'POST /api/marketplace/bookings/:bookingId/accept|reject|cancel|mark-complete|confirm-complete|dispute  (Phase 12.1a.2 — CAS+expectedSeq)',

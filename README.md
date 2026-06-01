@@ -152,6 +152,51 @@ Implemented pieces:
 
 ---
 
+## 🌐 2026-06-01 — Phase 12.2.1 shipped: external-adapter substrate + first real API (OSM Nominatim reverse geocode)
+
+First real external-API integration. Lays down the substrate that
+every future Bharat OS integration — DigiLocker, Aadhaar e-KYC,
+GST, UPI rails, NPCI — will compose in ~100 lines.
+
+- **ADR 0141** — `src/phase0/external-adapter.mjs` `createAdapter`
+  factory owns the cross-cutting concerns once: stub-vs-live
+  mode (env-configurable per adapter; defaults stub for demo
+  safety), in-memory LRU cache (pointer-not-payload — caller
+  hands a coarsened cacheKey), token-bucket rate limit (default
+  1 req/sec), polite User-Agent + Accept injection, 6s timeout,
+  audit-ledger emission (`external_adapter.call` — meta only,
+  NEVER the response body).
+- **First adapter** — `src/phase1/nominatim-geocoder.mjs`
+  composes the substrate with OSM Nominatim's exact policy:
+  1 req/sec hard cap, polite UA with contact URL, 1dp bubble
+  (~11 km) as cache key (two pickups in the same bubble share
+  one upstream call; the upstream URL is built from the
+  rounded value, so even the wire never sees the 4dp citizen
+  pickup), 24h TTL.
+- **Endpoint** — `GET /api/geocode/reverse?lat&lng` returns
+  `{mode, source, place: {label, suburb, city, state,
+  countryCode, osmId}, latencyMs}`. Honest failure modes:
+  rate-limited → 429, invalid input → 400, upstream / network
+  → 502.
+- **FE** — `useReverseGeocode` TanStack hook +
+  `<PickupAreaHint/>` component render "Near Shivajinagar,
+  Pune" above the raw lat/lng on both branches of
+  `ProviderBookingDetail` (post-accept full coord + pre-accept
+  masked bubble) and `CitizenServices` booking detail.
+- **§15 bindings** — audit event JSON contains zero 4dp coord
+  literals (vitest case); UA matches `/^BharatOS\//` and
+  carries a contact in parens; stub-first default means demo
+  deployments never burn an upstream call by accident.
+- **Tests** — Node 1035 → **1053** (+18 external-adapter
+  cases) + vitest 115 → **119** (+4). tsc clean. Bundle main
+  unchanged at 599 KB / 170 KB gzipped.
+
+**Next: Phase 12.2.2** — wave-1 KYC wizard or the next external
+adapter as the user provisions sandbox keys (DigiLocker,
+Aadhaar e-KYC, GST).
+
+---
+
 ## 🤝 2026-06-01 — Phase 12.1b.4 shipped: SLM-D booking advisor — Phase 12.1b arc CLOSED
 
 Last of four 12.1b AI-orchestration sub-phases. **All four SLM

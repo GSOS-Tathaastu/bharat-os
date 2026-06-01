@@ -2038,7 +2038,7 @@ code lands; do not create a separate `STATUS.md` (§16).
 | L8 — Vernacular generative UI | deterministic intent normalization across five Indian languages (Hindi, Marathi, Bhojpuri, Tamil, Bengali — script + romanized) with localized response strings (`src/phase1/vernacular.mjs`); **user-facing shell at `/shell/`** (`public/shell/`) with voice + TTS runtime planning (`src/phase1/voice-runtime.mjs`), on-device SLM runtime planning (`src/phase1/on-device-model.mjs`), Web Speech / browser SpeechSynthesis fallbacks, persona-aware greeting, per-action result cards, health-document capture card, profile passkey card, Worker alerts card, device-claim model with owner + household | no actual IndicWhisper-WASM / IndicTTS-WASM / WebGPU SLM decoder/model pack bundled yet; no IndicTrans2-WASM yet; health OCR is deterministic text normalization, not real image OCR yet; Web Push is local-notification/VAPID-pending scaffold; generative UI is action-type-specific cards, not from-scratch UI synthesis |
 | Cross-cutting | Trust Passport v1 (derived + signed snapshots), integrity verifier, audit ledger, operator console, PWA shell, local identity creation, worker-notification receipts (`src/phase1/worker-notification.mjs`) | none unique to layer |
 
-### Team and operational state (2026-05-25)
+### Team and operational state (2026-06-01)
 
 - **Delivery team:** solo founder + Claude Code. The §12 "5–8 senior
   engineers" team is a Phase 2 target, not current state. Code work is
@@ -2201,6 +2201,36 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.1 — SHIPPED 2026-06-01 (ADR 0141).** First real
+  external-API integration + the substrate that makes every
+  future one cheap. NEW `src/phase0/external-adapter.mjs`
+  factory (`createAdapter`) owns the cross-cutting concerns
+  once — stub-vs-live mode dispatch (env-configurable per
+  adapter via `modeEnvVar`; defaults stub), in-memory LRU
+  cache (pointer-not-payload — caller hands a coarsened
+  cacheKey), token-bucket rate limiter (default 1 req/sec),
+  polite User-Agent + Accept injection, 6s AbortController
+  timeout, audit-ledger emission (`external_adapter.call`
+  with `{adapter, mode, cacheKey, status, latencyMs, at}`
+  — NEVER the response body; binding-grep test asserts no
+  4dp coord in audit JSON). NEW
+  `src/phase1/nominatim-geocoder.mjs` composes the substrate
+  with OSM Nominatim's exact policy (1 req/sec, polite UA
+  with contact URL, 1dp bubble cache key, 24h TTL). NEW
+  `GET /api/geocode/reverse?lat&lng` endpoint returns
+  `{mode, source, place: {label, suburb, city, state,
+  countryCode, osmId}, latencyMs}`. NEW FE
+  `useReverseGeocode` TanStack hook + `<PickupAreaHint/>`
+  component renders "Near Shivajinagar, Pune" above the raw
+  lat/lng on both branches of `ProviderBookingDetail`
+  (post-accept full coord + pre-accept masked bubble) and
+  `CitizenServices` booking detail. Stub mode is the test +
+  demo default; flip per-adapter env var to go live. Tests:
+  1035 → 1053 Node (+18) + 115 → 119 vitest (+4). tsc clean.
+  Bundle main unchanged at 599 KB / 170 KB gzipped. Substrate
+  is the foundation every future integration composes —
+  DigiLocker, Aadhaar e-KYC, GST, UPI rails all land as
+  ~100-line adapters from here.
 - **Phase 12.1b.4 — SHIPPED 2026-06-01 (ADR 0140).** SLM-D booking
   advisor — last of the four 12.1b sub-phases. Honest scope:
   true rate-negotiation breaks `rateSnapshot` immutability +

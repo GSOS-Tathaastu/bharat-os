@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Action, Badge, Card, Field, useToast } from '@/components/ui';
 import { BookingStatusPill, DisputeFileSheet, SlmBookingAdvisorChip } from '@/components/booking';
+import { PickupAreaHint } from '@/components/geo';
 import { formatRupees, formatRateBasis } from '@/lib/format-paise';
 import { formatDistanceMeters } from '@/lib/format-distance';
 import { useBooking, useBookingTransition, type ProviderIdentity } from '@/lib/hooks';
@@ -103,6 +104,7 @@ export function ProviderBookingDetail({ provider, rootIdentityId }: Props) {
               <p className="text-body text-text">
                 {b.pickupPoint.address || 'Pinned location'}
               </p>
+              <PickupAreaHint lat={b.pickupPoint.lat} lng={b.pickupPoint.lng} />
               <p className="mt-1 text-caption text-text-muted">
                 {b.pickupPoint.lat.toFixed(4)}, {b.pickupPoint.lng.toFixed(4)}
               </p>
@@ -112,6 +114,7 @@ export function ProviderBookingDetail({ provider, rootIdentityId }: Props) {
               <p className="text-body text-text-muted">
                 ~{b.pickupPoint.bubble1dp} area
               </p>
+              <PickupAreaHint bubble1dp={b.pickupPoint.bubble1dp} />
               {/* UX-8 (adversarial review) — frame the mask as a
                   citizen-safety feature, not a paywall. */}
               <p className="mt-1 text-caption text-text-muted">
