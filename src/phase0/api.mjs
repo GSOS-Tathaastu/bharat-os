@@ -20,6 +20,11 @@ import {
   orchestrateIntent
 } from '../phase1/orchestrator.mjs';
 import {
+  normaliseIntentAnnotation,
+  compareIntentAnnotation,
+  buildIntentAnnotationLedgerEvent
+} from './intent-annotation.mjs';
+import {
   createMemoryRecord,
   memoryProvenance,
   memorySummary,
@@ -3661,6 +3666,22 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           const publicRecords = publicRecordsFromIdentities(await store.listIdentities());
           const flags = await store.listFlagReports();
 
+          // Phase 12.1b.1 — optional on-device SLM annotation. Validated
+          // + clipped here so a misbehaving FE can't pollute the ledger.
+          // NEVER overrides server-side actionType inference.
+          let intentAnnotation = null;
+          const rawAnnotation = body.intentAnnotation ?? body.metadata?.intentAnnotation ?? null;
+          if (rawAnnotation != null) {
+            try {
+              intentAnnotation = normaliseIntentAnnotation(rawAnnotation);
+            } catch (err) {
+              jsonResponse(response, 400, {
+                error: { code: 'invalid_intent_annotation', message: err.message }
+              });
+              return;
+            }
+          }
+
           // §9C vignette 16b — daily_brief needs the on-device signals
           // gathered (recent activity, mesh earnings, expiring consents,
           // open §9A flags) before the tool can render the brief. This
@@ -3668,7 +3689,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           // step; the §15 binding (no PII leaves the user's profile
           // boundary) is preserved because the signals only ever live
           // inside the orchestration response back to the same client.
-          let augmentedBody = body;
+          let augmentedBody = { ...body, intentAnnotation };
           if (body.actionType === 'daily_brief' && body.actorId) {
             const horizonHours = Number(body.metadata?.horizonHours ?? 24);
             const signals = await gatherDailyBriefSignals(store, body.actorId, {
@@ -3679,6 +3700,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
               .catch(() => null);
             augmentedBody = {
               ...body,
+              intentAnnotation,
               metadata: {
                 ...(body.metadata ?? {}),
                 signals,
@@ -3698,6 +3720,28 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             await store.saveToolExecution(orchestration.execution);
           }
           await store.saveOrchestration(orchestration);
+
+          // Phase 12.1b.1 — record the SLM-vs-substrate verdict on
+          // the ledger so the citizen + operator can audit how often
+          // the on-device parse agrees with the deterministic parse.
+          // Verdict is recorded regardless of whether the annotation
+          // was present; 'absent' / 'server_only' show no SLM was
+          // installed; 'agreed' / 'disagreed' compare interpretations.
+          const verdict = compareIntentAnnotation(
+            intentAnnotation,
+            orchestration.actionRequest?.actionType ?? null
+          );
+          if (verdict !== 'absent') {
+            await store.appendLedger(
+              buildIntentAnnotationLedgerEvent({
+                orchestrationId: orchestration.orchestrationId,
+                annotation: intentAnnotation,
+                serverActionType: orchestration.actionRequest?.actionType ?? null,
+                verdict,
+                at: orchestration.createdAt
+              })
+            );
+          }
 
           // §13A #7 — when the just-executed action minted a trust
           // attestation, auto-sign it with the subject's identity and

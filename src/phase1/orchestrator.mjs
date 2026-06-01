@@ -284,6 +284,13 @@ function deriveLifecycleStatus(skillPreflightApproved, execution) {
 
 export function orchestrateIntent(intent, consents = [], { execute = false, at = nowIso(), publicRecords = [], flags = [] } = {}) {
   const actionRequest = buildActionRequest(intent);
+  // Phase 12.1b.1 — preserve the FE's on-device SLM annotation
+  // verbatim on the orchestration record so the citizen can see
+  // what their SLM thought vs. what the orchestrator routed to.
+  // The annotation NEVER overrides the server-side actionType.
+  // Validation + clipping happens at the API boundary; here we
+  // only echo what's already been normalised.
+  const intentAnnotation = intent.intentAnnotation ?? null;
   const normalizedIntent = {
     normalizedText: actionRequest.metadata.normalizedText,
     detectedLocale: actionRequest.metadata.detectedLocale,
@@ -324,7 +331,11 @@ export function orchestrateIntent(intent, consents = [], { execute = false, at =
       matchedAliases: normalizedIntent.matchedAliases,
       languageConfidence: normalizedIntent.confidence,
       channel: intent.channel ?? 'text',
-      actorId: intent.actorId
+      actorId: intent.actorId,
+      // Phase 12.1b.1 — on-device SLM annotation (opt-in, never
+      // overrides). Null when the citizen has no SLM installed or
+      // chose not to annotate this intent.
+      slmAnnotation: intentAnnotation
     },
     actionRequest,
     consentRequirement: consentRequirement(actionRequest),

@@ -18,6 +18,8 @@ import {
   type Orchestration
 } from '@/lib/hooks';
 import { isVoiceIntentSupported, VoiceIntentSession } from '@/lib/voice-intent';
+import { useSlmIntentParser } from '@/lib/use-slm-intent-parser';
+import { actionTypeFriendlyLabel, type ParsedIntent } from '@/lib/intent-parser';
 
 const ACTION_TYPE_LABEL: Record<string, string> = {
   service_booking: 'Service booking (Bharat OS marketplace)',
@@ -174,16 +176,66 @@ function CitizenIntent() {
     setGrantOpen(true);
   }
 
+  // Phase 12.1b.1 — on-device SLM intent parser. Citizens with no
+  // SLM installed never see the chip; citizens with one installed
+  // get a "we understood: …" preview before tapping Send.
+  const slmParser = useSlmIntentParser({ identityId: identity?.id });
+  const [parsedIntent, setParsedIntent] = useState<ParsedIntent | null>(null);
+
+  // Phase 12.1b.1 — keep a reference to the EXACT text the user
+  // parsed so the annotation gate matches it byte-for-byte. Any
+  // textarea edit clears parsedIntent before handleSend can attach
+  // a stale annotation (MF-1 + MF-3 adversarial fix).
+  const [parsedFromText, setParsedFromText] = useState<string | null>(null);
+
+  async function handleParseWithSlm() {
+    setParsedIntent(null);
+    slmParser.reset();
+    const snapshot = text;
+    const result = await slmParser.parse(snapshot);
+    if (result?.parsed) {
+      setParsedIntent(result.parsed);
+      setParsedFromText(snapshot);
+    }
+  }
+
   function handleSend(intentText: string = text) {
     if (!identity || !intentText.trim()) {
       show('Type or pick what you want to do.', 'error');
       return;
     }
+    // MF-1 (adversarial fix) — don't attach a stale annotation when:
+    //   • voice interim is still pending (user sees text + interim
+    //     but we only parsed text)
+    //   • the sent text doesn't match the text the chip was built
+    //     from (any edit invalidates the annotation)
+    const interimPending = listening && interim.trim().length > 0;
+    const annotation =
+      parsedIntent && !interimPending && parsedFromText != null && intentText === parsedFromText
+        ? {
+            actionType: parsedIntent.actionType,
+            confidence: parsedIntent.confidence,
+            detectedLanguage: parsedIntent.detectedLanguage,
+            rationale: parsedIntent.rationale,
+            modelPackId: slmParser.modelPackId,
+            entities: parsedIntent.entities,
+            generatedAt: new Date().toISOString()
+          }
+        : null;
     sendIntent.mutate(
-      { identityId: identity.id, intentText },
+      { identityId: identity.id, intentText, intentAnnotation: annotation },
       {
         onSuccess: (data) => {
           setLastOutcome(data.orchestration);
+          // MF-3 (adversarial fix) — preserve the chip when the
+          // user is sending the same intent twice; only clear when
+          // text changed since parse so the citizen doesn't pay
+          // the parse cost again for a repeat-intent flow.
+          if (parsedFromText == null || text.trim() !== parsedFromText.trim()) {
+            setParsedIntent(null);
+            setParsedFromText(null);
+            slmParser.reset();
+          }
         },
         onError: (err: Error) => show(err.message, 'error')
       }
@@ -252,7 +304,19 @@ function CitizenIntent() {
           <textarea
             rows={3}
             value={text + (listening && interim ? ` ${interim}` : '')}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setText(next);
+              // MF-3 (adversarial fix) — invalidate the parsed chip
+              // immediately when the user edits the textarea so a
+              // stale annotation cannot be attached to a different
+              // intent.
+              if (parsedFromText != null && next !== parsedFromText) {
+                setParsedIntent(null);
+                setParsedFromText(null);
+                slmParser.reset();
+              }
+            }}
             placeholder="Speak in any language. Hindi · Marathi · Bhojpuri · Tamil · Bengali · English."
             className={
               'w-full resize-none rounded-sm border bg-white px-3 py-2 text-body text-text placeholder:text-text-muted focus:outline-none focus:ring-2 ' +
@@ -291,6 +355,69 @@ function CitizenIntent() {
             </button>
           ))}
         </div>
+        {/* Phase 12.1b.1 — on-device SLM intent parser pre-flight.
+            Hidden when no SLM installed; shown as a soft chip when
+            ready. NEVER auto-sends — the citizen taps Send.
+            Copy intentionally non-technical (MF-4 adversarial fix). */}
+        {(slmParser.status.kind === 'ready' ||
+          slmParser.status.kind === 'loading' ||
+          slmParser.status.kind === 'parsing' ||
+          slmParser.status.kind === 'error') && text.trim().length > 0 && text.trim().length <= 2 && (
+          <p className="mt-2 text-caption text-text-muted">
+            Type a bit more so I can understand it for you.
+          </p>
+        )}
+        {(slmParser.status.kind === 'ready' ||
+          slmParser.status.kind === 'loading' ||
+          slmParser.status.kind === 'parsing' ||
+          slmParser.status.kind === 'error') && text.trim().length > 2 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleParseWithSlm}
+              disabled={slmParser.status.kind === 'loading' || slmParser.status.kind === 'parsing'}
+              className="rounded-sm border border-primary bg-primary-50 px-3 py-1 text-caption font-semibold text-primary transition-colors hover:bg-primary-100 disabled:opacity-50"
+            >
+              {slmParser.status.kind === 'loading'
+                ? `Loading on-device model ${slmParser.status.progress}%…`
+                : slmParser.status.kind === 'parsing'
+                  ? 'Understanding on-device…'
+                  : '✨ Check my understanding'}
+            </button>
+            {parsedIntent && (
+              <Badge variant="trust">
+                <span title="How sure the on-device model is. You decide if it matches.">
+                  We understood: {actionTypeFriendlyLabel(parsedIntent.actionType)}
+                  {parsedIntent.detectedLanguage && ` · ${parsedIntent.detectedLanguage}`}
+                  {' · '}
+                  confidence {Math.round(parsedIntent.confidence * 100)}%
+                </span>
+              </Badge>
+            )}
+            {parsedIntent && (
+              <button
+                type="button"
+                onClick={() => { setParsedIntent(null); setParsedFromText(null); slmParser.reset(); }}
+                className="text-caption text-text-muted underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+        {slmParser.status.kind === 'error' && (
+          <p className="mt-2 text-caption text-text-muted">
+            On-device model couldn&rsquo;t finish: {slmParser.status.message}.{' '}
+            <button
+              type="button"
+              onClick={handleParseWithSlm}
+              className="underline text-primary"
+            >
+              Retry
+            </button>{' '}
+            or send without it &mdash; your intent will still route.
+          </p>
+        )}
         <div className="mt-4 flex gap-2">
           <Action onClick={() => handleSend()} disabled={sendBusy}>
             {sendIntent.isPending ? 'Sending…' : autoRetrying ? 'Re-sending after consent…' : 'Send'}

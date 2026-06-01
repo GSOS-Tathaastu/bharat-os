@@ -152,6 +152,46 @@ Implemented pieces:
 
 ---
 
+## 🧠 2026-06-01 — Phase 12.1b.1 shipped: SLM-A vernacular intent parser — AI loop starts closing
+
+First of four 12.1b AI-orchestration sub-phases. Citizens with an
+installed wllama SLM (Phase 9.0c) see their device's interpretation
+of what they typed before tapping Send — the annotation rides
+alongside the raw text, the server records an
+`intent.slm_<verdict>` ledger event for audit, but the
+deterministic vernacular substrate remains the source of truth.
+Citizens with no SLM installed see no change.
+
+- **ADR 0137** — BE + FE.
+- **§15 binding**: annotation is a confidence signal, NEVER an
+  override. Tested with a deliberate disagreement fixture.
+- **NEW src/phase0/intent-annotation.mjs** — pure validator +
+  comparer + ledger builder. Field caps prevent ledger bloat.
+- **NEW frontend/src/lib/intent-parser.ts** + `use-slm-intent-parser.ts`
+  — pure prompt + completion parser + lazy wllama hook. Reusable
+  by future SLM-C dynamic forms + SLM-D negotiation agent.
+- **CitizenHome chip**: "Check my understanding" → soft Badge
+  "We understood: <Friendly> · <lang> · confidence <pct>%".
+  `handleSend` annotation gate is byte-for-byte strict.
+- **Adversarial review** (3 lenses + triage): Privacy ship_clean.
+  4 must-fix + 2 should-fix applied before commit:
+  - MF-1 voice-interim + edit-clears annotation gate;
+  - MF-2 error UX with Retry button;
+  - MF-3 chip persists on repeat sends, clears on edit;
+  - MF-4 non-technical copy ("Check my understanding" not
+    "Parse with my SLM");
+  - SF-1 mount-guarded setStatus;
+  - SF-2 inflight-ref de-dups concurrent parses.
+- Tests: **993/993 Node** + **81/81 vitest** (+15 contracts
+  including 3 adversarial edge-case rejections). tsc clean.
+- Bundle: 557 → 565 KB / 159 KB gzipped (+8 KB). wllama lazy
+  chunk unchanged.
+
+**Next: Phase 12.1b.2** — SLM-B offline-first decisioning +
+queued sync + 17 more Indic languages.
+
+---
+
 ## 🛒 2026-06-01 — Phase 12.1a.2 shipped: booking + escrow + provider surface — marketplace LOOP CLOSES
 
 Second + final 12.1a sub-phase. Citizens lock escrow against a

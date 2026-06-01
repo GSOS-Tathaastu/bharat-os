@@ -2136,7 +2136,10 @@ on top of the four earlier:
 | **12.0** | `providerIdentity` substrate (BE+FE). Schema + KYC-heavy onboarding + linkage to root recovery. Earner home: two ledger cards (micro-task + marketplace). | ~1.5 wks |
 | **12.1a.1** ✅ | **SHIPPED 2026-06-01 (ADR 0135).** Marketplace discovery substrate + citizen browse. Discriminated-union geo schema (4dp persist, 2dp public emit), shared phase0/geo.mjs + FE geo lib (reusable for booking, mesh, audits), GET /api/marketplace/providers, POST /express-interest typed precedent row, /app/citizen/services/* nested routes, ProviderOnboarding ServiceAreaPicker. ONDC suppressed. | ✅ shipped |
 | **12.1a.2** ✅ | **SHIPPED 2026-06-01 (ADR 0136).** Booking + citizen-escrow + provider surface. 6-state CAS-guarded booking machine; lazy auto-release (4h pre-accept expiry + 24h after provider-marked-complete); rate snapshot immutability; bookkeeping-v1 funding via admin escrow deposit. /provider/* 5-tab surface; /citizen/services/bookings list + detail. Push on every transition. Extracted escrow-paise + provider-auth + booking-push + bubbleAt1dp as CORE substrates. ONDC still suppressed. | ✅ shipped |
-| **12.1b** | SLM AI-orchestration layer on top. Vernacular intent → structured action (22+ Indic languages) · offline-first decisioning · on-device dynamic forms · on-device negotiation agent for marketplace. Reuses Phase 9.0c runtime + Phase 10.6 prompt/parse pattern. | ~3 wks |
+| **12.1b.1** ✅ | **SHIPPED 2026-06-01 (ADR 0137).** SLM-A vernacular intent parser. On-device wllama parses intent → structured annotation; deterministic substrate remains source of truth; verdict ledger events. Citizens with no SLM installed see no change. | ✅ shipped |
+| **12.1b.2** | SLM-B offline-first decisioning + queued sync. Cache consents, answer queries from local memory + 17 more Indic languages. | ~1 wk |
+| **12.1b.3** | SLM-C on-device dynamic forms (per-role onboarding wizard). | ~1 wk |
+| **12.1b.4** | SLM-D on-device negotiation agent for marketplace. | ~1 wk |
 | **12.2** | Provider self-serve onboarding — **wave 1 four roles**: cab-driver, personal-driver, labourers, household-help (maid+cook combined). Shares one physical-service onboarding flow + role-specific extras. | ~2 wks |
 | **12.3+** | Remaining provider roles: kirana, skilled-trades. Order TBD. | ~3 wks |
 | **13.x** | SLM USP features: on-device document summariser · PII redactor · personalization (preferences never leave device) · skill agents for Indian tasks (electricity bill / consumer complaint / PM-KISAN). | ~6 wks |
@@ -2197,6 +2200,42 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.1b.1 — SHIPPED 2026-06-01 (ADR 0137).** SLM-A
+  vernacular intent parser — first of four 12.1b AI-orchestration
+  sub-phases. Citizens with an installed wllama SLM (Phase 9.0c)
+  see their device's interpretation before tapping Send. The
+  annotation is a confidence signal that the server records for
+  audit + lays down an `intent.slm_<verdict>` ledger event
+  (`agreed | disagreed | fe_only | server_only | absent`), but
+  the deterministic vernacular substrate (`src/phase1/vernacular.mjs`)
+  remains the source of truth for actionType, consent scoping,
+  and skill preflight — annotation NEVER overrides. Substrate
+  extracted as a CORE shared module per the binding:
+  `src/phase0/intent-annotation.mjs` (normaliseIntentAnnotation
+  validator + compareIntentAnnotation verdict comparer +
+  buildIntentAnnotationLedgerEvent builder; field caps prevent
+  ledger bloat from a misbehaving FE). FE shared lib:
+  `frontend/src/lib/intent-parser.ts` (prompt builder +
+  completion parser; pure functions reusable by future SLM-C
+  dynamic forms + SLM-D negotiation agent) +
+  `use-slm-intent-parser.ts` hook (lazy wllama load, OPFS-cached,
+  cleans up on unmount). CitizenHome integration: "Check my
+  understanding" button (non-technical copy) → "Understanding
+  on-device…" → soft Badge "We understood: <Friendly> · <lang>
+  · confidence <pct>%". `handleSend` annotation gate is strict:
+  annotation attached ONLY when (a) parsed text matches sent
+  text byte-for-byte, (b) textarea hasn't been edited since
+  parse, (c) voice interim is empty. Adversarial review (3
+  lenses + triage) — Privacy: ship_clean. Safety: 1 should-fix
+  (reentrant parse de-dup + post-unmount setState guard). UX:
+  4 must-fix (annotation gate + error retry + chip-clear
+  semantics + jargon copy). All applied before commit. Tests:
+  993/993 Node (+18 intent-annotation tests including binding
+  grep + ledger verdict + non-override fixture) + 81/81 vitest
+  (+15 intent-parser contracts + 3 adversarial edge-case
+  rejections). Bundle main 557 → 565 KB / 159 KB gzipped (+8 KB).
+  wllama lazy chunk unchanged. Next: **Phase 12.1b.2** SLM-B
+  offline-first decisioning + queued sync.
 - **Phase 12.1a.2 — SHIPPED 2026-06-01 (ADR 0136).** Booking +
   citizen-escrow + provider surface — closes the marketplace
   loop. Second of two 12.1a sub-phases. Booking record with 6

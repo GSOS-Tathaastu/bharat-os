@@ -313,16 +313,34 @@ export function useRevokeConsent() {
  * `actionRequest.actorId` never matched — citizens typed "Book a
  * cab" and saw nothing happen.
  */
+export interface SendIntentInput {
+  identityId: string;
+  intentText: string;
+  // Phase 12.1b.1 — optional on-device SLM annotation. The server
+  // validates + clips at the boundary. Annotation NEVER overrides
+  // the server-side deterministic actionType.
+  intentAnnotation?: {
+    actionType: string;
+    confidence: number;
+    detectedLanguage?: string | null;
+    rationale?: string | null;
+    modelPackId?: string | null;
+    entities?: Array<{ type: string; value: string; confidence?: number }>;
+    generatedAt?: string;
+  } | null;
+}
+
 export function useSendIntent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ identityId, intentText }: { identityId: string; intentText: string }) =>
+    mutationFn: ({ identityId, intentText, intentAnnotation }: SendIntentInput) =>
       api<SendIntentResponse>('/api/orchestrations', {
         method: 'POST',
         body: JSON.stringify({
           intentText,
           actorId: identityId,
-          locale: 'en-IN'
+          locale: 'en-IN',
+          intentAnnotation: intentAnnotation ?? null
         })
       }),
     onSuccess: (_data, { identityId }) => {

@@ -398,6 +398,65 @@ USP priorities, new revenue lines) captured in
 `memory/phase-12-13-sequencing-set.md` + the four new direction
 memos.
 
+#### Phase 12.1b.1 — SLM-A vernacular intent parser ✅ SHIPPED 2026-06-01
+- **ADR 0137** — first of four 12.1b AI-orchestration
+  sub-phases. Marketplace + AI loop starts closing.
+- **Annotation pass-through, NEVER override**. Server-side
+  deterministic vernacular substrate (`src/phase1/vernacular.mjs`)
+  remains the source of truth for `actionType`, consent
+  scoping, and skill preflight. The on-device SLM annotation is
+  a confidence signal recorded for audit; tested via a
+  deliberate disagreement fixture (annotation says
+  `health_record_read`, substrate routes to `service_booking`
+  — orchestrator routes to substrate's choice).
+- **Verdict ledger events** —
+  `intent.slm_<agreed|disagreed|fe_only|server_only|absent>`.
+  Payload carries only verdict + actionType + meta (modelPackId,
+  detectedLanguage, entityCount). No raw intent text.
+- **NEW src/phase0/intent-annotation.mjs** — pure validator +
+  comparer + ledger builder. Field caps (max 16 entities, 280-char
+  rationale, confidence clipped to [0,1]) prevent ledger bloat
+  from misbehaving FE. Binding-grep test forbids
+  `override|routeTo|force*` fields.
+- **NEW frontend/src/lib/intent-parser.ts** — pure prompt
+  builder + completion parser. Reusable by future SLM-C dynamic
+  forms + SLM-D negotiation agent.
+- **NEW frontend/src/lib/use-slm-intent-parser.ts** — lazy
+  wllama-loading hook. Citizens with no installed SLM pay zero
+  bytes for the runtime + never see the chip. Mount-guarded
+  setStatus + in-flight de-dup so rapid double-taps + late WASM
+  resolves don't race.
+- **CitizenHome chip** — "✨ Check my understanding" → soft
+  Badge "We understood: <Friendly> · <lang> · confidence
+  <pct>%". `handleSend` annotation gate is byte-for-byte strict:
+  attached only when (a) parsed text === sent text, (b) no
+  textarea edits since parse, (c) voice interim empty.
+  Edit-time `onChange` invalidates the chip immediately.
+- **Process**: understanding workflow (4 parallel Explore
+  agents) → implementation → adversarial review workflow
+  (3 lenses: privacy / safety / UX + triage). Privacy verdict:
+  ship_clean. **4 must-fix + 2 should-fix applied** before
+  commit:
+  - MF-1 (STALE-ANNOTATION-VOICE-INTERIM): handleSend gate
+    accounts for voice interim + whitespace edits.
+  - MF-2 (PARSE-BUTTON-HIDDEN-ON-ERROR): error UX has a Retry
+    button + clearer copy.
+  - MF-3 (CHIP-CLEARS-SILENTLY-ON-SEND): chip persists on
+    repeat sends, clears on edit.
+  - MF-4 (BUTTON-LABEL-JARGON): "Parse with my SLM" →
+    "Check my understanding". Non-technical copy for
+    vernacular citizens.
+  - SF-1 (POST-UNMOUNT-SETSTATE): mounted-ref + safeSetStatus.
+  - SF-2 (REENTRANT-PARSE-GUARD): inflight-ref returns same
+    promise on concurrent calls.
+  - SF-5 (EDGE-CASE-TESTS): 3 new vitest cases rejecting
+    markdown-wrapped + unknown action values.
+- Tests: **993/993 Node** (+18) + **81/81 vitest** (+15).
+- Bundle: main 557 → 565 KB / 159 KB gzipped (+8 KB). wllama
+  lazy chunk unchanged.
+- **Next**: Phase 12.1b.2 SLM-B offline-first decisioning +
+  queued sync + 17 more languages.
+
 #### Phase 12.1a.2 — Booking + escrow + provider surface ✅ SHIPPED 2026-06-01
 - **ADR 0136** — second + final of two 12.1a sub-phases.
   Marketplace loop closes: citizens browse, lock escrow, see
@@ -740,9 +799,18 @@ memos.
   marketplace remains the only flow. Deferred to a future phase
   once native supply is non-trivial.
 
-#### Phase 12.1b — AI-orchestration layer (~3 wks)
-- [ ] **A.** Vernacular intent → structured action (22+ Indic
-  languages). Extends `vernacular.mjs` substrate.
+#### Phase 12.1b — AI-orchestration layer (split into 12.1b.1 + .2 + .3 + .4)
+
+##### 12.1b.1 — SLM-A vernacular intent ✅ SHIPPED 2026-06-01 (ADR 0137)
+- [x] On-device wllama parses intent text → structured
+  annotation. NEVER overrides server actionType.
+- [x] Verdict ledger events for audit.
+- [x] CitizenHome chip + edit-invalidate + voice-interim guard.
+
+##### 12.1b.2 — SLM-B offline-first decisioning (~1 wk)
+- [ ] Vernacular intent → structured action across 17 more
+  Indic languages (Telugu, Kannada, Gujarati, Punjabi, Odia,
+  Assamese, Malayalam, Urdu, …).
 - [ ] **B.** Offline-first decisioning + queued sync. Cache
   consents, answer queries from local memory.
 - [ ] **C.** On-device dynamic onboarding forms (SLM generates
