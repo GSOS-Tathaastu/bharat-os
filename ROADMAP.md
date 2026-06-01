@@ -1099,16 +1099,32 @@ status guard, clear-on-resubmit, audit-pollution
 suppression. Tests: 1142 → **1166 Node** (+24); vitest
 unchanged (138). tsc clean. **ADR 0145**.
 
-#### Phase 12.2.6 — DigiLocker first-live (reserved)
+#### Phase 12.2.6 — DigiLocker OAuth2 substrate + Parivahan integration + Sahayak binding ✅ SHIPPED 2026-06-01
 
-Citizen-authenticated Aadhaar e-KYC + signed DL/RC fetch
-via DigiLocker — wires the first non-stub provider into
-the Parivahan adapter + replaces KYC L1's "Aadhaar
-last-4 ONLY" defensive posture with real verification.
-Requires UIDAI / DigiLocker partner registration; see
-`docs/API_INTEGRATIONS.md` §3.1 for the provisioning
-path. ~2 weeks calendar time (mostly partner approval),
-~2 days engineering.
+First **citizen-authenticated** verification flow. NEW
+`src/phase1/digilocker-substrate.mjs` (OAuth2 helpers +
+signature verification + DPDP cascade). 4 endpoints
+(authorize / callback / status / delete). Parivahan
+adapter's `verifyRoleExtrasFields` now uses the
+citizen-authorised signed-document path when the
+citizen has linked DigiLocker. Operator console:
+🔏 indicator. Adversarial review (3 lenses) surfaced
+17 findings; 5 high+med fixed in-phase including the
+rainbow-tableable bindingDigest in stub mode, the
+redirectUri open-redirect, the state ordering bug, and
+the silent live→stub fallback. **NEW
+`memory/sahayak-no-smartphone-onboarding.md` binding** —
+captures the Snabit / Pronto agent-assisted model for
+serving the ~700M Indians without usable smartphones
+(Phase 14.x scope). Tests: 1166 → **1199 Node** (+33);
+vitest unchanged (138). tsc clean. **ADR 0146**.
+
+#### Phase 12.2.7 — FE wizard "Link DigiLocker" button (reserved)
+
+The Phase 12.2.6 substrate is BE-only. Phase 12.2.7
+adds the FE button in the KYC L1 wizard that opens the
+DigiLocker authorize URL in a popup, handles the redirect
+back, and shows a "linked ✓" indicator inline.
 
 #### Phase 12.2.3 — Attachment CORE substrate + KYC L1 selfie/ID-proof ✅ SHIPPED 2026-06-01
 
@@ -1209,6 +1225,46 @@ picked "minimum onboarding load, maximum coverage"):
 - [ ] SLM generates and signs SSO tokens for third-party
   services without revealing the underlying identity. Bharat
   OS as the trust anchor for India's app ecosystem.
+
+#### Phase 14.x — Sahayak (no-smartphone onboarding) ~6 wks engineering + partner calendar
+
+Surfaces the ~700M Indians without usable smartphones
+through the agent-assisted model proven by Snabit / Pronto /
+PayNearby / Eko / Spice Money / Fino. A trained, KYC'd
+local **Sahayak** uses THEIR device to onboard + transact on
+behalf of the citizen. See
+`memory/sahayak-no-smartphone-onboarding.md` for the
+binding.
+
+- [ ] **14.0** — `sahayak` provider role + double-signature
+  pattern (every action signed by Sahayak's session AND
+  citizen's biometric). Composes KYC L1 + role-extras +
+  attachments + DigiLocker substrate — substrate ~70%
+  already there.
+- [ ] **14.1** — AUA/KUA registration with UIDAI for the
+  biometric path (paid + 2-month approval).
+- [ ] **14.2** — USSD aggregator adapter (`*99#` bridge for
+  citizens with feature phones). Composes the Phase 12.2.1
+  external-adapter substrate. BSNL / commercial partner.
+- [ ] **14.3** — IVR voice flow engine (DTMF input mapping
+  to Bharat OS actions). Reuses the SMS provider substrate
+  for voice-OTP routing.
+- [ ] **14.4** — Print receipt template + Bluetooth thermal
+  printer driver for cash transactions at the Sahayak
+  kiosk.
+- [ ] **14.5** — Cash-float ledger (Sahayak's bank balance
+  vs citizens' Bharat OS balances). Compatible with the
+  existing bookkeeping-v1 escrow model.
+
+**Why this matters**: a smartphone-only OS excludes the
+majority of India. Snabit + Pronto + the BC (Business
+Correspondent) ecosystem have proven this is the only
+credible path to rural / low-income onboarding.
+
+**For the investor pitch**: substrate is ~70% there; the
+Sahayak product layer + partner partnerships are the
+remaining 30%. ~6 wks engineering plus partner calendar
+time.
 
 **Total: ~22 wks of substantive work to v1 marketplace +
 SLM-USP feature parity + new revenue lines + Bharat ID

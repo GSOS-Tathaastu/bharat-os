@@ -15,9 +15,10 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 12.2.5 — Parivahan adapter
-substrate + stub shipped. First **automated identity verification**
-surface; live providers slot in additively as keys arrive.)
+Last updated: 2026-06-01 (Phase 12.2.6 — DigiLocker OAuth2
+substrate + stub shipped. Wired into Parivahan as the
+`digilocker` provider; citizen-authorised signed-document
+flow now end-to-end on stub.)
 
 ## Legend
 
@@ -94,28 +95,43 @@ surface; live providers slot in additively as keys arrive.)
 
 ## 3. Identity verification (govt-issued IDs)
 
-### 3.1 DigiLocker (Aadhaar e-KYC + signed docs) 📋 Reserved
+### 3.1 DigiLocker (Aadhaar e-KYC + signed docs) 🧪 Stub-only
 
-- **Why**: Replace the "Aadhaar last-4 ONLY" defensive
-  posture in KYC L1 (Phase 12.2.2) with a real
+- **What it does**: Replace the "Aadhaar last-4 ONLY"
+  defensive posture in KYC L1 (Phase 12.2.2) with a real
   citizen-authenticated e-KYC. The citizen signs in via
   DigiLocker, Bharat OS receives a signed verification
   token. No Aadhaar number ever touches our servers.
-- **Upstream**: `https://api.digitallocker.gov.in/`
+- **Adapter**: [`src/phase1/digilocker-substrate.mjs`](../src/phase1/digilocker-substrate.mjs)
+  shipped in Phase 12.2.6. OAuth2 helpers + signature
+  verification + token storage + DPDP cascade. Wired into
+  the Parivahan adapter as the `digilocker` provider.
+- **Stub mode** (default): deterministic OAuth flow with a
+  stub-prefixed code + deterministic signed-document
+  response. Demo deployments without partner credentials
+  exercise the citizen → operator review loop end-to-end.
+- **Upstream**: `https://api.digitallocker.gov.in/public/oauth2/1/`
 - **Cost**: Free for citizen-side; partner registration
   with MeitY required.
-- **To provision**:
+- **To go live**:
   - Register as a DigiLocker Partner at
     https://partners.digitallocker.gov.in/.
   - Receive sandbox `client_id` + `client_secret`.
   - Production approval requires SOC 2 / ISO 27001
     self-attestation + data-localisation compliance check.
-- **Env**: `BHARAT_OS_DIGILOCKER_MODE`,
-  `BHARAT_OS_DIGILOCKER_CLIENT_ID`,
-  `BHARAT_OS_DIGILOCKER_CLIENT_SECRET`,
-  `BHARAT_OS_DIGILOCKER_REDIRECT_URI`.
-- **Phase**: Reserved for Phase 12.2.6 or 12.3.x once
-  partner credentials arrive.
+- **Env**:
+  - `BHARAT_OS_DIGILOCKER_MODE=live`
+  - `BHARAT_OS_DIGILOCKER_CLIENT_ID`
+  - `BHARAT_OS_DIGILOCKER_CLIENT_SECRET`
+  - `BHARAT_OS_DIGILOCKER_REDIRECT_URI` (production redirect
+    URL; same-origin callback is auto-allowed)
+- **§15 bindings**: access + refresh tokens NEVER returned
+  by `/status` and NEVER on the audit ledger. State is
+  one-shot + 10-min TTL + bound to rootIdentityId server-
+  side. DPDP cascade erases both `digilocker_states` and
+  `digilocker_links` atomically with the identity.
+- **Phase shipped**: 12.2.6 (substrate stub; live wires
+  in additively).
 
 ### 3.2 PAN verification (NSDL / Income Tax) 📋 Reserved
 

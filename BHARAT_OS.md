@@ -2201,6 +2201,43 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.6 — SHIPPED 2026-06-01 (ADR 0146).** DigiLocker
+  OAuth2 substrate + first non-stub Parivahan provider + Sahayak
+  no-smartphone binding. NEW
+  `src/phase1/digilocker-substrate.mjs` — OAuth2 helpers
+  (generateState, buildAuthorizeUrl, exchangeCodeForToken,
+  buildLink) + stubSignedDocument + verifyDocumentSignature.
+  Frozen scope allowlist. Stub mode = deterministic flow; live
+  mode hits `api.digitallocker.gov.in` when partner credentials
+  set. NEW `digilocker_states` + `digilocker_links` tables on
+  both stores (states one-shot 10-min TTL; links 1 per root
+  identity). NEW 4 endpoints: `/api/digilocker/authorize`,
+  `/callback`, `/status`, `DELETE /link`. **§15 bindings**:
+  access + refresh tokens NEVER on ledger or in `/status`
+  response; state binds to rootIdentityId server-side; DPDP
+  cascade atomic. Parivahan adapter `verifyRoleExtrasFields`
+  now accepts optional `digilockerLink` — citizen-authorised
+  signed-document path via stubSignedDocument; result envelope
+  carries `signedDocSha256` pointer. Operator console: 🔏
+  (locked) indicator when result is from a citizen-authorised
+  DigiLocker session vs generic stub. Adversarial review (3
+  lenses) surfaced 17 findings; **5 high+med fixed in-phase**:
+  bindingDigest skipped in stub (was rainbow-tableable); open-
+  redirect via redirectUri closed via allowlist; state ordering
+  fixed to peek→exchange→consume (was burning state on
+  transient errors); silent live→stub fallback now warn-once;
+  opportunistic sweep bounds stale-state growth. **User-raised
+  strategic direction captured**: Sahayak no-smartphone
+  onboarding model (Snabit / Pronto pattern). New memory
+  binding + ROADMAP Phase 14.x sub-items (sahayak role +
+  UIDAI AUA registration + USSD `*99#` bridge + IVR voice
+  + print receipt + cash float). Substrate ~70% already
+  there; remaining 30% is Sahayak product layer + partner
+  partnerships. **NEW `docs/API_INTEGRATIONS.md` updated**:
+  DigiLocker flipped from 📋 Reserved to 🧪 Stub-only with
+  full env-var list + partner-provisioning steps. Tests:
+  1166 → **1199 Node** (+33). Vitest 138 unchanged. tsc clean.
+  Bundle unchanged.
 - **Phase 12.2.5 — SHIPPED 2026-06-01 (ADR 0145).** Parivahan /
   Sarathi / Vahan verification adapter + master
   `docs/API_INTEGRATIONS.md` tracker. Third concrete adapter

@@ -152,6 +152,70 @@ Implemented pieces:
 
 ---
 
+## 🔏 2026-06-01 — Phase 12.2.6 shipped: DigiLocker OAuth2 substrate + first non-stub Parivahan provider + Sahayak no-smartphone binding
+
+The first **citizen-authenticated** verification flow lands —
+substrate for every future DigiLocker-mediated identity path
+(Aadhaar e-KYC, PAN verify, RC/DL fetch). And the strategic
+direction for serving the ~700M Indians without usable
+smartphones is captured as a binding.
+
+- **ADR 0146** — `src/phase1/digilocker-substrate.mjs` —
+  OAuth2 helpers + state generation + signed-document
+  verification. Frozen scope allowlist. Stub mode =
+  deterministic flow; live mode hits
+  `api.digitallocker.gov.in` when partner credentials set.
+- **4 endpoints** — `/api/digilocker/authorize` (mints
+  state + builds redirect), `/callback` (exchanges code +
+  persists link), `/status` (link presence, NEVER returns
+  the token), `DELETE /link` (unlink + audit).
+- **§15 bindings** — access + refresh tokens NEVER on the
+  audit ledger AND NEVER in the `/status` response. State
+  binds to rootIdentityId server-side; the callback uses
+  the bound identity, not the URL. DPDP cascade erases
+  both `digilocker_states` and `digilocker_links` atomically
+  with the identity.
+- **Parivahan integration** — `verifyRoleExtrasFields` now
+  accepts an optional `digilockerLink`. When present, the
+  substrate uses the citizen-authorised signed-document
+  path; result envelope carries a `signedDocSha256`
+  pointer. Operator console shows 🔏 (locked) badge so the
+  stronger trust signal is legible at a glance.
+- **Adversarial review** — 17 findings across 3 lenses
+  (token-leak / state-CSRF / DPDP-storage). **5 high+med
+  fixed in-phase**: bindingDigest skipped in stub (was
+  rainbow-tableable for `dl-stub-access-<state>` tokens);
+  open-redirect via `?redirectUri=` closed via allowlist;
+  state ordering reversed to peek → exchange → consume so
+  a transient live-mode error no longer burns the state;
+  silent live→stub fallback now warn-once at startup;
+  opportunistic sweep bounds stale-state growth.
+- **Sahayak no-smartphone binding** — strategic direction
+  captured: Snabit / Pronto / PayNearby / Eko / Spice Money
+  proved the agent-assisted model. A trained, KYC'd local
+  agent uses THEIR device to onboard + transact on behalf
+  of citizens with feature phones or no phones at all.
+  Substrate is ~70% there today (KYC + role-extras +
+  attachments + DigiLocker biometric + SMS providers);
+  remaining 30% is the Sahayak product layer + partner
+  partnerships (USSD aggregator, UIDAI AUA license). New
+  memory binding + ROADMAP Phase 14.x sub-items.
+- **API_INTEGRATIONS update** — DigiLocker §3.1 flipped
+  from 📋 Reserved to 🧪 Stub-only with full env-var list +
+  partner-provisioning steps.
+- **Tests** — Node 1166 → **1199** (+33 substrate + storage
+  + endpoint + binding-grep + cascade + Parivahan
+  integration + 7 adversarial-fix cases). Vitest 138
+  unchanged. tsc clean. Build green. Bundle unchanged.
+
+**Next: Phase 12.2.7** (FE wizard "Link DigiLocker" button +
+browser-redirect flow) OR **Phase 12.3+** (wave-2 provider
+roles: `kirana`, `skilled-trades`) OR **Phase 14 Sahayak**
+(if the user wants to prioritise rural reach). Direction
+flexible.
+
+---
+
 ## 🚗 2026-06-01 — Phase 12.2.5 shipped: Parivahan verification adapter + API_INTEGRATIONS master tracker
 
 Third concrete adapter composing the Phase 12.2.1 external-

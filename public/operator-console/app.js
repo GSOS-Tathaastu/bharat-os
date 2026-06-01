@@ -1713,7 +1713,13 @@ function renderProviderKycReview(items) {
             const color = status === 'valid' ? 'var(--green)' : 'var(--red)';
             const provider = (env && env.provider) || 'unknown';
             const stubTag = provider === 'stub' ? ' [stub]' : '';
-            return `<span class="small" style="color:${color}" title="${escapeHtml(provider)}">${symbol} ${escapeHtml(fieldId)}=${escapeHtml(status)}${escapeHtml(stubTag)}</span>`;
+            // Phase 12.2.6 — when the result carries a
+            // signedDocSha256 the operator knows it came from
+            // a citizen-authorised DigiLocker session, not the
+            // generic stub. Mark visually so the trust signal
+            // is legible at a glance.
+            const signedTag = env && env.signedDocSha256 ? ' 🔏' : '';
+            return `<span class="small" style="color:${color}" title="${escapeHtml(provider)}">${symbol} ${escapeHtml(fieldId)}=${escapeHtml(status)}${escapeHtml(stubTag)}${signedTag}</span>`;
           }).join(' · ')
         : '';
       const roleExtrasAttestButtons = rx

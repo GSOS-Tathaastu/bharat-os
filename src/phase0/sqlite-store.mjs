@@ -467,6 +467,28 @@ const SCHEMAS = `
     json TEXT NOT NULL
   );
 
+  -- Phase 12.2.6 — DigiLocker state + link tables. State is
+  -- the OAuth2 CSRF parameter minted at /authorize; link is
+  -- the access+refresh token persisted after /callback.
+  -- Both cascade by root_identity_id.
+  CREATE TABLE IF NOT EXISTS digilocker_states (
+    state TEXT PRIMARY KEY,
+    root_identity_id TEXT NOT NULL,
+    minted_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_digilocker_states_root ON digilocker_states(root_identity_id);
+  CREATE INDEX IF NOT EXISTS idx_digilocker_states_expires ON digilocker_states(expires_at);
+
+  CREATE TABLE IF NOT EXISTS digilocker_links (
+    root_identity_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+
   -- Phase 12.2.3 — Attachment CORE substrate. Binary blobs
   -- owned by a root identity (KYC selfies, ID proofs, per-role
   -- docs, dispute evidence). Composite PK on (sha256, root)
@@ -2468,6 +2490,115 @@ export class SqliteStore {
     return false;
   }
 
+  // ─── Phase 12.2.6 — DigiLocker state + link tables ──────────────────
+
+  async saveDigiLockerState(record) {
+    if (!record?.state) throw new Error('digilocker state requires state.');
+    if (!record.rootIdentityId) throw new Error('digilocker state requires rootIdentityId.');
+    await this.init();
+    // Persist the FULL record (includes redirectUri + next so
+    // the callback can complete the flow); indexed columns
+    // mirror just the lookup fields.
+    this.db
+      .prepare(
+        `INSERT INTO digilocker_states (state, root_identity_id, minted_at, expires_at, json)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (state) DO UPDATE SET
+           root_identity_id = excluded.root_identity_id,
+           minted_at = excluded.minted_at,
+           expires_at = excluded.expires_at,
+           json = excluded.json`
+      )
+      .run(
+        record.state,
+        record.rootIdentityId,
+        record.mintedAt,
+        record.expiresAt,
+        JSON.stringify(record)
+      );
+    return record;
+  }
+
+  async peekDigiLockerState(state) {
+    await this.init();
+    if (!state) return null;
+    const row = this.db
+      .prepare('SELECT json FROM digilocker_states WHERE state = ?')
+      .get(state);
+    return row ? JSON.parse(row.json) : null;
+  }
+
+  async consumeDigiLockerState(state) {
+    await this.init();
+    const row = this.db
+      .prepare('SELECT json FROM digilocker_states WHERE state = ?')
+      .get(state);
+    if (!row) return null;
+    const meta = JSON.parse(row.json);
+    // One-shot — consuming the state deletes it.
+    this.db.prepare('DELETE FROM digilocker_states WHERE state = ?').run(state);
+    return meta;
+  }
+
+  async sweepExpiredDigiLockerStates({ now = new Date().toISOString() } = {}) {
+    await this.init();
+    const result = this.db
+      .prepare('DELETE FROM digilocker_states WHERE expires_at < ?')
+      .run(now);
+    return result.changes;
+  }
+
+  async saveDigiLockerLink(link) {
+    if (!link?.rootIdentityId) throw new Error('digilocker link requires rootIdentityId.');
+    await this.init();
+    this.db
+      .prepare(
+        `INSERT INTO digilocker_links (root_identity_id, mode, expires_at, linked_at, json)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (root_identity_id) DO UPDATE SET
+           mode = excluded.mode,
+           expires_at = excluded.expires_at,
+           linked_at = excluded.linked_at,
+           json = excluded.json`
+      )
+      .run(link.rootIdentityId, link.mode || 'stub', link.expiresAt, link.linkedAt, JSON.stringify(link));
+    await this.appendLedger({
+      type: 'digilocker.link_saved',
+      rootIdentityId: link.rootIdentityId,
+      mode: link.mode,
+      scope: link.scope,
+      expiresAt: link.expiresAt,
+      at: link.linkedAt
+    });
+    return link;
+  }
+
+  async readDigiLockerLink(rootIdentityId) {
+    await this.init();
+    if (!rootIdentityId) return null;
+    const row = this.db
+      .prepare('SELECT json FROM digilocker_links WHERE root_identity_id = ?')
+      .get(rootIdentityId);
+    return row ? JSON.parse(row.json) : null;
+  }
+
+  async deleteDigiLockerLink(rootIdentityId, { at = new Date().toISOString() } = {}) {
+    await this.init();
+    if (!rootIdentityId) return false;
+    const result = this.db
+      .prepare('DELETE FROM digilocker_links WHERE root_identity_id = ?')
+      .run(rootIdentityId);
+    if (result.changes > 0) {
+      await this.appendLedger({
+        type: 'digilocker.link_erased',
+        rootIdentityId,
+        at
+      });
+      return true;
+    }
+    return false;
+  }
+
   // ─── Phase 10.5 Audit signer (singleton) ──────────────────────────────
 
   async readAuditSigner() {
@@ -2660,6 +2791,13 @@ export class SqliteStore {
       // root_identity_id. The bytes column goes with the row so
       // erasure is atomic — no half-deleted blob on disk.
       sections.attachments = sweep('attachments', ['root_identity_id']);
+      // Phase 12.2.6 — DigiLocker state + link tables cascade
+      // by root_identity_id. State is the in-flight OAuth CSRF
+      // record; link is the persisted access + refresh token.
+      // Atomic with the identity erasure — no orphaned tokens
+      // floating after a DPDP request.
+      sections.digilockerStates = sweep('digilocker_states', ['root_identity_id']);
+      sections.digilockerLinks = sweep('digilocker_links', ['root_identity_id']);
       sections.identity = sweep('identities', ['id']);
 
       // Redact ledger entries that mention this user. We rewrite each

@@ -78,6 +78,11 @@ export class BosStore {
     // the bytes streamable + the meta scannable. DPDP cascade
     // walks meta files filtered by rootIdentityId.
     this.attachmentsPath = path.join(rootPath, 'attachments');
+    // Phase 12.2.6 — DigiLocker state + link directories. State
+    // is short-lived (10 min OAuth CSRF param). Link is the
+    // persisted access + refresh token, one per root identity.
+    this.digilockerStatesPath = path.join(rootPath, 'digilocker-states');
+    this.digilockerLinksPath = path.join(rootPath, 'digilocker-links');
     this.ledgerPath = path.join(rootPath, 'ledger.jsonl');
   }
 
@@ -113,6 +118,8 @@ export class BosStore {
     await fs.mkdir(this.bookingsPath, { recursive: true });
     await fs.mkdir(this.citizenEscrowsPath, { recursive: true });
     await fs.mkdir(this.attachmentsPath, { recursive: true });
+    await fs.mkdir(this.digilockerStatesPath, { recursive: true });
+    await fs.mkdir(this.digilockerLinksPath, { recursive: true });
     await fs.mkdir(this.labelingJobsPath, { recursive: true });
     await fs.mkdir(this.labelingJobItemsPath, { recursive: true });
     await fs.mkdir(this.labelingSubmissionsPath, { recursive: true });
@@ -519,6 +526,24 @@ export class BosStore {
       }
     }
     sections.attachments = attachmentsRemoved;
+
+    // Phase 12.2.6 — DigiLocker state cascade. States are
+    // keyed by the OAuth `state` value (not rootIdentityId);
+    // walk the directory and unlink the rows owned by this
+    // identity.
+    let stateRemoved = 0;
+    try {
+      const allStates = await listJson(this.digilockerStatesPath).catch(() => []);
+      for (const meta of allStates) {
+        if (meta && meta.rootIdentityId === identityId) {
+          await fs.unlink(this.digilockerStateFile(meta.state)).catch(() => {});
+          stateRemoved += 1;
+        }
+      }
+    } catch (_error) { /* best-effort */ }
+    sections.digilockerStates = stateRemoved;
+    const linkErased = await this.deleteDigiLockerLink(identityId).catch(() => false);
+    sections.digilockerLinks = linkErased ? 1 : 0;
 
     await sweep(
       'workerNotifications',
@@ -1595,6 +1620,84 @@ export class BosStore {
       attachmentId,
       rootIdentityId: meta.rootIdentityId,
       at: at || new Date().toISOString()
+    });
+    return true;
+  }
+
+  // Phase 12.2.6 — DigiLocker state + link substrate. Each
+  // state is a single .json file keyed by state value (the
+  // OAuth CSRF parameter); each link is a single .json file
+  // keyed by rootIdentityId.
+  digilockerStateFile(state) {
+    return path.join(this.digilockerStatesPath, `${safeName(state)}.json`);
+  }
+  digilockerLinkFile(rootIdentityId) {
+    return path.join(this.digilockerLinksPath, `${safeName(rootIdentityId)}.json`);
+  }
+
+  async saveDigiLockerState(record) {
+    if (!record?.state) throw new Error('digilocker state requires state.');
+    if (!record.rootIdentityId) throw new Error('digilocker state requires rootIdentityId.');
+    await this.init();
+    await writeJson(this.digilockerStateFile(record.state), record);
+    return record;
+  }
+
+  async peekDigiLockerState(state) {
+    if (!state) return null;
+    return readJson(this.digilockerStateFile(state));
+  }
+
+  async consumeDigiLockerState(state) {
+    if (!state) return null;
+    const file = this.digilockerStateFile(state);
+    const meta = await readJson(file);
+    if (!meta) return null;
+    await fs.unlink(file).catch(() => {});
+    return meta;
+  }
+
+  async sweepExpiredDigiLockerStates({ now = new Date().toISOString() } = {}) {
+    const all = await listJson(this.digilockerStatesPath);
+    let removed = 0;
+    for (const meta of all) {
+      if (meta && meta.expiresAt && meta.expiresAt < now) {
+        await fs.unlink(this.digilockerStateFile(meta.state)).catch(() => {});
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  async saveDigiLockerLink(link) {
+    if (!link?.rootIdentityId) throw new Error('digilocker link requires rootIdentityId.');
+    await this.init();
+    await writeJson(this.digilockerLinkFile(link.rootIdentityId), link);
+    await this.appendLedger({
+      type: 'digilocker.link_saved',
+      rootIdentityId: link.rootIdentityId,
+      mode: link.mode,
+      scope: link.scope,
+      expiresAt: link.expiresAt,
+      at: link.linkedAt
+    });
+    return link;
+  }
+
+  async readDigiLockerLink(rootIdentityId) {
+    if (!rootIdentityId) return null;
+    return readJson(this.digilockerLinkFile(rootIdentityId));
+  }
+
+  async deleteDigiLockerLink(rootIdentityId, { at = new Date().toISOString() } = {}) {
+    if (!rootIdentityId) return false;
+    const link = await readJson(this.digilockerLinkFile(rootIdentityId));
+    if (!link) return false;
+    await fs.unlink(this.digilockerLinkFile(rootIdentityId)).catch(() => {});
+    await this.appendLedger({
+      type: 'digilocker.link_erased',
+      rootIdentityId,
+      at
     });
     return true;
   }

@@ -295,6 +295,17 @@ import {
   verifyRoleExtrasFields
 } from '../phase1/parivahan-adapter.mjs';
 import {
+  generateState,
+  buildAuthorizeUrl,
+  exchangeCodeForToken,
+  buildLink,
+  readDigiLockerMode,
+  isAllowedRedirectUri,
+  DigiLockerError,
+  DIGILOCKER_STATE_TTL_MS,
+  DIGILOCKER_SCOPES
+} from '../phase1/digilocker-substrate.mjs';
+import {
   validateRoleAnswers,
   getProviderRoleForm,
   PROVIDER_ROLE_FORMS
@@ -2162,11 +2173,18 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           });
           return;
         }
+        // Phase 12.2.6 — if the citizen has authorised a
+        // DigiLocker session, the substrate uses the signed-
+        // document path. Operator-side verification gets a
+        // stronger signal (signedDocSha256 pointer) when
+        // available.
+        const digilockerLink = await store.readDigiLockerLink(existing.rootIdentityId).catch(() => null);
         let results;
         try {
           results = await verifyRoleExtrasFields(parivahanAdapter, {
             role: existing.roleExtrasSubmission.role,
-            answers: existing.roleExtrasSubmission.answers
+            answers: existing.roleExtrasSubmission.answers,
+            digilockerLink
           });
         } catch (err) {
           jsonResponse(response, 502, {
@@ -2618,6 +2636,217 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             error: { code: 'pincode_lookup_failed', message: err && err.message ? err.message : 'pincode lookup failed.' }
           });
         }
+        return;
+      }
+
+      // ── Phase 12.2.6 — DigiLocker OAuth2 substrate ────────────────
+      //
+      // GET    /api/digilocker/authorize?actingRootIdentityId=...&next=...
+      //   → mints state, persists, returns { authorizeUrl, state }
+      // GET    /api/digilocker/callback?code=...&state=...
+      //   → exchanges code, persists link, redirects to next
+      // GET    /api/digilocker/status?actingRootIdentityId=...
+      //   → { linked, mode, expiresAt, scope, linkedAt }
+      // DELETE /api/digilocker/link?actingRootIdentityId=...
+      //   → unlinks
+      //
+      // §15 bindings:
+      //   - state is sha256-derived from {rootIdentityId, salt, at}
+      //     and persisted server-side; the callback's URL `state`
+      //     must match exactly to defeat CSRF.
+      //   - The authorize endpoint requires X-Bharat-OS-Acting-Identity
+      //     (or query param fallback) — minting state without an
+      //     identity is rejected.
+      //   - The audit ledger emits digilocker.link_saved /
+      //     digilocker.link_erased; never the access token.
+      //   - Stub mode never hits api.digitallocker.gov.in.
+      if (request.method === 'GET' && url.pathname === '/api/digilocker/authorize') {
+        const acting = (url.searchParams.get('actingRootIdentityId')
+          || request.headers['x-bharat-os-acting-identity']
+          || ''
+        ).toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'digilocker authorize requires actingRootIdentityId.' }
+          });
+          return;
+        }
+        const identity = await store.readIdentity(acting).catch(() => null);
+        if (!identity) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_identity', message: 'actingRootIdentityId does not resolve to a known identity.' }
+          });
+          return;
+        }
+        const mode = readDigiLockerMode();
+        const next = url.searchParams.get('next') || '/';
+        // Phase 12.2.6 adversarial fix L1-2 — redirectUri must
+        // pass the substrate allowlist (default same-origin OR
+        // BHARAT_OS_DIGILOCKER_REDIRECT_URI). Without this,
+        // any caller could set redirectUri to attacker.com and
+        // capture the OAuth code in live mode.
+        const sameOriginCallback = `${request.headers['x-forwarded-proto'] || 'http'}://${request.headers.host || '127.0.0.1'}/api/digilocker/callback`;
+        const candidateRedirect = url.searchParams.get('redirectUri') || sameOriginCallback;
+        if (!isAllowedRedirectUri(candidateRedirect, { sameOriginCallback })) {
+          jsonResponse(response, 400, {
+            error: { code: 'redirect_uri_not_allowed', message: 'redirectUri must be the same-origin callback or a configured production redirect.' }
+          });
+          return;
+        }
+        const redirectUri = candidateRedirect;
+        const at = new Date().toISOString();
+        const stateRec = generateState({ rootIdentityId: acting, at });
+        const expiresAt = new Date(Date.parse(at) + DIGILOCKER_STATE_TTL_MS).toISOString();
+        // Phase 12.2.6 adversarial fix L3-4 — opportunistic
+        // sweep on save. Without it, an attacker hitting
+        // authorize 1000 times without callback would let
+        // 1000 stale rows accumulate until SOMEONE eventually
+        // completes a callback. Sweep is bounded — only deletes
+        // rows already past their TTL.
+        await store.sweepExpiredDigiLockerStates({ now: at }).catch(() => {});
+        await store.saveDigiLockerState({
+          state: stateRec.state,
+          rootIdentityId: acting,
+          mintedAt: at,
+          expiresAt,
+          redirectUri,
+          next
+        });
+        const authorizeUrl = buildAuthorizeUrl({
+          mode,
+          clientId: process.env.BHARAT_OS_DIGILOCKER_CLIENT_ID,
+          redirectUri,
+          state: stateRec.state,
+          scope: DIGILOCKER_SCOPES
+        });
+        jsonResponse(response, 200, {
+          ok: true,
+          mode,
+          state: stateRec.state,
+          authorizeUrl,
+          expiresAt
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/digilocker/callback') {
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
+        if (!code || !state) {
+          jsonResponse(response, 400, {
+            error: { code: 'missing_callback_params', message: 'code and state are required.' }
+          });
+          return;
+        }
+        // Sweep expired states opportunistically (cheap).
+        await store.sweepExpiredDigiLockerStates({ now: new Date().toISOString() }).catch(() => {});
+        // Phase 12.2.6 adversarial fix L2-6 — peek-then-consume.
+        // The original ordering consumed the state BEFORE the
+        // token exchange. A transient live-mode network error
+        // then burned the state and forced the citizen to
+        // restart the whole authorize roundtrip. Now: peek →
+        // exchange → consume only on success.
+        const meta = await store.peekDigiLockerState(state);
+        if (!meta) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_or_expired_state', message: 'state not found or already consumed.' }
+          });
+          return;
+        }
+        if (meta.expiresAt && new Date(meta.expiresAt) < new Date()) {
+          // Expired — consume to clean up, then refuse.
+          await store.consumeDigiLockerState(state).catch(() => {});
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_or_expired_state', message: 'state expired.' }
+          });
+          return;
+        }
+        const acting = meta.rootIdentityId;
+        const redirectUri = meta.redirectUri;
+        const mode = readDigiLockerMode();
+        let tokenEnvelope;
+        try {
+          tokenEnvelope = await exchangeCodeForToken({
+            mode,
+            clientId: process.env.BHARAT_OS_DIGILOCKER_CLIENT_ID,
+            clientSecret: process.env.BHARAT_OS_DIGILOCKER_CLIENT_SECRET,
+            redirectUri,
+            code,
+            at: new Date().toISOString()
+          });
+        } catch (err) {
+          if (err instanceof DigiLockerError) {
+            jsonResponse(response, err.status, {
+              error: { code: err.code, message: err.message }
+            });
+            return;
+          }
+          throw err;
+        }
+        // Exchange succeeded — NOW consume the state.
+        await store.consumeDigiLockerState(state);
+        const link = buildLink({ rootIdentityId: acting, tokenEnvelope });
+        await store.saveDigiLockerLink(link);
+        jsonResponse(response, 200, {
+          ok: true,
+          mode,
+          linked: true,
+          rootIdentityId: acting,
+          scope: link.scope,
+          expiresAt: link.expiresAt,
+          next: meta.next || '/'
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/digilocker/status') {
+        const acting = (url.searchParams.get('actingRootIdentityId')
+          || request.headers['x-bharat-os-acting-identity']
+          || ''
+        ).toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'digilocker status requires actingRootIdentityId.' }
+          });
+          return;
+        }
+        const link = await store.readDigiLockerLink(acting).catch(() => null);
+        if (!link) {
+          jsonResponse(response, 200, { linked: false });
+          return;
+        }
+        // §15 — NEVER return the access or refresh token from
+        // this endpoint. The substrate keeps the token server-
+        // side; the FE only needs to know the link exists.
+        jsonResponse(response, 200, {
+          linked: true,
+          mode: link.mode,
+          scope: link.scope,
+          linkedAt: link.linkedAt,
+          expiresAt: link.expiresAt
+        });
+        return;
+      }
+
+      if (request.method === 'DELETE' && url.pathname === '/api/digilocker/link') {
+        const acting = (url.searchParams.get('actingRootIdentityId')
+          || request.headers['x-bharat-os-acting-identity']
+          || ''
+        ).toString().trim();
+        if (!acting) {
+          jsonResponse(response, 401, {
+            error: { code: 'missing_acting_identity', message: 'digilocker unlink requires actingRootIdentityId.' }
+          });
+          return;
+        }
+        const ok = await store.deleteDigiLockerLink(acting, { at: new Date().toISOString() });
+        if (!ok) {
+          jsonResponse(response, 404, {
+            error: { code: 'no_link', message: 'no digilocker link to unlink.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, { ok: true, unlinked: true });
         return;
       }
 
@@ -4410,6 +4639,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/provider-identities/:providerIdentityId/submit-role-extras  (Phase 12.2.4 — citizen-driven role-specific extras)',
             'POST /api/admin/provider-identities/:providerIdentityId/attest-role-extras  (Phase 12.2.4 — operator attestation of role extras)',
             'POST /api/admin/provider-identities/:providerIdentityId/verify-role-extras  (Phase 12.2.5 — Parivahan auto-verification of DL/RC numbers)',
+            'GET /api/digilocker/authorize?actingRootIdentityId&next  (Phase 12.2.6 — mints OAuth state + returns authorizeUrl)',
+            'GET /api/digilocker/callback?code&state  (Phase 12.2.6 — exchanges code, persists token link)',
+            'GET /api/digilocker/status?actingRootIdentityId  (Phase 12.2.6 — link presence; never returns token)',
+            'DELETE /api/digilocker/link?actingRootIdentityId  (Phase 12.2.6 — unlink + audit event)',
             'GET /api/provider-role-extras-schemas  (Phase 12.2.4 — closed schema map for the wizard)',
             'GET /api/admin/provider-identities?status&roleKind&limit  (Phase 12.2.2 — operator KYC review queue)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',
