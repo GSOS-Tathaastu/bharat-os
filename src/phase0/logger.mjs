@@ -104,6 +104,19 @@ export function generateRequestId() {
   return `req-${hex()}-${hex()}`;
 }
 
+// Routes whose trailing path segment is a PII pointer (PIN code,
+// last-4 of an ID, an Aadhaar reference) must NOT appear in the
+// access log. These templates are matched against the cleaned
+// path; the matching segment is rewritten to `:param` before
+// logging. Add new entries when introducing PII-bearing routes.
+const PII_PATH_TEMPLATES = [
+  // Phase 12.2.2 — PIN code on the path. The PIN is a §15
+  // pointer (one PIN ≈ thousands of citizens) but join-keyed
+  // with a near-simultaneous KYC L1 submission, it would
+  // recover the citizen's residential PIN.
+  { pattern: /^\/api\/geocode\/pincode\/[^/]+$/, rewrite: '/api/geocode/pincode/:pin' }
+];
+
 // Strip query strings + percent-decode safely so log paths are
 // readable but don't carry user input that could be PII.
 export function safePath(url) {
@@ -111,5 +124,9 @@ export function safePath(url) {
   const [pathOnly] = String(url).split('?');
   // Replace any non-ASCII-printable so a malicious User-Agent /
   // path injection doesn't poison the log line.
-  return pathOnly.replace(/[^\x20-\x7e]/g, '?');
+  const cleaned = pathOnly.replace(/[^\x20-\x7e]/g, '?');
+  for (const { pattern, rewrite } of PII_PATH_TEMPLATES) {
+    if (pattern.test(cleaned)) return rewrite;
+  }
+  return cleaned;
 }

@@ -1937,6 +1937,17 @@ export type ServiceArea =
       summary: string;
     };
 
+export interface KycLevel1Submission {
+  fullLegalName: string;
+  aadhaarLast4: string;
+  panLast4: string;
+  addressPinCode: string;
+  addressLine: string;
+  cityFromPincode: string;
+  stateFromPincode: string;
+  submittedAt: string;
+}
+
 export interface ProviderIdentity {
   providerIdentityId: string;
   protocolVersion: string;
@@ -1949,11 +1960,26 @@ export interface ProviderIdentity {
   ratePaisePerHour: number;
   ratePaisePerService: number;
   description?: string | null;
+  // Phase 12.2.2 — owner-visible KYC L1 submission. NOT on
+  // publicProviderRecord; only present when the FE reads from
+  // a root-owner or admin endpoint. On the owner-list endpoint,
+  // last-4 + address-line are redacted to "••••".
+  kycLevel1Submission?: KycLevel1Submission | null;
   kycLevel: ProviderKycLevel;
   status: ProviderIdentityStatus;
   createdAt: string;
   submittedAt?: string | null;
   activatedAt?: string | null;
+  // Phase 12.2.2 — set when an operator transitions the record.
+  // Used by the KYC L1 page to render a "submission was sent back"
+  // banner when status is back at 'draft' after a 'submitted' phase.
+  lastTransition?: {
+    from: string;
+    to: string;
+    operatorId: string;
+    reason: string | null;
+    at: string;
+  } | null;
 }
 
 export function useProviderIdentities(rootIdentityId: string | null | undefined) {
@@ -2034,6 +2060,55 @@ export function useUpdateProviderProfile() {
       ),
     onSuccess: (_data, { rootIdentityId }) => {
       qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
+    }
+  });
+}
+
+// ─── Phase 12.2.2 — citizen-driven KYC L1 submission ───────────────
+
+export interface SubmitKycLevel1Input {
+  rootIdentityId: string;
+  providerIdentityId: string;
+  fullLegalName: string;
+  aadhaarLast4: string;
+  panLast4: string;
+  addressPinCode: string;
+  addressLine: string;
+  cityFromPincode: string;
+  stateFromPincode: string;
+}
+
+export function useSubmitKycLevel1() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SubmitKycLevel1Input) =>
+      api<{ providerIdentity: ProviderIdentity }>(
+        `/api/provider-identities/${encodeURIComponent(input.providerIdentityId)}/submit-kyc-l1`,
+        {
+          method: 'POST',
+          headers: {
+            // Phase 12.2.2 fix KYC-AUTH-1 — strong owner-auth via
+            // requireProviderOwnerAuth. The header is the
+            // canonical channel; we ALSO send actingRootIdentityId
+            // in the body so admin/CLI tooling without header
+            // control keeps working.
+            'X-Bharat-OS-Acting-Identity': input.rootIdentityId
+          },
+          body: JSON.stringify({
+            actingRootIdentityId: input.rootIdentityId,
+            fullLegalName: input.fullLegalName,
+            aadhaarLast4: input.aadhaarLast4,
+            panLast4: input.panLast4,
+            addressPinCode: input.addressPinCode,
+            addressLine: input.addressLine,
+            cityFromPincode: input.cityFromPincode,
+            stateFromPincode: input.stateFromPincode
+          })
+        }
+      ),
+    onSuccess: (_data, { rootIdentityId, providerIdentityId }) => {
+      qc.invalidateQueries({ queryKey: ['provider-identities', rootIdentityId] });
+      qc.invalidateQueries({ queryKey: ['provider-identity', providerIdentityId] });
     }
   });
 }

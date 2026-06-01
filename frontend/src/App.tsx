@@ -12,6 +12,7 @@ import { VerifyPage } from '@/routes/Verify';
 import { LabsPage } from '@/routes/Labs';
 import { LabelsPage } from '@/routes/Labels';
 import { ProviderOnboardingPage } from '@/routes/ProviderOnboarding';
+import { KycLevel1Page } from '@/routes/onboarding/KycLevel1Page';
 import { SettingsPage } from '@/routes/Settings';
 import { SponsorSurface } from '@/routes/sponsor/SponsorSurface';
 import { TopBar } from '@/components/TopBar';
@@ -98,6 +99,17 @@ export default function App() {
           element={
             <ProtectedSurface>
               <ProviderOnboardingPage />
+            </ProtectedSurface>
+          }
+        />
+        {/* Phase 12.2.2 — KYC Level 1 wizard (citizen-driven submission
+            consumed by the operator review queue). Standalone route so
+            future personas (labelers, citizen data-revenue) can reuse it. */}
+        <Route
+          path="/onboarding/kyc-level-1"
+          element={
+            <ProtectedSurface>
+              <KycLevel1Page />
             </ProtectedSurface>
           }
         />

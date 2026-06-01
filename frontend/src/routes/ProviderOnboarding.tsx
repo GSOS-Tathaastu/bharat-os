@@ -138,9 +138,14 @@ export function ProviderOnboardingPage() {
         roleAnswerValues
       },
       {
+        // Phase 12.2.2 — after draft creation, hand straight to the
+        // KYC Level 1 wizard. Provider can bail and resume later from
+        // the ProviderProfile "Complete KYC Level 1" CTA.
         onSuccess: ({ providerIdentity }) => {
-          show(`Draft provider profile created (${providerIdentity.status}).`, 'success');
-          navigate('/worker');
+          show('Draft profile created. One more step — KYC Level 1.', 'success');
+          navigate(
+            `/onboarding/kyc-level-1?providerId=${encodeURIComponent(providerIdentity.providerIdentityId)}&returnTo=/provider`
+          );
         },
         onError: (err: Error) => show(err.message, 'error')
       }

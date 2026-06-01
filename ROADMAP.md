@@ -1054,10 +1054,40 @@ Tests: 1035 → **1053 Node** (+18 substrate + adapter + HTTP
 binding cases) + 115 → **119 vitest** (+4). tsc clean. Bundle
 main unchanged at 599 KB / 170 KB gzipped. **ADR 0141**.
 
+#### Phase 12.2.2 — KYC Level 1 wizard + India Post PIN-code adapter ✅ SHIPPED 2026-06-01
+
+The common physical-service KYC slice for all four wave-1
+provider roles. Citizen-driven 3-step wizard
+(`/onboarding/kyc-level-1`): identity (full legal name +
+Aadhaar last-4 + PAN last-4) → address (PIN code → India Post
+auto-fill OR honest manual fallback in stub mode) → review.
+Produces a `kycLevel1Submission` record consumed by the
+operator review queue (new `#provider-kyc-review` section on
+the operator console). NEW `india-post-pincode` adapter (2nd
+composition of the external-adapter substrate) with **§15
+binding upgrade**: sha256-digest cacheKey on audit ledger +
+`/api/geocode/pincode/:pin` access-log path rewrite. NEW
+`provider_identity.kyc_l1_submitted` ledger event carries
+field NAMES + city/state only — never values. **Aadhaar /
+PAN last-4 ONLY** — substrate + UI paste handler both
+defensive. Strong owner-auth via
+`requireProviderOwnerAuth`; ledger-before-save + optimistic
+concurrency check (partial L2-1 fix). Owner-list endpoint
+now redacts last-4 + addressLine via
+`selfProviderRecord`. Operator console: admin token /
+operator-id topbar (sessionStorage only); two-step confirm
+on Attest / Activate echoing identity before bless.
+Adversarial review (4 parallel lenses) surfaced 24 findings;
+12 high+med fixed in-phase, 12 low deferred with scope
+rationale. Tests: 1053 → **1082 Node** (+29) + 119 →
+**121 vitest** (+2). tsc clean. Bundle 599 → 612 KB / 170 →
+174 KB gzipped (+13 KB). **ADR 0142**.
+
 #### Phase 12.2 — Provider onboarding wave 1 (~2 wks)
-Four roles share a common physical-service onboarding flow +
-role-specific extras (founder picked "minimum onboarding load,
-maximum coverage"):
+Four roles share a common physical-service onboarding flow
+(**KYC L1 done in 12.2.2**) + role-specific extras (founder
+picked "minimum onboarding load, maximum coverage"):
+- [x] **Common KYC L1 substrate + wizard** — Phase 12.2.2.
 - [ ] `cab-driver` — own commercial vehicle (taxi/auto/ride-hail).
   Extras: vehicle docs + commercial permit.
 - [ ] `personal-driver` — chauffeur for citizen's vehicle.
@@ -1066,6 +1096,11 @@ maximum coverage"):
   daily wage. Extras: sardar/contractor attestation.
 - [ ] `household-help` — maid + cook combined. Extras: police
   verification + references.
+- [ ] **Attachment CORE substrate** — selfie + ID-proof photo
+  capture, content-addressed blob store on both BosStore and
+  SqliteStore, multipart endpoint with size/MIME guards, DPDP
+  cascade-delete wiring, React capture component. Reused
+  across KYC L1, dispute evidence, future health-doc flows.
 
 #### Phase 12.3+ — Remaining provider roles (~3 wks)
 - [ ] `kirana` (shop license + GST optional).

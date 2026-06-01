@@ -2201,6 +2201,51 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.2 — SHIPPED 2026-06-01 (ADR 0142).** KYC Level 1
+  citizen-driven wizard + India Post PIN-code adapter (second
+  composition of the external-adapter substrate) + operator
+  review queue. The common physical-service KYC slice for the
+  4 wave-1 provider roles. NEW
+  `src/phase1/india-post-pincode.mjs` composes the substrate
+  with postalpincode.in (5 req/sec polite cap, 7-day TTL).
+  **§15 binding upgrade**: cacheKey on the audit ledger is a
+  sha256 digest of the PIN, NOT the raw PIN; access-log path
+  rewrites `/api/geocode/pincode/:pin`. NEW
+  `kycLevel1Submission` field on providerIdentity carrying
+  `{fullLegalName, aadhaarLast4, panLast4, addressPinCode,
+  addressLine, cityFromPincode, stateFromPincode,
+  submittedAt}`. **Aadhaar/PAN last-4 ONLY** — substrate
+  defensively rejects 12-digit Aadhaar / 10-char PAN; UI
+  paste handler keeps the TRAILING 4 not the leading 4 (a
+  critical bug surfaced by the adversarial review). NEW
+  ledger event `provider_identity.kyc_l1_submitted` —
+  carries field NAMES + city/state only, NEVER values. NEW
+  `selfProviderRecord` projection redacts last-4 + addressLine
+  on the owner-list endpoint (defense-in-depth until Bharat
+  ID lands signed sessions in Phase 13+). NEW
+  `POST /api/provider-identities/:id/submit-kyc-l1` uses
+  `requireProviderOwnerAuth` (X-Bharat-OS-Acting-Identity
+  header), with ledger-before-save ordering + optimistic
+  concurrency re-read returning 409 on parallel operator
+  transitions. NEW `GET /api/admin/provider-identities?
+  status&roleKind&hasKycL1Submission&limit` admin queue.
+  FE: 3-step wizard `/onboarding/kyc-level-1` (identity →
+  address with PIN auto-fill OR honest manual fallback in
+  stub mode → review); ProviderProfile banners distinguish
+  no-submission / pending / **rejected** (operator
+  `submitted→draft` transition). Operator console: NEW
+  `#provider-kyc-review` section + admin-token/operator-id
+  topbar (sessionStorage only) + two-step confirm on attest
+  echoing identity before bless. Adversarial-review
+  workflow surfaced 24 findings across 4 lenses (PII /
+  state-machine / auth / UX honesty); 12 high+med fixed
+  in-phase, 12 low deferred with scope rationale in ADR.
+  Tests: 1053 → **1082 Node** (+29) + 119 → **121 vitest**
+  (+2). tsc clean. Bundle main 599 → 612 KB / 170 → 174 KB
+  gzipped (+13 KB). Phase 12.2 wave-1 common KYC flow is
+  the substrate per-role extras (cab-driver vehicle docs,
+  personal-driver police-verification, etc.) plug into in
+  Phase 12.2.3+.
 - **Phase 12.2.1 — SHIPPED 2026-06-01 (ADR 0141).** First real
   external-API integration + the substrate that makes every
   future one cheap. NEW `src/phase0/external-adapter.mjs`

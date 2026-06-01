@@ -24,7 +24,58 @@ export function ProviderProfile({ provider, ownedActive }: ProviderProfileProps)
         <div className="flex flex-wrap gap-2">
           <Badge variant="trust">KYC {provider.kycLevel}</Badge>
           <Badge variant="governance">{provider.status}</Badge>
+          {provider.kycLevel1Submission && (
+            <Badge variant="pending">KYC L1 submitted</Badge>
+          )}
         </div>
+        {provider.status === 'draft' && !provider.kycLevel1Submission && (
+          <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 p-3">
+            <p className="text-body text-text">
+              Your provider profile is still a draft. Complete a quick KYC
+              Level 1 record so an operator can review and activate it.
+            </p>
+            <div className="mt-2">
+              <Link to={`/onboarding/kyc-level-1?providerId=${encodeURIComponent(provider.providerIdentityId)}&returnTo=/provider`}>
+                <Action>Complete KYC Level 1</Action>
+              </Link>
+            </div>
+          </div>
+        )}
+        {provider.status === 'draft' && provider.kycLevel1Submission && (() => {
+          const wasRejected = Boolean(
+            provider.lastTransition
+            && provider.lastTransition.from === 'submitted'
+            && provider.lastTransition.to === 'draft'
+          );
+          return wasRejected ? (
+            <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 p-3">
+              <p className="text-body text-text">
+                An operator sent your KYC submission back for changes.
+                {provider.lastTransition?.reason ? (
+                  <> Reason: <em>&ldquo;{provider.lastTransition.reason}&rdquo;</em></>
+                ) : null}
+              </p>
+              <div className="mt-2">
+                <Link to={`/onboarding/kyc-level-1?providerId=${encodeURIComponent(provider.providerIdentityId)}&returnTo=/provider`}>
+                  <Action>Edit and resubmit</Action>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-md border border-trust-100 bg-trust-50 p-3">
+              <p className="text-body text-text">
+                KYC Level 1 submitted on{' '}
+                {new Date(provider.kycLevel1Submission.submittedAt).toLocaleDateString()}.
+                An operator will review and elevate your profile.
+              </p>
+              <div className="mt-2">
+                <Link to={`/onboarding/kyc-level-1?providerId=${encodeURIComponent(provider.providerIdentityId)}&returnTo=/provider`}>
+                  <Action variant="ghost">Edit submission</Action>
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
         {provider.ratePaisePerHour > 0 && (
           <p className="mt-2 text-body text-text">
             {formatRateBasis(provider.ratePaisePerHour, 'per-hour')}

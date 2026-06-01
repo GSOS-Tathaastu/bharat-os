@@ -32,6 +32,7 @@
           <a class="nav-item" href="#federated-rounds">Federated</a>
           <a class="nav-item" href="#attestations">Attestations</a>
           <a class="nav-item" href="#flag-reports">Flags</a>
+          <a class="nav-item" href="#provider-kyc-review">Provider KYC</a>
           <a class="nav-item" href="#consents">Consents</a>
           <a class="nav-item" href="#memory">Memory</a>
           <a class="nav-item" href="#nodes">Nodes</a>
@@ -51,6 +52,14 @@
             <h2>Mesh Bootstrap Control Plane</h2>
           </div>
           <div class="topbar-actions">
+            <label class="topbar-inline-label" title="Pasted token sent as Authorization: Bearer; kept in this tab only.">
+              Admin token
+              <input id="adminTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="••••••••" style="width:160px" />
+            </label>
+            <label class="topbar-inline-label" title="Recorded on every operator-attributed ledger event.">
+              Operator id
+              <input id="operatorIdInput" type="text" autocomplete="off" placeholder="bos:operator:you" style="width:180px" />
+            </label>
             <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh dashboard" title="Refresh dashboard">
               &#8635;
             </button>
@@ -515,6 +524,65 @@
                 </tr>
               </thead>
               <tbody id="flagReportsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="provider-kyc-review" class="panel table-panel" aria-labelledby="providerKycReviewTitle">
+          <div class="panel-header">
+            <h3 id="providerKycReviewTitle">Provider KYC Review</h3>
+            <span id="providerKycReviewCountLabel">-- providers</span>
+          </div>
+          <p class="muted small">
+            Citizen-driven KYC L1 submissions awaiting operator
+            attestation. Each row carries the legal name + Aadhaar
+            last-4 + PAN last-4 + address PIN (Phase 12.2.2). Use
+            "Attest" to elevate `kycLevel` (basic / verified) and
+            "Activate" to move the provider into the marketplace.
+          </p>
+          <div class="filter-controls">
+            <label>
+              Status
+              <select id="providerKycStatusFilter">
+                <option value="draft" selected>Draft (awaiting KYC L1)</option>
+                <option value="submitted">Submitted (geo + KYC ready)</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="revoked">Revoked</option>
+                <option value="">All</option>
+              </select>
+            </label>
+            <label>
+              Role
+              <select id="providerKycRoleFilter">
+                <option value="" selected>All roles</option>
+                <option value="cab-driver">cab-driver</option>
+                <option value="personal-driver">personal-driver</option>
+                <option value="labourers">labourers</option>
+                <option value="household-help">household-help</option>
+              </select>
+            </label>
+            <label>
+              <input id="providerKycHasSubmissionFilter" type="checkbox" checked />
+              Only show those with a KYC L1 submission
+            </label>
+            <button id="refreshProviderKycButton" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>KYC L1 legal name</th>
+                  <th>Aadhaar / PAN last-4</th>
+                  <th>City, State (PIN)</th>
+                  <th>Submitted</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="providerKycReviewTable"></tbody>
             </table>
           </div>
         </section>

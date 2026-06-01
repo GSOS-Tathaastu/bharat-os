@@ -272,6 +272,9 @@ import {
   transitionProviderStatus,
   updateProviderProfile,
   publicProviderRecord,
+  selfProviderRecord,
+  submitKycLevel1,
+  KycLevel1ValidationError,
   PROVIDER_ROLE_KINDS,
   PROVIDER_KYC_LEVELS,
   PROVIDER_IDENTITY_STATUSES
@@ -282,6 +285,7 @@ import {
   PROVIDER_ROLE_FORMS
 } from '../phase1/provider-role-forms.mjs';
 import { createNominatimAdapter } from '../phase1/nominatim-geocoder.mjs';
+import { createPincodeAdapter, isValidPincode } from '../phase1/india-post-pincode.mjs';
 import { ExternalAdapterError } from './external-adapter.mjs';
 import {
   haversineMeters,
@@ -320,6 +324,7 @@ import {
   requireProviderOwnerAuth,
   requireBookingPartyAuth,
   requireCitizenOwnerAuth,
+  checkProviderOwnerAuth,
   ProviderAuthError
 } from './provider-auth.mjs';
 import {
@@ -691,7 +696,7 @@ async function maybeReadControlPlane(store, controlPlaneId) {
   }
 }
 
-export function createPhase0ApiServer({ store, startedAt = new Date().toISOString(), nominatim } = {}) {
+export function createPhase0ApiServer({ store, startedAt = new Date().toISOString(), nominatim, pincode } = {}) {
   if (!store) {
     throw new Error('store is required.');
   }
@@ -702,6 +707,8 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
   // across requests. The Nominatim instance is overridable for
   // tests (so they can inject `liveFetch` + a stub mode).
   const nominatimAdapter = nominatim || createNominatimAdapter({ store });
+  // Phase 12.2.2 — India Post PIN-code adapter singleton.
+  const pincodeAdapter = pincode || createPincodeAdapter({ store });
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -1591,7 +1598,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const rootIdentityId = decodeURIComponent(provIdRootListMatch[1]);
         if (request.method === 'GET') {
           const all = await store.listProviderIdentities({ rootIdentityId });
-          jsonResponse(response, 200, { providerIdentities: all });
+          // Phase 12.2.2 — redact KYC L1 last-4 IDs + address line
+          // through selfProviderRecord. The endpoint trusts the URL
+          // rootIdentityId today; until Bharat ID lands a signed-
+          // session contract (Phase 13+), redaction limits the
+          // blast radius if a third party scrapes this list.
+          jsonResponse(response, 200, {
+            providerIdentities: all.map(selfProviderRecord)
+          });
           return;
         }
         if (request.method === 'POST') {
@@ -1747,6 +1761,167 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           at: next.updatedAt
         });
         jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // ── Phase 12.2.2 — citizen-driven KYC L1 submission ───────────
+      //
+      // POST /api/provider-identities/:id/submit-kyc-l1
+      //   Strong owner-auth via requireProviderOwnerAuth (acting
+      //   identity in body.actingRootIdentityId OR X-Bharat-OS-
+      //   Acting-Identity header). Phase 12.2.2 adversarial fix
+      //   for KYC-AUTH-1 — the previous body.rootIdentityId
+      //   declaration was forgeable by any caller who knew the
+      //   victim's public bos:identity id.
+      //
+      //   Persists the full legal name, Aadhaar last-4, PAN
+      //   last-4, address PIN + line + resolved city/state onto
+      //   the draft provider record. Does NOT change kycLevel
+      //   (operator review consumes this via the admin queue +
+      //   the existing kyc-attest endpoint).
+      //
+      //   §15: emits provider_identity.kyc_l1_submitted carrying
+      //   only field NAMES + resolved city/state (non-PII geo).
+      //   Ledger event is appended BEFORE the record save so a
+      //   ledger failure aborts the write — every persisted KYC
+      //   L1 submission has an audit trail.
+      //
+      //   Optimistic concurrency: re-reads the record immediately
+      //   before save and aborts with 409 if the provider's
+      //   status / kycLevel / updatedAt drifted (e.g. operator
+      //   transitioned the provider to submitted in parallel).
+      //   This is a partial mitigation for L2-1; full CAS-on-seq
+      //   lands when the substrate-wide concurrency story does.
+      const provIdKycL1Match = /^\/api\/provider-identities\/([^/]+)\/submit-kyc-l1$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdKycL1Match) {
+        const providerIdentityId = decodeURIComponent(provIdKycL1Match[1]);
+        const body = await readRequestJson(request);
+        const existing = await checkProviderOwnerAuth(request, response, {
+          store,
+          providerIdentityId,
+          body,
+          requestId
+        });
+        if (!existing) return;
+        let next;
+        try {
+          next = submitKycLevel1(existing, {
+            fullLegalName: body.fullLegalName,
+            aadhaarLast4: body.aadhaarLast4,
+            panLast4: body.panLast4,
+            addressPinCode: body.addressPinCode,
+            addressLine: body.addressLine,
+            cityFromPincode: body.cityFromPincode,
+            stateFromPincode: body.stateFromPincode
+          });
+        } catch (err) {
+          if (err instanceof KycLevel1ValidationError) {
+            jsonResponse(response, 400, {
+              error: { code: err.code, message: err.message, field: err.field }
+            });
+            return;
+          }
+          jsonResponse(response, 400, {
+            error: { code: err && err.code ? err.code : 'invalid_kyc_l1', message: err && err.message ? err.message : 'invalid KYC L1 submission.' }
+          });
+          return;
+        }
+        // Optimistic re-read just before save to catch the operator
+        // race. If anything observable changed since we computed
+        // `next`, refuse — the citizen will be redirected to
+        // refresh by the FE.
+        const fresh = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!fresh) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        if (
+          fresh.status !== existing.status ||
+          fresh.kycLevel !== existing.kycLevel ||
+          fresh.updatedAt !== existing.updatedAt
+        ) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'provider_concurrent_change',
+              message: 'provider state changed in parallel; reload and try again.',
+              observed: { status: fresh.status, kycLevel: fresh.kycLevel }
+            }
+          });
+          return;
+        }
+        // Ledger BEFORE save: if the ledger append throws, no
+        // record write happens; if the record write later throws,
+        // the orphan ledger event is benign (an event without a
+        // matching record is a readable anomaly, the reverse is
+        // a §15 audit gap).
+        await store.appendLedger({
+          type: 'provider_identity.kyc_l1_submitted',
+          providerIdentityId: next.providerIdentityId,
+          rootIdentityId: next.rootIdentityId,
+          submittedFields: [
+            'fullLegalName',
+            'aadhaarLast4',
+            'panLast4',
+            'addressPinCode',
+            'addressLine',
+            'cityFromPincode',
+            'stateFromPincode'
+          ],
+          cityFromPincode: next.kycLevel1Submission.cityFromPincode,
+          stateFromPincode: next.kycLevel1Submission.stateFromPincode,
+          at: next.updatedAt
+        });
+        await store.saveProviderIdentity(next);
+        jsonResponse(response, 200, { providerIdentity: next });
+        return;
+      }
+
+      // ── Phase 12.2.2 — operator KYC review queue ─────────────────
+      //
+      // GET /api/admin/provider-identities?status=&roleKind=&limit=
+      //   Operator-only. Returns the matching provider identities
+      //   (full records, NOT publicProviderRecord — the operator
+      //   needs to see the KYC L1 submission). Default limit 50.
+      if (request.method === 'GET' && url.pathname === '/api/admin/provider-identities') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const statusQ = url.searchParams.get('status');
+        const roleKindQ = url.searchParams.get('roleKind');
+        const hasL1Q = url.searchParams.get('hasKycL1Submission');
+        const limitQ = Number(url.searchParams.get('limit') ?? '50');
+        const limit = Number.isFinite(limitQ) && limitQ > 0 ? Math.min(Math.floor(limitQ), 200) : 50;
+        if (statusQ && !PROVIDER_IDENTITY_STATUSES.includes(statusQ)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_status', message: `status must be one of: ${PROVIDER_IDENTITY_STATUSES.join(', ')}.` }
+          });
+          return;
+        }
+        if (roleKindQ && !PROVIDER_ROLE_KINDS.includes(roleKindQ)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_role_kind', message: `roleKind must be one of: ${PROVIDER_ROLE_KINDS.join(', ')}.` }
+          });
+          return;
+        }
+        let items = await store.listProviderIdentities({
+          status: statusQ || undefined,
+          roleKind: roleKindQ || undefined
+        });
+        // Phase 12.2.2 fix L2-4 — operator can filter to drafts
+        // that have an actual KYC L1 submission (otherwise the
+        // queue is padded with citizens who created a draft and
+        // never filled the wizard).
+        if (hasL1Q === 'true') {
+          items = items.filter((p) => p.kycLevel1Submission != null);
+        } else if (hasL1Q === 'false') {
+          items = items.filter((p) => p.kycLevel1Submission == null);
+        }
+        jsonResponse(response, 200, {
+          providerIdentities: items.slice(0, limit),
+          totalAvailable: items.length,
+          limit
+        });
         return;
       }
 
@@ -2049,6 +2224,52 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           }
           jsonResponse(response, 400, {
             error: { code: 'geocode_failed', message: err && err.message ? err.message : 'reverse geocode failed.' }
+          });
+        }
+        return;
+      }
+
+      // ── Phase 12.2.2 — PIN-code lookup ────────────────────────────
+      //
+      // GET /api/geocode/pincode/:pincode
+      //   Resolves a 6-digit Indian PIN code into {city, district,
+      //   state, branches[]}. Composes the India Post adapter.
+      //
+      //   Same envelope as /reverse: {ok, mode, source, place,
+      //   latencyMs, at}. Honest failure modes: invalid PIN → 400,
+      //   rate-limited → 429, upstream → 502.
+      const pincodeMatch = /^\/api\/geocode\/pincode\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && pincodeMatch) {
+        const pin = decodeURIComponent(pincodeMatch[1]);
+        if (!isValidPincode(pin)) {
+          jsonResponse(response, 400, {
+            error: { code: 'pincode_invalid', message: 'pincode must be a 6-digit Indian PIN code.' }
+          });
+          return;
+        }
+        const startedMs = Date.now();
+        try {
+          const result = await pincodeAdapter.call({ pincode: pin });
+          jsonResponse(response, 200, {
+            ok: true,
+            mode: result.mode,
+            source: result.source,
+            place: result.body,
+            latencyMs: Date.now() - startedMs,
+            at: new Date().toISOString()
+          });
+        } catch (err) {
+          if (err instanceof ExternalAdapterError) {
+            const status = err.code === 'rate_limited' ? 429
+              : err.code === 'adapter_invalid_request' ? 400
+              : err.status || 502;
+            jsonResponse(response, status, {
+              error: { code: err.code, message: err.message, adapter: 'india-post-pincode' }
+            });
+            return;
+          }
+          jsonResponse(response, 400, {
+            error: { code: 'pincode_lookup_failed', message: err && err.message ? err.message : 'pincode lookup failed.' }
           });
         }
         return;
@@ -3586,6 +3807,9 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'GET /api/marketplace/providers?lat&lng&radiusMeters&role&limit  (Phase 12.1a.1 — discovery)',
             'POST /api/marketplace/providers/:providerIdentityId/express-interest  (Phase 12.1a.1 — booking stub)',
             'GET /api/geocode/reverse?lat&lng  (Phase 12.2.1 — OSM Nominatim reverse geocode; mode=stub|live)',
+            'GET /api/geocode/pincode/:pin  (Phase 12.2.2 — India Post PIN code → city/state; mode=stub|live)',
+            'POST /api/provider-identities/:providerIdentityId/submit-kyc-l1  (Phase 12.2.2 — citizen-driven KYC L1 submission)',
+            'GET /api/admin/provider-identities?status&roleKind&limit  (Phase 12.2.2 — operator KYC review queue)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',
             'GET /api/marketplace/bookings/:bookingId  (Phase 12.1a.2 — party-aware projection)',
             'POST /api/marketplace/bookings/:bookingId/accept|reject|cancel|mark-complete|confirm-complete|dispute  (Phase 12.1a.2 — CAS+expectedSeq)',

@@ -152,6 +152,74 @@ Implemented pieces:
 
 ---
 
+## 🪪 2026-06-01 — Phase 12.2.2 shipped: citizen-driven KYC L1 wizard + India Post PIN-code adapter + operator review queue
+
+The common physical-service KYC slice for the 4 wave-1 provider
+roles. Citizen runs a 3-step wizard (identity → address with PIN
+auto-fill → review) to produce a `kycLevel1Submission` record
+that the operator review queue consumes before elevating the
+provider into the marketplace. Second composition of the external-
+adapter substrate proves it generalises beyond geo.
+
+- **ADR 0142** — `src/phase1/india-post-pincode.mjs` composes
+  the substrate with postalpincode.in (5 req/sec polite cap,
+  7-day TTL). cacheKey on the audit ledger is a sha256 digest
+  of the PIN, **NOT** the raw PIN; `safePath` rewrites
+  `/api/geocode/pincode/:pin` so the access log never carries
+  the PIN either. Both surfaces hardened by the adversarial
+  review.
+- **KYC L1 substrate** — new `kycLevel1Submission` field
+  carrying `{fullLegalName, aadhaarLast4, panLast4,
+  addressPinCode, addressLine, cityFromPincode,
+  stateFromPincode, submittedAt}`. **Aadhaar / PAN last-4
+  only** — substrate defensively rejects a 12-digit Aadhaar /
+  10-char PAN; UI paste handler keeps the TRAILING 4 (a
+  critical bug the adversarial review caught — it was keeping
+  the leading 4, which is wrong for both IDs). New ledger
+  event `provider_identity.kyc_l1_submitted` carries field
+  NAMES + city/state ONLY — never the values.
+- **Strong auth** (KYC-AUTH-1 fix) —
+  `POST /api/provider-identities/:id/submit-kyc-l1` uses
+  `requireProviderOwnerAuth` via the `X-Bharat-OS-Acting-
+  Identity` header; the older weak `body.rootIdentityId
+  === existing.rootIdentityId` pattern is replaced. Plus
+  ledger-before-save ordering (L2-3) + optimistic
+  concurrency re-read returning 409 (partial L2-1).
+- **Owner-list redaction** —
+  `GET /api/identities/:rootId/provider-identities` now
+  redacts `aadhaarLast4` / `panLast4` to "••••" and
+  `addressLine` to "•••• (re-enter to edit)" via the new
+  `selfProviderRecord` projection. Defense-in-depth until
+  Bharat ID lands signed sessions in Phase 13+.
+- **Operator review queue** — new `#provider-kyc-review`
+  section on `public/operator-console/` with admin-token /
+  operator-id topbar (sessionStorage only — never
+  localStorage). Two-step confirm on Attest / Activate
+  echoes the legal name + Aadhaar last-4 + PAN last-4
+  BEFORE collecting notes (attest-no-confirmation-dialog
+  fix).
+- **UX honesty** — stub-mode is honest: PIN lookup in stub
+  doesn't return a fake "Pune, Maharashtra" for every PIN;
+  the wizard surfaces a manual City + State `Field` pair.
+  Rejection vs pending distinguished: when
+  `provider.lastTransition` reads `submitted → draft`, the
+  wizard + ProviderProfile render a warning banner with the
+  operator's reason quoted, not the "awaiting review" trust
+  banner.
+- **Adversarial review** — 4-lens parallel workflow surfaced
+  24 findings (5 PII / 7 state-machine / 4 auth / 8 UX). 12
+  high+med fixed in-phase; 12 low deferred with explicit
+  scope rationale in the ADR.
+- **Tests** — Node 1053 → **1082** (+29) + vitest 119 →
+  **121** (+2). tsc clean. Bundle main 599 → 612 KB / 170 →
+  174 KB gzipped (+13 KB).
+
+**Next: Phase 12.2.3** — per-role extras (cab-driver vehicle
+docs, personal-driver police verification, etc.) + the
+attachment CORE substrate for selfie / ID proof photos.
+
+---
+
 ## 🌐 2026-06-01 — Phase 12.2.1 shipped: external-adapter substrate + first real API (OSM Nominatim reverse geocode)
 
 First real external-API integration. Lays down the substrate that

@@ -579,6 +579,7 @@ async function loadDashboard() {
     await loadServiceMarketplace();
     await loadWorkerAuthorizations();
     await loadFlagReports();
+    await loadProviderKycReview();
     await loadFederatedRounds();
     await loadAttestations();
     setApiStatus(true, 'Connected');
@@ -1613,6 +1614,207 @@ $('flagReportsTable').addEventListener('click', (event) => {
 
 $('flagStatusFilter').addEventListener('change', loadFlagReports);
 $('refreshFlagsButton').addEventListener('click', loadFlagReports);
+
+// ─── Phase 12.2.2 — Provider KYC review queue ────────────────────────────
+
+// Helper: read admin headers from the topbar inputs. Persists to
+// sessionStorage so a tab refresh doesn't lose the token. The token
+// is NEVER persisted to localStorage (that would survive close).
+function readAdminHeaders() {
+  const tokenEl = document.getElementById('adminTokenInput');
+  const opEl = document.getElementById('operatorIdInput');
+  const token = (tokenEl && tokenEl.value.trim()) || sessionStorage.getItem('bos.adminToken') || '';
+  const operator = (opEl && opEl.value.trim()) || sessionStorage.getItem('bos.operatorId') || '';
+  if (tokenEl && tokenEl.value.trim()) sessionStorage.setItem('bos.adminToken', tokenEl.value.trim());
+  if (opEl && opEl.value.trim()) sessionStorage.setItem('bos.operatorId', opEl.value.trim());
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (operator) headers['X-Bharat-Os-Operator'] = operator;
+  return headers;
+}
+// Hydrate the topbar inputs from session on load.
+(function hydrateAdminInputs() {
+  const t = sessionStorage.getItem('bos.adminToken');
+  const o = sessionStorage.getItem('bos.operatorId');
+  if (t) { const el = document.getElementById('adminTokenInput'); if (el) el.value = t; }
+  if (o) { const el = document.getElementById('operatorIdInput'); if (el) el.value = o; }
+})();
+
+function renderProviderKycReview(items) {
+  state.providerKycReview = items;
+  const table = $('providerKycReviewTable');
+  if (!table) return;
+  $('providerKycReviewCountLabel').textContent =
+    `${items.length} provider${items.length === 1 ? '' : 's'}`;
+  if (items.length === 0) {
+    table.innerHTML = '<tr><td colspan="8">No matching providers.</td></tr>';
+    return;
+  }
+  table.innerHTML = items
+    .map((p) => {
+      const sub = p.kycLevel1Submission;
+      const legalName = sub ? escapeHtml(sub.fullLegalName) : '<span class="muted">—</span>';
+      const last4 = sub
+        ? `••••${escapeHtml(sub.aadhaarLast4)} / ••••${escapeHtml(sub.panLast4)}`
+        : '<span class="muted">—</span>';
+      const cityState = sub
+        ? `${escapeHtml(sub.cityFromPincode)}, ${escapeHtml(sub.stateFromPincode)} (${escapeHtml(sub.addressPinCode)})`
+        : '<span class="muted">—</span>';
+      const submittedAt = sub
+        ? new Date(sub.submittedAt).toLocaleString()
+        : '<span class="muted">—</span>';
+      const canAttest = sub != null;
+      const canActivate = p.status === 'submitted' && p.kycLevel !== 'none';
+      return `<tr>
+        <td>${escapeHtml(p.displayName)}<br><span class="muted small">${escapeHtml(p.providerIdentityId)}</span></td>
+        <td>${escapeHtml(p.roleKind)}</td>
+        <td>${escapeHtml(p.status)} <span class="muted">/ kyc=${escapeHtml(p.kycLevel)}</span></td>
+        <td>${legalName}</td>
+        <td>${last4}</td>
+        <td>${cityState}</td>
+        <td>${submittedAt}</td>
+        <td>
+          <button data-kyc-attest-basic="${escapeHtml(p.providerIdentityId)}" ${canAttest ? '' : 'disabled'} type="button">Attest basic</button>
+          <button data-kyc-attest-verified="${escapeHtml(p.providerIdentityId)}" ${canAttest ? '' : 'disabled'} type="button">Attest verified</button>
+          <button data-kyc-activate="${escapeHtml(p.providerIdentityId)}" ${canActivate ? '' : 'disabled'} type="button">Activate</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[c]);
+}
+
+async function loadProviderKycReview() {
+  try {
+    const status = $('providerKycStatusFilter').value;
+    const role = $('providerKycRoleFilter').value;
+    const hasL1 = $('providerKycHasSubmissionFilter').checked;
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (role) params.set('roleKind', role);
+    if (hasL1) params.set('hasKycL1Submission', 'true');
+    params.set('limit', '50');
+    const headers = readAdminHeaders();
+    if (!headers['Authorization']) {
+      $('providerKycReviewTable').innerHTML =
+        '<tr><td colspan="8">Paste the admin token in the topbar to load this queue.</td></tr>';
+      $('providerKycReviewCountLabel').textContent = '-- providers';
+      return;
+    }
+    const response = await fetch(`/api/admin/provider-identities?${params}`, { headers });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      $('providerKycReviewTable').innerHTML =
+        `<tr><td colspan="8">Failed to load (${response.status} ${escapeHtml((body.error && body.error.code) || 'error')}).</td></tr>`;
+      $('providerKycReviewCountLabel').textContent = '-- providers';
+      return;
+    }
+    const data = await response.json();
+    renderProviderKycReview(data.providerIdentities || []);
+  } catch (err) {
+    $('providerKycReviewTable').innerHTML =
+      `<tr><td colspan="8">${escapeHtml(err.message || 'error')}</td></tr>`;
+  }
+}
+
+async function attestProviderKyc(providerIdentityId, level) {
+  // Phase 12.2.2 fix attest-no-confirmation-dialog: echo the
+  // identity being blessed BEFORE collecting notes. Pull the
+  // record from the loaded queue rather than hitting the API
+  // again — it's already in front of the operator.
+  const row = (state.providerKycReview || []).find((p) => p.providerIdentityId === providerIdentityId);
+  const ident = row && row.kycLevel1Submission
+    ? `${row.kycLevel1Submission.fullLegalName} (Aadhaar ••••${row.kycLevel1Submission.aadhaarLast4}, PAN ••••${row.kycLevel1Submission.panLast4})`
+    : providerIdentityId;
+  const confirmed = window.confirm(`Attest ${ident} as KYC ${level}?\n\nThis writes an operator-attributed event to the audit ledger.`);
+  if (!confirmed) return;
+  const notes = window.prompt(`Attestation notes (optional, becomes part of the audit trail):`, '');
+  if (notes === null) return; // cancelled
+  const headers = readAdminHeaders();
+  if (!headers['Authorization']) {
+    window.alert('Paste an admin token in the topbar first.');
+    return;
+  }
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/admin/provider-identities/${encodeURIComponent(providerIdentityId)}/kyc-attest`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ kycLevel: level, notes: notes.trim() || null, evidenceRefs: [] })
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    await loadProviderKycReview();
+  } catch (err) {
+    window.alert(`Attest failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function activateProvider(providerIdentityId) {
+  const row = (state.providerKycReview || []).find((p) => p.providerIdentityId === providerIdentityId);
+  const ident = row && row.kycLevel1Submission
+    ? `${row.kycLevel1Submission.fullLegalName} (Aadhaar ••••${row.kycLevel1Submission.aadhaarLast4}, PAN ••••${row.kycLevel1Submission.panLast4})`
+    : providerIdentityId;
+  const confirmed = window.confirm(`Activate ${ident}?\n\nThis moves the provider into the live marketplace.`);
+  if (!confirmed) return;
+  const reason = window.prompt('Reason (becomes part of the audit trail):', 'KYC L1 reviewed, identity confirmed');
+  if (reason === null) return;
+  const headers = readAdminHeaders();
+  if (!headers['Authorization']) {
+    window.alert('Paste an admin token in the topbar first.');
+    return;
+  }
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/admin/provider-identities/${encodeURIComponent(providerIdentityId)}/transition`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ nextStatus: 'active', reason: reason.trim() || null })
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    await loadProviderKycReview();
+  } catch (err) {
+    window.alert(`Activate failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+$('providerKycReviewTable').addEventListener('click', (event) => {
+  const basic = event.target.closest('[data-kyc-attest-basic]');
+  if (basic && !basic.disabled) { attestProviderKyc(basic.dataset.kycAttestBasic, 'basic'); return; }
+  const verified = event.target.closest('[data-kyc-attest-verified]');
+  if (verified && !verified.disabled) { attestProviderKyc(verified.dataset.kycAttestVerified, 'verified'); return; }
+  const activate = event.target.closest('[data-kyc-activate]');
+  if (activate && !activate.disabled) { activateProvider(activate.dataset.kycActivate); }
+});
+$('providerKycStatusFilter').addEventListener('change', loadProviderKycReview);
+$('providerKycRoleFilter').addEventListener('change', loadProviderKycReview);
+$('providerKycHasSubmissionFilter').addEventListener('change', loadProviderKycReview);
+$('refreshProviderKycButton').addEventListener('click', loadProviderKycReview);
+// Reload on token change.
+const adminTokenInputEl = document.getElementById('adminTokenInput');
+const operatorIdInputEl = document.getElementById('operatorIdInput');
+if (adminTokenInputEl) adminTokenInputEl.addEventListener('change', loadProviderKycReview);
+if (operatorIdInputEl) operatorIdInputEl.addEventListener('change', loadProviderKycReview);
 
 // ─── §7f Federated rounds — Phase 2a.23 catch-up ──────────────────────────
 function renderFederatedRounds(rounds) {

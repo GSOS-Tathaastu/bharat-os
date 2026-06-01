@@ -82,6 +82,141 @@ export const PROVIDER_ROLE_KINDS = [
 // real Aadhaar e-KYC) calls kyc-attest with one of these values.
 export const PROVIDER_KYC_LEVELS = ['none', 'basic', 'verified'];
 
+// Phase 12.2.2 — KYC Level 1 (citizen-driven) submission shape.
+//
+// The provider supplies their identity + address + IDs themselves
+// via the /onboarding/kyc-level-1 wizard. This is NOT the same as
+// `attestProviderKyc` (operator action that elevates `kycLevel`).
+//
+// §15 bindings on KYC L1:
+//   - Aadhaar last-4 ONLY. The substrate refuses anything that
+//     could be a full Aadhaar (12 digits). Bharat OS never stores
+//     the full 12-digit Aadhaar today; real e-KYC lands in a
+//     Phase 12.2.x DigiLocker adapter that returns a signed
+//     verification token, not the number itself.
+//   - PAN last-4 ONLY. Same reasoning. The full PAN is held by
+//     the citizen; we store the last-4 as a check-digit so
+//     downstream consumers (operators reviewing the submission)
+//     can verify a citizen-presented PAN matches the record
+//     without ever transmitting the full PAN.
+//   - Address PIN code (6-digit). The city + state are auto-
+//     resolved via the India Post adapter; the citizen confirms
+//     and the resolved values are persisted on the record.
+//   - `publicProviderRecord` MUST NOT echo this field. Citizens
+//     browsing the marketplace must not see the legal name +
+//     last-4 IDs of providers.
+export const KYC_L1_AADHAAR_LAST4_RE = /^[0-9]{4}$/;
+export const KYC_L1_PAN_LAST4_RE = /^[A-Z0-9]{4}$/;
+export const KYC_L1_PINCODE_RE = /^[1-9][0-9]{5}$/;
+export const KYC_L1_FULL_LEGAL_NAME_MAX = 120;
+export const KYC_L1_ADDRESS_LINE_MAX = 240;
+
+export class KycLevel1ValidationError extends Error {
+  constructor(code, message, field = null) {
+    super(message);
+    this.name = 'KycLevel1ValidationError';
+    this.code = code;
+    this.field = field;
+  }
+}
+
+// Validate a KYC L1 submission. Returns the cleaned record on
+// success; throws KycLevel1ValidationError on the FIRST failure.
+// Pure — no IO. Caller persists the returned object verbatim.
+export function validateKycLevel1Submission({
+  fullLegalName,
+  aadhaarLast4,
+  panLast4,
+  addressPinCode,
+  addressLine,
+  cityFromPincode,
+  stateFromPincode
+} = {}) {
+  const name = fullLegalName == null ? '' : String(fullLegalName).trim();
+  if (!name) throw new KycLevel1ValidationError('full_legal_name_required', 'fullLegalName is required.', 'fullLegalName');
+  if (name.length > KYC_L1_FULL_LEGAL_NAME_MAX) {
+    throw new KycLevel1ValidationError('full_legal_name_too_long', 'fullLegalName must be ≤ 120 chars.', 'fullLegalName');
+  }
+
+  const a = aadhaarLast4 == null ? '' : String(aadhaarLast4).trim();
+  // §15 binding: anything that looks like a full Aadhaar (12 digits)
+  // is rejected outright BEFORE the last-4 regex check. Defense in
+  // depth against a UI bug that forwards the full input.
+  if (/^[0-9]{12}$/.test(a)) {
+    throw new KycLevel1ValidationError(
+      'aadhaar_last4_full_aadhaar_rejected',
+      'never send the full 12-digit Aadhaar; only the last 4 digits.',
+      'aadhaarLast4'
+    );
+  }
+  if (!KYC_L1_AADHAAR_LAST4_RE.test(a)) {
+    throw new KycLevel1ValidationError('aadhaar_last4_invalid', 'aadhaarLast4 must be exactly 4 digits.', 'aadhaarLast4');
+  }
+
+  const p = panLast4 == null ? '' : String(panLast4).trim().toUpperCase();
+  // Full PAN is exactly 10 chars (AAAAA9999A). Reject defensively.
+  if (/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(p)) {
+    throw new KycLevel1ValidationError(
+      'pan_last4_full_pan_rejected',
+      'never send the full 10-character PAN; only the last 4 characters.',
+      'panLast4'
+    );
+  }
+  if (!KYC_L1_PAN_LAST4_RE.test(p)) {
+    throw new KycLevel1ValidationError('pan_last4_invalid', 'panLast4 must be exactly 4 chars (A-Z / 0-9).', 'panLast4');
+  }
+
+  const pin = addressPinCode == null ? '' : String(addressPinCode).trim();
+  if (!KYC_L1_PINCODE_RE.test(pin)) {
+    throw new KycLevel1ValidationError('pincode_invalid', 'addressPinCode must be a 6-digit Indian PIN.', 'addressPinCode');
+  }
+  const line = addressLine == null ? '' : String(addressLine).trim();
+  if (!line) throw new KycLevel1ValidationError('address_line_required', 'addressLine is required.', 'addressLine');
+  if (line.length > KYC_L1_ADDRESS_LINE_MAX) {
+    throw new KycLevel1ValidationError('address_line_too_long', 'addressLine must be ≤ 240 chars.', 'addressLine');
+  }
+
+  const city = cityFromPincode == null ? null : String(cityFromPincode).trim().slice(0, 120) || null;
+  const state = stateFromPincode == null ? null : String(stateFromPincode).trim().slice(0, 120) || null;
+  // City + state must both be present — the wizard auto-fills them
+  // via the PIN adapter; if either is absent, the FE submitted a
+  // bad envelope and we don't want a half-populated record.
+  if (!city) throw new KycLevel1ValidationError('city_required', 'cityFromPincode is required.', 'cityFromPincode');
+  if (!state) throw new KycLevel1ValidationError('state_required', 'stateFromPincode is required.', 'stateFromPincode');
+
+  return {
+    fullLegalName: name,
+    aadhaarLast4: a,
+    panLast4: p,
+    addressPinCode: pin,
+    addressLine: line,
+    cityFromPincode: city,
+    stateFromPincode: state
+  };
+}
+
+// Persist (or replace) a KYC L1 submission on a draft providerIdentity.
+// Does NOT change kycLevel — that remains an operator action. Does
+// NOT change status — the operator review surface decides whether
+// to elevate to `submitted`. This call is idempotent: re-submitting
+// with the same fields produces the same record.
+export function submitKycLevel1(provider, fields, { at = nowIso() } = {}) {
+  if (!provider || provider.status !== 'draft') {
+    const err = new Error('KYC L1 can only be submitted while the provider is in draft.');
+    err.code = 'invalid_status_for_kyc_l1';
+    throw err;
+  }
+  const cleaned = validateKycLevel1Submission(fields);
+  return {
+    ...provider,
+    kycLevel1Submission: {
+      ...cleaned,
+      submittedAt: at
+    },
+    updatedAt: at
+  };
+}
+
 // Lifecycle status. Substrate enforces single-direction transitions
 // (draft → submitted → active → suspended | revoked). A revoked
 // identity cannot return to active; the citizen creates a new one.
@@ -329,6 +464,10 @@ export function createProviderIdentity({
     ratePaisePerService: perService,
     description: desc,
     roleAnswers: roleAnswers && typeof roleAnswers === 'object' ? roleAnswers : null,
+    // Phase 12.2.2 — citizen-driven KYC L1 submission. Operator
+    // review consumes this field via the admin queue; never exposed
+    // by publicProviderRecord.
+    kycLevel1Submission: null,
     kycLevel: 'none',
     kycAttestation: null,
     status: 'draft',
@@ -535,6 +674,63 @@ export function publicProviderRecord(provider) {
     kycLevel: provider.kycLevel,
     status: provider.status,
     activatedAt: provider.activatedAt
+  };
+}
+
+// Phase 12.2.2 — projection for the OWNER's own list of provider
+// identities (GET /api/identities/:rootId/provider-identities).
+// Stronger than publicProviderRecord (the owner sees their own
+// kycLevel1Submission) but REDACTS the sensitive fields the
+// adversarial review (OWNER-LIST-UNAUTHENTICATED) flagged:
+// the endpoint trusts rootIdentityId from the URL today, so a
+// network attacker who learns a victim's rootIdentityId would
+// scrape full last-4 IDs + address line. Until Bharat ID lands
+// a signed-session contract, redact those fields to "••••" so
+// the worst the leak yields is the citizen's name + PIN +
+// city/state — the same surface that's already on the operator
+// queue today.
+//
+// The wizard's "edit" mode requires the citizen to re-type the
+// last-4 Aadhaar/PAN; the city/state/PIN/name pre-fill from this
+// redacted projection is enough to confirm "this is the right
+// submission to edit."
+export function selfProviderRecord(provider) {
+  const sub = provider.kycLevel1Submission;
+  return {
+    providerIdentityId: provider.providerIdentityId,
+    protocolVersion: provider.protocolVersion,
+    objectType: provider.objectType,
+    rootIdentityId: provider.rootIdentityId,
+    roleKind: provider.roleKind,
+    roleWave: provider.roleWave,
+    displayName: provider.displayName,
+    serviceArea: provider.serviceArea,
+    ratePaisePerHour: provider.ratePaisePerHour,
+    ratePaisePerService: provider.ratePaisePerService,
+    description: provider.description,
+    roleAnswers: provider.roleAnswers,
+    kycLevel1Submission: sub
+      ? {
+        fullLegalName: sub.fullLegalName,
+        aadhaarLast4: '••••',
+        panLast4: '••••',
+        addressPinCode: sub.addressPinCode,
+        addressLine: '•••• (re-enter to edit)',
+        cityFromPincode: sub.cityFromPincode,
+        stateFromPincode: sub.stateFromPincode,
+        submittedAt: sub.submittedAt
+      }
+      : null,
+    kycLevel: provider.kycLevel,
+    kycAttestation: provider.kycAttestation,
+    status: provider.status,
+    createdAt: provider.createdAt,
+    submittedAt: provider.submittedAt,
+    activatedAt: provider.activatedAt,
+    suspendedAt: provider.suspendedAt,
+    revokedAt: provider.revokedAt,
+    updatedAt: provider.updatedAt,
+    lastTransition: provider.lastTransition
   };
 }
 
