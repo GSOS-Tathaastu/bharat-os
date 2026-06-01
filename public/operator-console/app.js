@@ -1693,11 +1693,36 @@ function renderProviderKycReview(items) {
           ).join(' ')
         : '';
       const canAttestRoleExtras = Boolean(rx) && !rxa;
+      // Phase 12.2.5 — Parivahan verification button + badges.
+      // The button is enabled whenever there's a role-extras
+      // submission to verify; running it again overwrites the
+      // prior result so the operator can re-check after a
+      // citizen edits.
+      const rxv = p.roleExtrasVerifications;
+      const canVerifyRoleExtras = Boolean(rx);
+      const verifyButton = rx
+        ? `<button data-role-extras-verify="${escapeHtml(p.providerIdentityId)}" ${canVerifyRoleExtras ? '' : 'disabled'} type="button">Pre-verify (Parivahan)</button>`
+        : '';
+      // Phase 12.2.5 adversarial fix UX-Q1+Q2 — color + symbol
+      // per status. Stub provider tagged inline so the operator
+      // doesn't mistake demo results for real verifications.
+      const verifyBadges = rxv && rxv.results
+        ? Object.entries(rxv.results).map(([fieldId, env]) => {
+            const status = (env && env.status) || 'unknown';
+            const symbol = status === 'valid' ? '✓' : status === 'verifier_error' ? '✗' : '⚠';
+            const color = status === 'valid' ? 'var(--green)' : 'var(--red)';
+            const provider = (env && env.provider) || 'unknown';
+            const stubTag = provider === 'stub' ? ' [stub]' : '';
+            return `<span class="small" style="color:${color}" title="${escapeHtml(provider)}">${symbol} ${escapeHtml(fieldId)}=${escapeHtml(status)}${escapeHtml(stubTag)}</span>`;
+          }).join(' · ')
+        : '';
       const roleExtrasAttestButtons = rx
         ? `<div class="small">
+             ${verifyButton}
              <button data-role-extras-attest-basic="${escapeHtml(p.providerIdentityId)}" ${canAttestRoleExtras ? '' : 'disabled'} type="button">Attest role basic</button>
              <button data-role-extras-attest-verified="${escapeHtml(p.providerIdentityId)}" ${canAttestRoleExtras ? '' : 'disabled'} type="button">Attest role verified</button>
              ${rxa ? `<span class="muted">role=${escapeHtml(rxa.level)}</span>` : ''}
+             ${verifyBadges ? `<div class="muted small">${verifyBadges}</div>` : ''}
            </div>`
         : '';
       const attachmentButtons = (selfieBtn || idProofBtn)
@@ -1878,6 +1903,42 @@ async function viewAttachment(attachmentId) {
   }
 }
 
+async function verifyRoleExtras(providerIdentityId) {
+  // Phase 12.2.5 — fire the Parivahan adapter and refresh the
+  // operator view. Confirm dialog notes that stub mode returns
+  // fake-but-deterministic results so the operator knows what
+  // they're looking at.
+  const headers = readAdminHeaders();
+  if (!headers['Authorization']) {
+    window.alert('Paste an admin token in the topbar first.');
+    return;
+  }
+  const confirmed = window.confirm(
+    `Run Parivahan pre-verification for ${providerIdentityId}?\n\n` +
+    'Stub mode returns demo "valid" results; configure ' +
+    'BHARAT_OS_PARIVAHAN_MODE=live + BHARAT_OS_PARIVAHAN_PROVIDER ' +
+    'for real verification.'
+  );
+  if (!confirmed) return;
+  setBusy(true);
+  try {
+    const response = await fetch(
+      `/api/admin/provider-identities/${encodeURIComponent(providerIdentityId)}/verify-role-extras`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' }
+      }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(data));
+    await loadProviderKycReview();
+  } catch (err) {
+    window.alert(`Verify failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function attestRoleExtras(providerIdentityId, level) {
   const row = (state.providerKycReview || []).find((p) => p.providerIdentityId === providerIdentityId);
   const rx = row && row.roleExtrasSubmission;
@@ -1924,6 +1985,8 @@ $('providerKycReviewTable').addEventListener('click', (event) => {
   if (rxBasic && !rxBasic.disabled) { attestRoleExtras(rxBasic.dataset.roleExtrasAttestBasic, 'basic'); return; }
   const rxVerified = event.target.closest('[data-role-extras-attest-verified]');
   if (rxVerified && !rxVerified.disabled) { attestRoleExtras(rxVerified.dataset.roleExtrasAttestVerified, 'verified'); return; }
+  const rxVerify = event.target.closest('[data-role-extras-verify]');
+  if (rxVerify && !rxVerify.disabled) { verifyRoleExtras(rxVerify.dataset.roleExtrasVerify); return; }
   const view = event.target.closest('[data-kyc-view-attachment]');
   if (view) { viewAttachment(view.dataset.kycViewAttachment); }
 });

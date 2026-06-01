@@ -276,6 +276,7 @@ import {
   submitKycLevel1,
   recordRoleExtrasSubmission,
   attestRoleExtras,
+  recordRoleExtrasVerifications,
   ROLE_EXTRAS_ATTESTATION_LEVELS,
   KycLevel1ValidationError,
   PROVIDER_ROLE_KINDS,
@@ -289,6 +290,10 @@ import {
   roleRequiresExtras,
   PROVIDER_ROLE_EXTRAS
 } from '../phase1/provider-role-extras.mjs';
+import {
+  createParivahanAdapter,
+  verifyRoleExtrasFields
+} from '../phase1/parivahan-adapter.mjs';
 import {
   validateRoleAnswers,
   getProviderRoleForm,
@@ -722,7 +727,7 @@ async function maybeReadControlPlane(store, controlPlaneId) {
   }
 }
 
-export function createPhase0ApiServer({ store, startedAt = new Date().toISOString(), nominatim, pincode } = {}) {
+export function createPhase0ApiServer({ store, startedAt = new Date().toISOString(), nominatim, pincode, parivahan } = {}) {
   if (!store) {
     throw new Error('store is required.');
   }
@@ -735,6 +740,10 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
   const nominatimAdapter = nominatim || createNominatimAdapter({ store });
   // Phase 12.2.2 — India Post PIN-code adapter singleton.
   const pincodeAdapter = pincode || createPincodeAdapter({ store });
+  // Phase 12.2.5 — Parivahan / Sarathi / Vahan adapter singleton.
+  // Default stub; live mode requires both BHARAT_OS_PARIVAHAN_MODE=live
+  // AND a configured provider via BHARAT_OS_PARIVAHAN_PROVIDER.
+  const parivahanAdapter = parivahan || createParivahanAdapter({ store });
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -2097,6 +2106,121 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
       // accidentally mutate) the substrate's frozen objects.
       if (request.method === 'GET' && url.pathname === '/api/provider-role-extras-schemas') {
         jsonResponse(response, 200, { schemas: structuredClone(PROVIDER_ROLE_EXTRAS) });
+        return;
+      }
+
+      // ── Phase 12.2.5 — Parivahan auto-verify ──────────────────────
+      //
+      // POST /api/admin/provider-identities/:id/verify-role-extras
+      //   Operator-only (admin bearer). Runs the Parivahan adapter
+      //   against the citizen's typed DL # / vehicle registration #
+      //   from roleExtrasSubmission.answers and persists the result
+      //   onto roleExtrasVerifications. The operator console shows
+      //   ✓/⚠ badges inline so the manual cross-check with the
+      //   document image becomes one-click.
+      //
+      //   §15 bindings:
+      //   - Adapter cacheKey is sha256(number); raw DL/RC numbers
+      //     never land on the audit ledger or path-prefix.
+      //   - Audit event payload is `{type, providerIdentityId,
+      //     rootIdentityId, fields: [field-id], statuses: [status],
+      //     operatorId, at}` — never the holder name or validity.
+      //   - Verification RESULTS (holder name, validity date) ARE
+      //     on the provider record (the operator + citizen own
+      //     them by §15 binding 3.4 — operator reviewing is fine,
+      //     citizen seeing their own record is fine).
+      //   - Live mode requires both env vars (mode + provider).
+      //     Stub mode is safe to call on every operator-side
+      //     submission.
+      const provIdVerifyRoleExtrasMatch =
+        /^\/api\/admin\/provider-identities\/([^/]+)\/verify-role-extras$/.exec(url.pathname);
+      if (request.method === 'POST' && provIdVerifyRoleExtrasMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const operator = auth.operator;
+        const providerIdentityId = decodeURIComponent(provIdVerifyRoleExtrasMatch[1]);
+        const existing = await store.readProviderIdentity(providerIdentityId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_provider', message: 'provider identity not found.' }
+          });
+          return;
+        }
+        if (!existing.roleExtrasSubmission) {
+          jsonResponse(response, 400, {
+            error: { code: 'no_role_extras_submission', message: 'no role-extras submission to verify against.' }
+          });
+          return;
+        }
+        // Phase 12.2.5 adversarial fix L2-B — refuse verify
+        // on terminal / live states; the operator should
+        // re-bounce the provider through draft if they need
+        // to re-verify an active or revoked record.
+        if (existing.status !== 'draft' && existing.status !== 'submitted') {
+          jsonResponse(response, 409, {
+            error: { code: 'invalid_status_for_verify', message: `verify is only valid for draft / submitted; current is ${existing.status}.` }
+          });
+          return;
+        }
+        let results;
+        try {
+          results = await verifyRoleExtrasFields(parivahanAdapter, {
+            role: existing.roleExtrasSubmission.role,
+            answers: existing.roleExtrasSubmission.answers
+          });
+        } catch (err) {
+          jsonResponse(response, 502, {
+            error: { code: 'verifier_failed', message: err && err.message ? err.message : 'verifier failed.' }
+          });
+          return;
+        }
+        // Phase 12.2.5 adversarial fix L2-A — when EVERY result
+        // is a verifier_error (typically a configuration
+        // failure: provider not configured / network out),
+        // refuse to persist a row + emit a misleading ledger
+        // event that looks like a real verification outcome.
+        // Surface 502 so the operator knows the env / provider
+        // needs attention.
+        const resultEntries = Object.entries(results);
+        if (resultEntries.length > 0 && resultEntries.every(([, env]) => env && env.status === 'verifier_error')) {
+          jsonResponse(response, 502, {
+            error: {
+              code: 'verifier_unavailable',
+              message: 'Parivahan adapter returned no usable verification — check BHARAT_OS_PARIVAHAN_MODE + provider env vars.',
+              failedFields: resultEntries.map(([k]) => k)
+            }
+          });
+          return;
+        }
+        let next;
+        try {
+          next = recordRoleExtrasVerifications(existing, {
+            results,
+            operatorId: operator,
+            at: new Date().toISOString()
+          });
+        } catch (err) {
+          jsonResponse(response, 400, {
+            error: { code: err.code || 'invalid_verification', message: err.message }
+          });
+          return;
+        }
+        // Audit event: field IDs + statuses + operator. No holder
+        // names, no validity dates.
+        const fieldIds = Object.keys(results);
+        const statuses = fieldIds.map((id) => results[id] && results[id].status);
+        await store.appendLedger({
+          type: 'provider_identity.role_extras_verified',
+          providerIdentityId: next.providerIdentityId,
+          rootIdentityId: next.rootIdentityId,
+          role: next.roleExtrasSubmission?.role,
+          verifiedFields: fieldIds,
+          statuses,
+          operatorId: operator,
+          at: next.updatedAt
+        });
+        await store.saveProviderIdentity(next);
+        jsonResponse(response, 200, { providerIdentity: next });
         return;
       }
 
@@ -4285,6 +4409,7 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             'POST /api/provider-identities/:providerIdentityId/submit-kyc-l1  (Phase 12.2.2 — citizen-driven KYC L1 submission)',
             'POST /api/provider-identities/:providerIdentityId/submit-role-extras  (Phase 12.2.4 — citizen-driven role-specific extras)',
             'POST /api/admin/provider-identities/:providerIdentityId/attest-role-extras  (Phase 12.2.4 — operator attestation of role extras)',
+            'POST /api/admin/provider-identities/:providerIdentityId/verify-role-extras  (Phase 12.2.5 — Parivahan auto-verification of DL/RC numbers)',
             'GET /api/provider-role-extras-schemas  (Phase 12.2.4 — closed schema map for the wizard)',
             'GET /api/admin/provider-identities?status&roleKind&limit  (Phase 12.2.2 — operator KYC review queue)',
             'POST /api/marketplace/bookings  (Phase 12.1a.2 — citizen creates booking, locks escrow)',

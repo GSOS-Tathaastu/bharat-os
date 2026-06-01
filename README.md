@@ -152,6 +152,71 @@ Implemented pieces:
 
 ---
 
+## 🚗 2026-06-01 — Phase 12.2.5 shipped: Parivahan verification adapter + API_INTEGRATIONS master tracker
+
+Third concrete adapter composing the Phase 12.2.1 external-
+adapter substrate (after Nominatim + India Post PIN). Auto-
+verifies the citizen's typed DL # + vehicle registration #
+against the official Government of India endpoints so the
+operator's manual cross-check becomes a one-click ✓/✗
+badge.
+
+- **ADR 0145** — `src/phase1/parivahan-adapter.mjs` substrate
+  with frozen provider allowlist (`stub | digilocker |
+  surepass | karza | idfy`). v1 ships stub only; live
+  providers slot in additively (each requires its own
+  partner registration). Stub returns deterministic
+  "valid" with a REAL `fetchedAt` timestamp so demo
+  freshness reads honestly.
+- **Endpoint** — POST
+  `/api/admin/provider-identities/:id/verify-role-extras`
+  (admin bearer). Status guard: refuses non-draft /
+  non-submitted (operator must re-bounce through draft to
+  re-verify). All-error result → 502 + skips ledger event
+  (was polluting the audit trail with misconfig disguised
+  as verification outcomes).
+- **NEW ledger event** `provider_identity.role_extras_verified`
+  carries field-id + status + operatorId + role ONLY.
+  Never holder names or validity dates.
+- **§15 fix** — `selfProviderRecord` does NOT echo
+  `roleExtrasVerifications` (would have leaked holder names
+  + validity dates through the URL-trusted owner-list
+  endpoint, strictly MORE sensitive than the existing
+  "••••" redacted answers). Operator-authenticated paths
+  still see the full record.
+- **§15 fix** — `verifier_error` envelope sanitized to
+  `{code: 'verifier_unavailable'}` only; was leaking
+  "Parivahan provider X not yet configured. See docs/..."
+  message to anyone reading the owner-list.
+- **Operator console** — Pre-verify button per row +
+  color-coded badges (green ✓ valid / red ✗
+  verifier_error / amber ⚠ not_found) with **`[stub]`
+  marker** so demo results aren't mistaken for real.
+- **NEW `docs/API_INTEGRATIONS.md`** — master tracker for
+  every external API Bharat OS needs to go live:
+  Parivahan, DigiLocker (Aadhaar e-KYC), NSDL PAN, GSTN,
+  NPCI/UPI, Razorpay IFSC, Karix/Gupshup/MSG91/Twilio
+  SMS, ABDM/ABHA, ONDC. Per service: adapter path, cost,
+  partner-provisioning steps, exact env-var names. Will
+  be updated every phase a new external API surfaces.
+- **Adversarial review** (3 lenses — PII / auth / UX) —
+  20 findings; **8 high+med fixed in-phase**: PII leak via
+  selfProviderRecord, verifier_error message persistence,
+  status guard missing, stale verification on resubmit,
+  audit-pollution on misconfig, stub freshness UX, doc
+  env-var drift, badge color + stub marker.
+- **Tests** — Node 1142 → **1166** (+24 substrate + endpoint
+  + binding-grep + 5 adversarial-fix cases). Vitest
+  unchanged (138). tsc clean. Bundle unchanged.
+
+**Next: Phase 12.2.6** — DigiLocker partner registration +
+first real live provider for the Parivahan adapter
+(citizen-authenticated DL fetch). OR Phase 12.3+ wave-2
+provider roles (`kirana`, `skilled-trades`). Direction
+flexible.
+
+---
+
 ## 🪪 2026-06-01 — Phase 12.2.4 shipped: per-role heavy extras (wave-1) + operator attestation flow
 
 The wave-1 onboarding loop closes. All 4 wave-1 provider roles

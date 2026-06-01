@@ -2201,6 +2201,42 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 12.2.5 — SHIPPED 2026-06-01 (ADR 0145).** Parivahan /
+  Sarathi / Vahan verification adapter + master
+  `docs/API_INTEGRATIONS.md` tracker. Third concrete adapter
+  composed on Phase 12.2.1 external-adapter substrate (after
+  Nominatim + India Post PIN). NEW `src/phase1/parivahan-adapter.mjs`
+  with frozen provider allowlist (stub | digilocker | surepass
+  | karza | idfy) — v1 ships stub only; live providers throw
+  `provider_not_configured` until URL+parse landed per provider.
+  NEW field `roleExtrasVerifications` on providerIdentity +
+  `recordRoleExtrasVerifications` mutator. NEW endpoint
+  POST `/api/admin/provider-identities/:id/verify-role-extras`
+  (admin bearer): runs adapter per verifiable field, persists
+  results, emits `provider_identity.role_extras_verified`
+  ledger event (verifiedFields + statuses + operatorId only,
+  NEVER holder names / validity dates). Operator console:
+  Pre-verify button per row + color-coded status badges with
+  `[stub]` marker so demo results aren't mistaken for real
+  verifications. NEW `docs/API_INTEGRATIONS.md` master tracker
+  for every external API Bharat OS needs (Parivahan,
+  DigiLocker, NSDL PAN, GSTN, NPCI/UPI, Karix/Gupshup/MSG91/
+  Twilio SMS, ABDM, ONDC, etc.) with cost + provisioning
+  steps + exact env-var names. Adversarial review (3 lenses)
+  surfaced 20 findings — 8 high+med fixed in-phase:
+  selfProviderRecord NO LONGER echoes roleExtrasVerifications
+  (would have leaked holder names through URL-trusted
+  owner-list); verifier_error envelope sanitized to code-only
+  (was leaking "provider X not yet configured" message);
+  endpoint refuses non-draft/non-submitted status; clear-on-
+  resubmit posture (was leaving OLD ✓ badges on NEW typed
+  numbers); 502 + ledger-skip when all results are
+  verifier_error (was polluting audit trail); stub fetchedAt
+  uses real clock (frozen demo date confused operators about
+  freshness); doc env-var names fixed against actual codebase.
+  **User-flagged**: keep updating the API list as new
+  integrations land. Tests: 1142 → **1166 Node** (+24).
+  Vitest 138 unchanged. tsc clean. Bundle unchanged.
 - **Phase 12.2.4 — SHIPPED 2026-06-01 (ADR 0144).** Per-role
   heavy extras (wave-1) + operator attestation flow. Closes
   the wave-1 onboarding loop: all 4 roles (cab-driver /

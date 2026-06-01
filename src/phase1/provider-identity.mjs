@@ -280,6 +280,11 @@ export function recordRoleExtrasSubmission(provider, validatedEnvelope, { at = n
     // attestation would silently apply to the new answers the
     // operator never reviewed.
     roleExtrasAttestation: null,
+    // Phase 12.2.5 adversarial fix UX-Q4 — same posture for
+    // verifications. Old ✓ badges against new typed numbers
+    // would mislead the operator the same way old
+    // attestations would.
+    roleExtrasVerifications: null,
     updatedAt: at
   };
 }
@@ -294,6 +299,40 @@ export function recordRoleExtrasSubmission(provider, validatedEnvelope, { at = n
 // schema (wave-1 covers 4 roles; future roles need a substrate
 // update before they can be attested at this layer).
 export const ROLE_EXTRAS_ATTESTATION_LEVELS = ['basic', 'verified'];
+
+// Phase 12.2.5 — record a fresh Parivahan verification run on
+// the provider. Pure: caller passes the result map; this function
+// stamps it onto the record with the operator's identifier and a
+// timestamp. Idempotent — a re-run overwrites the prior block so
+// the operator's view always reflects the latest attempt.
+//
+// The substrate refuses to attach verifications when there's no
+// roleExtrasSubmission to verify against — the operator queue
+// disables the button in that case.
+export function recordRoleExtrasVerifications(provider, {
+  results,
+  operatorId,
+  at = nowIso()
+} = {}) {
+  if (!provider) {
+    throw new Error('provider is required.');
+  }
+  if (!provider.roleExtrasSubmission) {
+    const err = new Error('cannot record verifications without a role-extras submission.');
+    err.code = 'no_role_extras_submission';
+    throw err;
+  }
+  const op = assertNonEmptyString(operatorId, 'operatorId', 160);
+  return {
+    ...provider,
+    roleExtrasVerifications: {
+      runByOperatorId: op,
+      runAt: at,
+      results: results && typeof results === 'object' ? results : {}
+    },
+    updatedAt: at
+  };
+}
 
 export function attestRoleExtras(provider, {
   level,
@@ -596,6 +635,13 @@ export function createProviderIdentity({
     // or null. Never echoed by publicProviderRecord.
     roleExtrasSubmission: null,
     roleExtrasAttestation: null,
+    // Phase 12.2.5 — Parivahan / Sarathi / Vahan verification
+    // results. Operator-triggered; persists the verification
+    // envelope per verifiable field-id so the operator review
+    // shows ✓/⚠ badges inline. Shape:
+    //   { runByOperatorId, runAt, results: {fieldId: envelope} }
+    // or null. Never echoed by publicProviderRecord.
+    roleExtrasVerifications: null,
     kycLevel: 'none',
     kycAttestation: null,
     status: 'draft',
@@ -903,6 +949,17 @@ export function selfProviderRecord(provider) {
       }
       : null,
     roleExtrasAttestation: provider.roleExtrasAttestation,
+    // Phase 12.2.5 adversarial fix PII-3 — DO NOT echo
+    // roleExtrasVerifications on the owner-list projection.
+    // The /api/identities/:rootId/provider-identities endpoint
+    // trusts the URL-declared rootIdentityId (Phase 12.2.2
+    // KYC-AUTH-1 deferral); echoing the upstream holder name
+    // + validity dates would let a network attacker who
+    // guesses a victim's rootIdentityId see strictly MORE
+    // sensitive data than the redacted "••••" answers.
+    // Operator-authenticated paths (admin queue) get the full
+    // record via the un-projected list — they still see
+    // verifications.
     status: provider.status,
     createdAt: provider.createdAt,
     submittedAt: provider.submittedAt,

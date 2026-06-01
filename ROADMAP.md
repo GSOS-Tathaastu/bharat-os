@@ -1076,18 +1076,39 @@ attest pair. **Adversarial review** (4 lenses) surfaced
 clean. Bundle 618 → 628 KB / 175 → 177 KB gzipped
 (+10 KB). **ADR 0144**.
 
-#### Phase 12.2.5 — mParivahan / Sarathi / Vahan adapter (reserved)
+#### Phase 12.2.5 — Parivahan verification adapter + API_INTEGRATIONS tracker ✅ SHIPPED 2026-06-01
 
-User-flagged need from Phase 12.2.4: real validation of
-DL # / vehicle reg # / commercial permit # against the
-official Government of India endpoints. Composes the
-Phase 12.2.1 external-adapter substrate (third concrete
-adapter after Nominatim + India Post PIN). Stub mode
-returns "valid" for demo; live mode hits
-parivahan.gov.in endpoints when sandbox keys are
-provisioned. Pre-validated badge replaces the operator's
-manual cross-check; failed verifications surface
-operator review notes inline.
+Third concrete adapter on the Phase 12.2.1 external-adapter
+substrate. Auto-verifies citizen-typed DL # + vehicle
+registration # against Govt-of-India endpoints; operator
+gets a one-click ✓/✗ badge instead of a manual cross-check.
+Frozen provider allowlist (stub | digilocker | surepass |
+karza | idfy); v1 stub-only. NEW `roleExtrasVerifications`
+field on providerIdentity + POST
+`/api/admin/.../verify-role-extras` endpoint. Audit event
+pointer-not-payload. Operator console: Pre-verify button
++ color-coded badges + `[stub]` marker. **NEW
+`docs/API_INTEGRATIONS.md`** master tracker for every
+external API Bharat OS needs to go live (Parivahan,
+DigiLocker, NSDL PAN, GSTN, NPCI/UPI, SMS providers,
+ABDM, ONDC) with cost + provisioning steps + env-var
+names. Adversarial review (3 lenses) surfaced 20
+findings; 8 high+med fixed in-phase including the
+selfProviderRecord leak, verifier_error sanitization,
+status guard, clear-on-resubmit, audit-pollution
+suppression. Tests: 1142 → **1166 Node** (+24); vitest
+unchanged (138). tsc clean. **ADR 0145**.
+
+#### Phase 12.2.6 — DigiLocker first-live (reserved)
+
+Citizen-authenticated Aadhaar e-KYC + signed DL/RC fetch
+via DigiLocker — wires the first non-stub provider into
+the Parivahan adapter + replaces KYC L1's "Aadhaar
+last-4 ONLY" defensive posture with real verification.
+Requires UIDAI / DigiLocker partner registration; see
+`docs/API_INTEGRATIONS.md` §3.1 for the provisioning
+path. ~2 weeks calendar time (mostly partner approval),
+~2 days engineering.
 
 #### Phase 12.2.3 — Attachment CORE substrate + KYC L1 selfie/ID-proof ✅ SHIPPED 2026-06-01
 
