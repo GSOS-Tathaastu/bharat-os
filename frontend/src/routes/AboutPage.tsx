@@ -6,23 +6,43 @@
 import { Link } from 'react-router-dom';
 import { Card, Action } from '@/components/ui';
 import { MarketingLayout } from '@/components/MarketingLayout';
+import { OnDeviceInferenceAnimation } from '@/components/OnDeviceInferenceAnimation';
+import { useDocumentMeta } from '@/lib/use-document-meta';
 
 export function AboutPage() {
+  useDocumentMeta({
+    title: 'About · Bharat OS — India-first AI-native operating system',
+    description:
+      "Bharat OS is an India-first AI-native operating system. On-device Small Language Model inference. Citizens own and monetise their data. Workers earn from labeling, federated training, and compute serving. Open-source under Apache 2.0.",
+    ogType: 'website'
+  });
   return (
     <MarketingLayout>
-      <section className="mb-12">
-        <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-primary">
-          About
-        </p>
-        <h1 className="text-display font-semibold text-text">
-          India's first AI-native OS where YOU own your data.
-        </h1>
-        <p className="mt-3 max-w-2xl text-body-lg text-text-muted">
-          Bharat OS is an operating system built for India — on-device by
-          default, citizen-owned by construction, and economically aligned
-          so every participant (citizen, worker, provider) earns from
-          their contribution.
-        </p>
+      <section className="mb-12 grid gap-8 lg:grid-cols-[1.4fr_1fr] lg:items-center">
+        <div>
+          <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-primary">
+            About
+          </p>
+          <h1 className="text-display font-semibold text-text">
+            India's first AI-native OS where YOU own your data.
+          </h1>
+          <p className="mt-3 max-w-2xl text-body-lg text-text-muted">
+            Bharat OS is an operating system built for India — on-device by
+            default, citizen-owned by construction, and economically aligned
+            so every participant (citizen, worker, provider) earns from
+            their contribution. The substrate is{' '}
+            <a
+              href="https://www.apache.org/licenses/LICENSE-2.0"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-primary hover:underline"
+            >
+              open-source under Apache 2.0
+            </a>
+            .
+          </p>
+        </div>
+        <OnDeviceInferenceAnimation />
       </section>
 
       <section className="mb-12">

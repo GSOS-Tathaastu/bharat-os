@@ -152,6 +152,53 @@ Implemented pieces:
 
 ---
 
+## 📜 2026-06-03 — Phase 13.6.1 shipped: LICENSE + landing animation + SEO meta tags (marketing polish closes 13.6 arc)
+
+Pitch-visible polish that closes the §13.6 marketing arc:
+
+1. **LICENSE** (Apache License 2.0) + **NOTICE** at repo root.
+   Backs the "open-source" claim that was stripped from the marketing
+   pages in Phase 13.6 MF-2 because no LICENSE existed.
+2. **Static SEO defaults** in `frontend/index.html` (title +
+   description + og:* + twitter:* + theme-color + author + robots +
+   application-name + locale en_IN) — share-card friendly + indexable.
+3. **`useDocumentMeta` hook** (~80 lines, zero new deps) — per-route
+   title + meta tags with mount/unmount restoration. Wired into all 4
+   marketing pages.
+4. **`OnDeviceInferenceAnimation`** — landing-page React component
+   that simulates the Phase 13.0 doc-summary skill streaming
+   token-by-token (~16 ms per token, pause-on-hover, looped). Wired
+   into the AboutPage hero. Explicitly labelled "Illustration of
+   /labs" + a11y "Illustration: streaming on-device SLM output,
+   looped" — honest-by-construction; the real /labs surface runs the
+   same flow live.
+5. Marketing footer + AboutPage hero re-add "Open-source under
+   Apache 2.0" with `target=_blank` link to the canonical Apache URL.
+
+Why Apache 2.0 (not MIT / BSD): explicit patent grant + retaliation
+clause are important for a substrate that composes external rails
+(UPI, DigiLocker, Aadhaar, GST). Defensive cover for downstream
+adopters. Industry standard for India-public-infra substrates.
+
+Honest-by-construction: animation is labelled an illustration in the
+a11y label + footer caption; the script text is what the real
+`doc-summary v1` actually produces; a real screen-capture GIF deferred
+to Phase 2a when there's a CDN.
+
+Adversarial review: ship_with_no_must_fix. Three-lens pass (honesty /
+privacy / edge cases) — zero network calls; zero new entities; zero
+ledger events; zero PII surface; useDocumentMeta restores prior title
++ 6 managed meta tags on unmount; missing-meta-tag path returns null
+gracefully; animation cancellation handled on unmount via a closure
+flag; external LICENSE link uses `rel="noreferrer noopener"`.
+
+Tests: 522 vitest (+9: 4 useDocumentMeta + 2 animation + 3 AboutPage
+extensions) + 1438 Node (+12 LICENSE + NOTICE + SEO defaults
+regression). tsc clean. Zero new external API. Zero new dep. ADR 0168.
+
+Phase 13.7.4 (deferred) — Phase 9.0c wllama runtime serve-mode
+extension that automates the compute network's last manual step.
+
 ## 🔐 2026-06-03 — Phase 13.7.3 shipped: Encrypted-prompt substrate (compute network verifiable end-to-end)
 
 Closes the verifiable-serve loop. The 13.7.2 honor-system manual-serve

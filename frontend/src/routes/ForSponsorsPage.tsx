@@ -7,8 +7,15 @@
 import { Link } from 'react-router-dom';
 import { Card, Action, Badge } from '@/components/ui';
 import { MarketingLayout } from '@/components/MarketingLayout';
+import { useDocumentMeta } from '@/lib/use-document-meta';
 
 export function ForSponsorsPage() {
+  useDocumentMeta({
+    title: 'For sponsors · Bharat OS — Ethically sourced Indian data',
+    description:
+      "Bharat OS for AI labs and sponsors. Labeling marketplace + federated learning rounds + per-data-point citizen data purchases. Signed consent + escrow + audit-exportable Ed25519-signed provenance bundles. DPDP §12 compliant. Apache 2.0 substrate.",
+    ogType: 'website'
+  });
   return (
     <MarketingLayout>
       <section className="mb-12">

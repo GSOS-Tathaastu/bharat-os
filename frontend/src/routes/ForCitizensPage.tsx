@@ -8,8 +8,15 @@
 import { Link } from 'react-router-dom';
 import { Card, Action, Badge } from '@/components/ui';
 import { MarketingLayout } from '@/components/MarketingLayout';
+import { useDocumentMeta } from '@/lib/use-document-meta';
 
 export function ForCitizensPage() {
+  useDocumentMeta({
+    title: 'For citizens · Bharat OS — You own your data',
+    description:
+      "Bharat OS for citizens. On-device summariser + PII redactor + skill agents (electricity bill, consumer complaint, PM-KISAN). Sell your data per-data-point with signed consent + revocable cascade. Sahayak path for the 700M without smartphones.",
+    ogType: 'website'
+  });
   return (
     <MarketingLayout>
       <section className="mb-12">

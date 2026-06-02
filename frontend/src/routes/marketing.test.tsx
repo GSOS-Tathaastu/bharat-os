@@ -23,6 +23,21 @@ describe('AboutPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders the on-device inference animation in the hero', () => {
+    renderWithRouter(<AboutPage />, '/about');
+    expect(screen.getByTestId('on-device-inference-animation')).toBeInTheDocument();
+  });
+
+  it('sets the document title via useDocumentMeta', () => {
+    renderWithRouter(<AboutPage />, '/about');
+    expect(document.title).toMatch(/About · Bharat OS/);
+  });
+
+  it('mentions Apache 2.0 in the body + footer', () => {
+    renderWithRouter(<AboutPage />, '/about');
+    expect(screen.getAllByText(/Apache 2\.0|Apache License 2\.0/i).length).toBeGreaterThan(0);
+  });
+
   it('exposes the marketing nav with all 4 links', () => {
     renderWithRouter(<AboutPage />, '/about');
     const nav = screen.getByRole('navigation');

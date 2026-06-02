@@ -2201,6 +2201,33 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.6.1 — SHIPPED 2026-06-03 (ADR 0168).** Marketing
+  pages polish + open-source backing. NEW `LICENSE` (Apache
+  License 2.0) + NEW `NOTICE` at repo root — backs the
+  open-source claim that was stripped from the marketing pages
+  in Phase 13.6 MF-2. NEW `frontend/src/lib/use-document-meta.ts`
+  — tiny per-route head-tag updater (title + description + og +
+  twitter), zero new deps; restores prior values on unmount so
+  SPA navigation doesn't leak. Static SEO defaults added to
+  `frontend/index.html` (title, description, og, twitter,
+  theme-color, author, robots, application-name, locale en_IN)
+  so crawlers that don't run JS still see something sensible.
+  NEW `frontend/src/components/OnDeviceInferenceAnimation.tsx`
+  — purely-cosmetic landing-page animation that simulates the
+  Phase 13.0 doc-summary skill streaming token-by-token.
+  Labeled "Illustration of /labs" + a11y "Illustration:
+  streaming on-device SLM output, looped" — honest-by-
+  construction; pause-on-hover. Wired into AboutPage hero
+  (2-column grid). All 4 marketing pages now use the meta hook
+  with per-route title + description. MarketingLayout footer
+  + AboutPage hero now mention "Open-source under Apache 2.0"
+  with a target=_blank link to the canonical Apache URL. NEW
+  `tests/node/license-and-seo-defaults.test.mjs` (13 cases)
+  pins LICENSE + NOTICE + SEO defaults as regression-safe.
+  vitest 513 → 522 (+9: 4 useDocumentMeta + 2 animation + 3
+  AboutPage). Node 1426 → 1438 (+12 LICENSE + NOTICE + SEO
+  defaults regression). Zero new external API. tsc clean.
+  Adversarial review: ship_with_no_must_fix.
 - **Phase 13.7.3 — SHIPPED 2026-06-03 (ADR 0167).**
   Encrypted-prompt substrate — closes the verifiable-serve loop
   for the compute network. Worker now actually sees the

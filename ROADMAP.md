@@ -1313,7 +1313,16 @@ claim backed by an ADR or memory binding.
 - [ ] /pricing once legal review per
   `memory/citizen-data-as-product-revenue.md` clears.
 - [ ] /team + /contact once team is hired.
-- [ ] SEO meta tags + landing video.
+- [x] **Phase 13.6.1 shipped 2026-06-03 (ADR 0168)** —
+  LICENSE (Apache 2.0) + NOTICE at repo root + static SEO
+  defaults in index.html + `useDocumentMeta` hook for
+  per-route title + 6 managed meta tags (zero new deps) +
+  `OnDeviceInferenceAnimation` landing-page component
+  (simulated streaming SLM, honest-by-construction
+  "Illustration of /labs"). Footer + AboutPage hero re-add
+  "Open-source under Apache 2.0" claim now that LICENSE
+  exists. Real screen-capture landing video deferred to
+  Phase 2a (when there's a CDN).
 - [~] **Compute network mesh workload.** Add `compute_serving`
   to `MESH_WORKLOAD_TYPES`. Worker phones serve Phi-3-mini
   inferences to OTHER citizens for fiat-credit. See

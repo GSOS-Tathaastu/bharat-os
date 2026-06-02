@@ -1,0 +1,22 @@
+Bharat OS
+Copyright 2026 Bharat OS contributors
+
+This product includes software developed at Bharat OS
+(https://github.com/GSOS-Tathaastu/bharat-os).
+
+Bharat OS is an India-first AI-native operating system substrate.
+The on-device Small Language Model inference layer composes the
+following third-party software components, used under their
+respective licenses:
+
+  - wllama (@wllama/wllama 3.4.1) — llama.cpp WebAssembly bindings.
+    Licensed under MIT.
+  - pdfjs-dist — Mozilla PDF.js for on-device text extraction.
+    Licensed under Apache-2.0.
+
+See the individual package LICENSE files in node_modules/ for the
+full text of each component's license.
+
+The Bharat OS substrate itself (this repository's source code,
+documentation, and ADRs) is licensed under the Apache License,
+Version 2.0 — see the LICENSE file at the repository root.

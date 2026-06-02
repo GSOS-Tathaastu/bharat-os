@@ -8,8 +8,15 @@
 import { Link } from 'react-router-dom';
 import { Card, Action, Badge } from '@/components/ui';
 import { MarketingLayout } from '@/components/MarketingLayout';
+import { useDocumentMeta } from '@/lib/use-document-meta';
 
 export function HowItWorksPage() {
+  useDocumentMeta({
+    title: 'How it works · Bharat OS — On-device SLM substrate',
+    description:
+      "Bharat OS technical substrate: on-device wllama SLM runtime, document summariser + PII redactor + personalisation, skill agents, citizen data marketplace, worker + provider marketplaces. Strict §15 privacy invariants. Apache 2.0.",
+    ogType: 'website'
+  });
   return (
     <MarketingLayout>
       <section className="mb-12">

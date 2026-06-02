@@ -94,12 +94,32 @@ export function MarketingLayout({ children }: MarketingLayoutProps) {
                 <li>DPDP §12 compliant by construction</li>
                 <li>Pointer-not-payload audit ledger (§15)</li>
                 <li>Strict-allowlist boundary normalisers</li>
+                <li>
+                  Open-source under{' '}
+                  <a
+                    href="https://www.apache.org/licenses/LICENSE-2.0"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-primary hover:underline"
+                  >
+                    Apache 2.0
+                  </a>
+                </li>
               </ul>
             </div>
           </div>
           <p className="mt-4 border-t border-border pt-3">
             Bharat OS is an India-first AI-native OS in active development.
-            Current state: investor pitch MVP. {' '}
+            Current state: investor pitch MVP. Source code licensed under{' '}
+            <a
+              href="https://www.apache.org/licenses/LICENSE-2.0"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-primary hover:underline"
+            >
+              Apache License 2.0
+            </a>
+            .{' '}
             {pathname !== '/' && (
               <Link to="/" className="text-primary hover:underline">
                 Try the demo
