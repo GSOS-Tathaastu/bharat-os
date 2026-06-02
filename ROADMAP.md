@@ -1264,8 +1264,12 @@ picked "minimum onboarding load, maximum coverage"):
   `SkillDefinition<TInput, TFields>` substrate; the BE
   skill-agent registry now seeds all three categories
   (utility_bill_explainer / consumer_complaint_drafter /
-  government_scheme_status). Phase 13.4.3 will wire action
-  verbs to real next-step launchers (URLs / tel: / mailto:).
+  government_scheme_status).
+  **Phase 13.4.3 shipped 2026-06-02 (ADR 0159)** — wired
+  action verbs to real launchers (URL / tel: / in_app) via a
+  4-entry frozen .gov.in/.nic.in URL allowlist + module-load
+  guard + shared `SkillActionLink` component used by all 3
+  panels. Closes the 13.4.x sub-arc.
 
 #### Phase 13.x — New revenue lines (~4 wks)
 - [ ] **Citizen data labelling + sponsor sale.** Citizens

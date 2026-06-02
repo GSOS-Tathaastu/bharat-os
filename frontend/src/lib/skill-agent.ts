@@ -234,3 +234,131 @@ export function parseSkillBaseFields(text: string): SkillBaseFields | null {
 // Re-export so consumers can reach the shared coercers without
 // importing slm-parse-helpers directly.
 export { clipLine, clampConfidence };
+
+// ─── Phase 13.4.3 — Action launchers ─────────────────────────────
+//
+// Each `SkillActionVerb` maps to a concrete next-step launcher
+// (or `null` when there is no universal launcher and the
+// action is informational only). Strict union on `kind` so the
+// renderer is forced to handle every branch.
+//
+// Why an allowlist on URLs?
+//   The launcher map is a fixed set of GOVERNMENT-OF-INDIA
+//   official endpoints (consumerhelpline.gov.in, edaakhil.nic.in,
+//   pmkisan.gov.in, findmycsc.nic.in). The SLM cannot inject an
+//   arbitrary URL — every action verb the parser accepts is
+//   already coerced to the SKILL_ACTION_VERBS allowlist, and
+//   every allowlist verb maps to a fixed launcher here. This is
+//   the §15 defence: even a hallucinating SLM cannot exfiltrate
+//   the citizen via a clickable URL.
+//
+// Why some verbs are `null`?
+//   Several verbs (e.g. `request_meter_recheck`, `verify_land_records`,
+//   `check_aadhaar_bank_seeding`) have no universal launcher —
+//   the right destination depends on the citizen's state /
+//   discom / bank. Rendering them as informational labels is
+//   the honest UX. Future state-aware sub-phases may wire
+//   per-state Bhulekh URLs etc.
+
+export type SkillActionLauncher =
+  | { kind: 'url'; href: string; verifyPrefix: string }
+  | { kind: 'tel'; number: string }
+  | { kind: 'in_app'; route: string }
+  | { kind: 'none' };
+
+// All `kind: 'url'` launchers MUST start with one of these
+// exact-match prefixes. The runtime guard in
+// `assertLauncherIsAllowlisted` rejects anything else. Adding
+// a new launcher URL is a cross-cutting change that requires
+// extending this list AND the map below.
+export const ALLOWED_LAUNCHER_URL_PREFIXES = Object.freeze([
+  'https://consumerhelpline.gov.in/',
+  'https://edaakhil.nic.in/',
+  'https://pmkisan.gov.in/',
+  'https://findmycsc.nic.in/'
+]);
+
+export const ACTION_LAUNCHER: Record<SkillActionVerb, SkillActionLauncher> = {
+  // ─── Electricity bill explainer verbs ───────────────────────────
+  file_dispute_consumer_forum: {
+    kind: 'url',
+    href: 'https://consumerhelpline.gov.in/',
+    verifyPrefix: 'https://consumerhelpline.gov.in/'
+  },
+  // No universal endpoint — discom-specific. Honest informational.
+  request_meter_recheck: { kind: 'none' },
+  switch_tariff_plan: { kind: 'none' },
+  // UPI deep link would need a payee VPA; we don't have one. Skip.
+  pay_via_upi: { kind: 'none' },
+  check_subsidy_eligibility: { kind: 'none' },
+  compare_with_neighbours: { kind: 'none' },
+  archive_for_records: { kind: 'in_app', route: '/citizen/notes' },
+  // SF-1 (adversarial review) — `/citizen/flags` does not yet
+  // exist as a route. The Sahayak agent flagging surface ships in
+  // Phase 14.x. Until then, render as informational ('none') so
+  // the link doesn't 404 the citizen out of the SLM-H demo.
+  flag_for_review: { kind: 'none' },
+
+  // ─── Consumer complaint drafter verbs ──────────────────────────
+  // The E-Daakhil portal is the GoI's central e-filing site for
+  // all three CPA 2019 commission tiers.
+  file_complaint_district_commission: {
+    kind: 'url',
+    href: 'https://edaakhil.nic.in/',
+    verifyPrefix: 'https://edaakhil.nic.in/'
+  },
+  file_complaint_state_commission: {
+    kind: 'url',
+    href: 'https://edaakhil.nic.in/',
+    verifyPrefix: 'https://edaakhil.nic.in/'
+  },
+  file_complaint_national_commission: {
+    kind: 'url',
+    href: 'https://edaakhil.nic.in/',
+    verifyPrefix: 'https://edaakhil.nic.in/'
+  },
+  escalate_to_consumer_helpline: { kind: 'tel', number: '1915' },
+  // Legal notice template would need recipient info; informational.
+  send_legal_notice: { kind: 'none' },
+
+  // ─── PM-KISAN status checker verbs ─────────────────────────────
+  complete_pm_kisan_ekyc: {
+    kind: 'url',
+    href: 'https://pmkisan.gov.in/',
+    verifyPrefix: 'https://pmkisan.gov.in/'
+  },
+  // Bank-specific path — informational.
+  check_aadhaar_bank_seeding: { kind: 'none' },
+  // State-specific (Bhulekh varies) — informational.
+  verify_land_records: { kind: 'none' },
+  contact_pm_kisan_helpline: { kind: 'tel', number: '155261' },
+  visit_csc_for_correction: {
+    kind: 'url',
+    href: 'https://findmycsc.nic.in/',
+    verifyPrefix: 'https://findmycsc.nic.in/'
+  }
+};
+
+/**
+ * Runtime guard — assert every `url` launcher's `href` matches
+ * one of `ALLOWED_LAUNCHER_URL_PREFIXES`. Called once at module
+ * load via the bottom of this file so a future PR that adds a
+ * non-allowlisted URL fails to import.
+ */
+function assertLauncherIsAllowlisted(verb: SkillActionVerb, launcher: SkillActionLauncher): void {
+  if (launcher.kind !== 'url') return;
+  // Defence-in-depth: verifyPrefix must exactly match href's start
+  // AND must be in the global allowlist.
+  if (!launcher.href.startsWith(launcher.verifyPrefix)) {
+    throw new Error(`ACTION_LAUNCHER[${verb}] href does not start with its own verifyPrefix.`);
+  }
+  if (!ALLOWED_LAUNCHER_URL_PREFIXES.includes(launcher.verifyPrefix)) {
+    throw new Error(
+      `ACTION_LAUNCHER[${verb}] verifyPrefix "${launcher.verifyPrefix}" is not in ALLOWED_LAUNCHER_URL_PREFIXES.`
+    );
+  }
+}
+
+for (const verb of SKILL_ACTION_VERBS) {
+  assertLauncherIsAllowlisted(verb, ACTION_LAUNCHER[verb]);
+}

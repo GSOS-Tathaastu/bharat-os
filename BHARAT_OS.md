@@ -2201,6 +2201,53 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.4.3 — SHIPPED 2026-06-02 (ADR 0159).** Closes
+  the 13.4.x sub-arc — wires SLM-H action verbs to real
+  next-step launchers (URLs / tel: / in_app routes). EXTENDED
+  `frontend/src/lib/skill-agent.ts` — strict-discriminated
+  `SkillActionLauncher` union (kind: url | tel | in_app | none),
+  `ACTION_LAUNCHER: Record<SkillActionVerb,
+  SkillActionLauncher>` (exhaustive Record forces every verb to
+  have a launcher; TS error on drift). 4-entry frozen URL
+  allowlist `ALLOWED_LAUNCHER_URL_PREFIXES`:
+  consumerhelpline.gov.in / edaakhil.nic.in / pmkisan.gov.in /
+  findmycsc.nic.in (all official Government of India / NIC
+  domains). Module-load guard `assertLauncherIsAllowlisted`
+  runs on every `url` entry — adding a non-allowlisted URL
+  fails IMPORT-time. Per-launcher `verifyPrefix` field is
+  defence-in-depth against typos
+  (`pmkisan.gov.in.malicious.example/` catches at boundary).
+  18 verbs distribute: 6 url (consumerhelpline + edaakhil×3 +
+  pmkisan + findmycsc), 2 tel (1915 + 155261), 1 in_app
+  (/citizen/notes), 9 none. NEW
+  `frontend/src/components/SkillActionLink.tsx` (~70 lines) —
+  shared renderer used by all 3 SLM-H panels. Exhaustive
+  switch on `launcher.kind`: `url` → `<a target="_blank"
+  rel="noopener noreferrer">` (security defaults for external
+  nav); `tel` → `<a href="tel:NUMBER">` with "(tap to dial)"
+  caption; `in_app` → react-router `<Link>` (SPA-internal, no
+  target=_blank); `none` → plain `<span>`. UPDATED
+  SkillAgentPanel + ConsumerComplaintPanel + PmKisanStatusPanel
+  — each action `<li>` now wraps `<SkillActionLink verb={v} />`
+  instead of plain `ACTION_LABEL[v]` text.
+  **Adversarial review** (3 lenses): **1 fix**. SF-1
+  `/citizen/flags` route does not exist (Sahayak surface
+  ships in Phase 14.x); flag_for_review re-mapped to
+  `kind: 'none'` so a click doesn't 404. **§15 bindings**:
+  4-link defence-in-depth chain so the SLM cannot inject a
+  clickable URL — (1) parser only accepts SKILL_ACTION_VERBS
+  members; (2) ACTION_LAUNCHER keyed exhaustively on
+  SkillActionVerb; (3) module-load asserts URL allowlist;
+  (4) renderer reads from the map, never from SLM output. No
+  string from the model ever flows into href.
+  **API_INTEGRATIONS.md impact**: ZERO new external API. The
+  links are 4 GoI official portals; no adapter / env var /
+  partner credential. Last-updated header bumped.
+  **FE-BE parity**: BE delta = none (FE-only navigation
+  wiring); FE delta = launcher map + shared component + 3
+  panel updates + 2 test files. Tests: vitest 467 → **490**
+  (+16 launcher-map test + 7 SkillActionLink render test).
+  Node 1284 unchanged (no BE delta). tsc clean.
 - **Phase 13.4.2 — SHIPPED 2026-06-02 (ADR 0158).** Third
   concrete SLM-H skill: PM-KISAN status checker. Completes the
   v1 SLM-H skill rollout (electricity bill + consumer complaint

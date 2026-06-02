@@ -22,11 +22,8 @@ import {
   type PmKisanFields,
   type PmKisanInput
 } from '@/lib/skills/pm-kisan-status-checker';
-import {
-  ACTION_LABEL,
-  type SkillActionVerb,
-  type SkillResult
-} from '@/lib/skill-agent';
+import { type SkillResult } from '@/lib/skill-agent';
+import { SkillActionLink } from '@/components/SkillActionLink';
 
 interface PmKisanStatusPanelProps {
   identityId: string | null | undefined;
@@ -268,8 +265,10 @@ export function PmKisanStatusPanel({ identityId }: PmKisanStatusPanelProps) {
                 Suggested next steps
               </p>
               <ul className="list-disc pl-5 text-body text-text">
-                {parsed.actions.map((verb: SkillActionVerb) => (
-                  <li key={verb}>{ACTION_LABEL[verb]}</li>
+                {parsed.actions.map((verb) => (
+                  <li key={verb}>
+                    <SkillActionLink verb={verb} />
+                  </li>
                 ))}
               </ul>
             </>

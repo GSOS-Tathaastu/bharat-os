@@ -15,18 +15,20 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.4.2 — SLM-H third concrete
-skill: PM-KISAN status checker shipped. **Still zero new
-external-API dependencies.** v1 is intentionally informational
-— the pmkisan.gov.in beneficiary-status lookup is a candidate
-external API but lacks a documented JSON path, so it ships in
-a future 13.4.x once a partner / scraping decision is made.
-Action-verb extension references pmkisan.gov.in, the PM-KISAN
-helpline (155261), mAadhaar / NPCI mapper, Bhulekh land
-portals, and CSC outlets as informational copy only — no
-adapter. Outstanding 13.x entries that will eventually touch
-this doc: pmkisan.gov.in beneficiary status (future 13.4.x),
-§4.1 UPI rails, §4.2 IFSC lookup, citizen data labelling.)
+Last updated: 2026-06-02 (Phase 13.4.3 — SLM-H action-verb
+launchers shipped, closing the 13.4.x sub-arc. **Still zero new
+external-API dependencies.** The action verbs now render as
+clickable `<a target="_blank" rel="noopener noreferrer">` links
+to 4 official Government of India portals — consumerhelpline.gov.in,
+edaakhil.nic.in, pmkisan.gov.in, findmycsc.nic.in — plus tel: links
+for the two helpline numbers (1915 consumer + 155261 PM-KISAN).
+These are NAVIGATION endpoints, not API integrations: the citizen's
+browser opens the page in a new tab; Bharat OS doesn't fetch or
+post anything. A frozen `ALLOWED_LAUNCHER_URL_PREFIXES` allowlist
++ module-load guard prevents any non-allowlisted URL from rendering.
+Outstanding 13.x entries that will eventually touch this doc:
+pmkisan.gov.in beneficiary status JSON (future 13.4.x), §4.1 UPI
+rails, §4.2 IFSC lookup, citizen data labelling.)
 
 ## Legend
 

@@ -25,11 +25,8 @@ import {
   type ConsumerComplaintFields,
   type ConsumerComplaintInput
 } from '@/lib/skills/consumer-complaint-drafter';
-import {
-  ACTION_LABEL,
-  type SkillActionVerb,
-  type SkillResult
-} from '@/lib/skill-agent';
+import { type SkillResult } from '@/lib/skill-agent';
+import { SkillActionLink } from '@/components/SkillActionLink';
 
 interface ConsumerComplaintPanelProps {
   identityId: string | null | undefined;
@@ -259,8 +256,10 @@ export function ConsumerComplaintPanel({ identityId }: ConsumerComplaintPanelPro
                 Suggested next steps
               </p>
               <ul className="list-disc pl-5 text-body text-text">
-                {parsed.actions.map((verb: SkillActionVerb) => (
-                  <li key={verb}>{ACTION_LABEL[verb]}</li>
+                {parsed.actions.map((verb) => (
+                  <li key={verb}>
+                    <SkillActionLink verb={verb} />
+                  </li>
                 ))}
               </ul>
             </>

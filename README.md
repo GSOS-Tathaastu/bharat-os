@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 🔗 2026-06-02 — Phase 13.4.3 shipped: SLM-H action-verb launchers (close 13.4.x sub-arc)
+
+Closes the SLM-H rollout. The 18 SKILL_ACTION_VERBS introduced across
+13.4 / 13.4.1 / 13.4.2 now render as real clickable next-step links —
+external URLs to 4 official Government of India portals (consumerhelpline,
+e-Daakhil, pmkisan, findmycsc), tel: links to the consumer (1915) and
+PM-KISAN (155261) helplines, an in-app link to /citizen/notes for
+archiving, or honest informational labels when no universal endpoint
+exists (state-specific Bhulekh, discom-specific meter recheck, etc.).
+
+**§15 defence-in-depth**: the SLM can never inject a clickable URL. The
+parser only accepts allowlist verbs → each verb maps to a fixed
+launcher via an exhaustive Record type → a module-load guard asserts
+every URL matches `ALLOWED_LAUNCHER_URL_PREFIXES` (4 frozen .gov.in /
+.nic.in entries) → the renderer reads from the map, never from SLM
+output. No string from the model ever reaches `<a href>`.
+
+External links carry `target="_blank"` + `rel="noopener noreferrer"` —
+the new tab cannot navigate the parent via window.opener.
+
+Adversarial review: 1 fix. `/citizen/flags` didn't exist yet (Sahayak
+surface lands in Phase 14.x), so flag_for_review re-mapped to
+informational until then. ADR 0159.
+
+Tests: 490 vitest + Node sweep clean + tsc clean.
+
 ## 🌾 2026-06-02 — Phase 13.4.2 shipped: SLM-H third skill — PM-KISAN status checker
 
 Third and final v1 SLM-H skill. PM-KISAN (Pradhan Mantri Kisan Samman
