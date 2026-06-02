@@ -1251,8 +1251,18 @@ picked "minimum onboarding load, maximum coverage"):
   domains); localStorage via Zustand persist; PersonalizationCard
   on /settings; profile fragment injected into SLM-A intent
   parser + SLM-E doc summariser; DPDP cascade complete.
-- [ ] **H.** On-device skill agents for Indian tasks
+- [x] **H.** On-device skill agents for Indian tasks
   (electricity bill / consumer complaint / PM-KISAN scheme).
+  **Phase 13.4 shipped 2026-06-02 (ADR 0156)** — SLM-H substrate
+  + first concrete skill (electricity bill explainer). Generic
+  `SkillDefinition<TInput, TFields>` substrate, BE skill-agent
+  registry with content-derived skillId + soft-delete, FE skill
+  composes SLM-E doc-summary output as input via a tiny owner-
+  gated bridge. First v1 skill emits TARIFF / EXPECTED_RANGE /
+  DEVIATION / 2-5 next-step actions from a fixed 8-verb
+  allowlist. Subsequent skills (consumer complaint drafter,
+  PM-KISAN status checker) land as 13.4.x sub-phases reusing
+  this substrate.
 
 #### Phase 13.x — New revenue lines (~4 wks)
 - [ ] **Citizen data labelling + sponsor sale.** Citizens

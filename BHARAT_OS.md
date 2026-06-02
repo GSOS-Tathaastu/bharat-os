@@ -2201,6 +2201,76 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.4 — SHIPPED 2026-06-02 (ADR 0156).** SLM-H
+  on-device skill-agent substrate + first concrete skill
+  (electricity bill explainer). Closes the SLM USP arc per
+  [[phase-12-13-sequencing-set]]. NEW
+  `src/phase1/skill-agent.mjs` (~290 lines) — registry validator
+  mirroring Phase 9.0a SLM model-pack pattern.
+  `SKILL_AGENT_PROTOCOL_VERSION = 'bos.phase13.skill-agent.v1'`,
+  3 categories (`utility_bill_explainer`,
+  `consumer_complaint_drafter`, `government_scheme_status`),
+  strict-allowlist `PERMITTED_SKILL_AGENT_KEYS` + 13-entry
+  `FORBIDDEN_REGISTRY_SUBSTRINGS` SF-2-style probe, content-
+  addressed `skillId` via sha256, soft-delete via
+  `revokeSkillAgent`. NEW `src/phase1/skill-agent-seed.mjs` —
+  built-in canonical seed list (v1 entry: electricity bill
+  explainer; license apache-2.0; supportedDocKinds:
+  ['electricity_bill']). EXTENDED `src/phase0/store.mjs` +
+  `src/phase0/sqlite-store.mjs` — saveSkillAgent /
+  readSkillAgent / listSkillAgents; new `skill_agents` table /
+  `skill-agents/` directory; ledger emits
+  `skill_agent.registered` / `.revoked` (pointer + meta only;
+  never the FE prompt body). EXTENDED `src/phase0/api.mjs` —
+  boot-time idempotent seed loader on first request (promise-
+  sentinel concurrency guard + SF-3 retry-on-empty), public
+  GET /api/skill-agents (with `?activeOnly` and
+  `?installedFamilies` filters), GET /api/skill-agents/:skillId,
+  admin POST + DELETE under /api/admin/skill-agents (5.7-token-
+  gated). FE: NEW `frontend/src/lib/skill-agent.ts` (~190 lines)
+  — shared substrate; `parseSkillBaseFields` shared parser for
+  HEADLINE / ASSESSMENT / CONFIDENCE / RISK_FLAG / ACTIONS prefix;
+  frozen `SKILL_ACTION_VERBS` allowlist (8 verbs) +
+  citizen-readable `ACTION_LABEL` map. NEW
+  `frontend/src/lib/skills/electricity-bill-explainer.ts` —
+  first concrete skill; SkillDefinition with prompt builder +
+  parser. Composes SLM-E doc-summary output as input; emits
+  TARIFF_TIER (6-way enum: domestic_low/mid/high + commercial +
+  industrial + unknown) + EXPECTED_RANGE_RUPEES (with min ≤ max
+  guard + 100k₹ cap) + DEVIATION_FLAG (4-way) on top of base
+  fields. NEW `frontend/src/lib/use-slm-skill-agent.ts` —
+  generic hook over `SkillDefinition<TInput, TFields>` on the
+  shared wllama runtime (Phase 13.0.0a); same posture as
+  `useSlmDocSummariser` (per-input 2/60s + global 6/5min rate
+  limit; citizen-safe error). NEW
+  `frontend/src/lib/last-doc-summary-bridge.ts` — tiny zustand
+  in-memory bridge with owner-gated `getLastDocSummary` so
+  cross-identity reads return null. NEW
+  `frontend/src/components/SkillAgentPanel.tsx` — mounted on
+  /labs sibling of DocSummariserPanel, keyed on identity;
+  honest empty state when no SLM / no recent summary / wrong
+  docKind. EXTENDED `DocSummariserPanel.tsx` — publishes parsed
+  summary to bridge on success; clears on Try Sample / Clear /
+  docKind pill change (SF-1). EXTENDED `Labs.tsx` —
+  SkillAgentPanel below DocSummariserPanel.
+  **Adversarial review** (3 lenses: privacy + UX + edge-cases):
+  **0 MUST_FIX + 3 SHOULD_FIX + N defer**. SF-1 pill change
+  clears bridge. SF-3 seed sentinel retries on empty-catalog.
+  SF-4 `runningRef` synchronous in-flight guard
+  (mirrors Phase 13.0.2 MF-2). **§15 bindings**: registry is
+  pointer-only (prompt body in FE bundle, never BE row); strict
+  allowlist > denylist; ledger meta only; bytes-never-leave-
+  device (skill runs on shared wllama); honest empty state;
+  PII-impossible bridge (owner-gated + in-memory only).
+  **API_INTEGRATIONS.md impact**: ZERO new external API. The
+  skill agent runs on the existing wllama runtime; no new
+  service / env var / partner credential. Last-updated header
+  bumped. **FE-BE parity**: BE delta = registry validator +
+  store wiring + 2 public + 2 admin endpoints; FE delta =
+  substrate + skill + hook + bridge + panel + Labs wiring.
+  Tests: vitest 388 → **419** (+31 skill-agent.test + electricity
+  -bill-explainer.test); Node 1256 → **1282** (+26 skill-agent
+  registry + HTTP integration). tsc clean.
 - **Phase 13.0.2 — SHIPPED 2026-06-02 (ADR 0155).** SLM-E
   document summary persistence — first BE delta in the SLM-E
   arc, closes the ADR 0149 "v1 is generate-and-render, persist

@@ -61,6 +61,10 @@ export class BosStore {
     this.onDeviceModelPacksPath = path.join(rootPath, 'on-device-model-packs');
     this.slmModelPacksPath = path.join(rootPath, 'slm-model-packs');
     this.installedSlmsPath = path.join(rootPath, 'installed-slms');
+    // Phase 13.4 — skill-agent registry (Tier-4 SLM consumer). One
+    // JSON file per skillId; same shape + admin-curation posture as
+    // slm-model-packs. Not per-identity (no DPDP §12(3) cascade).
+    this.skillAgentsPath = path.join(rootPath, 'skill-agents');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -113,6 +117,7 @@ export class BosStore {
     await fs.mkdir(this.onDeviceModelPacksPath, { recursive: true });
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
+    await fs.mkdir(this.skillAgentsPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -1321,6 +1326,42 @@ export class BosStore {
     } catch (_error) {
       return false;
     }
+  }
+
+  // Phase 13.4 — Tier-4 SLM-H skill-agent registry. Admin-curated
+  // metadata; not per-identity (no DPDP §12(3) cascade). Identical
+  // shape to slmModelPack persistence: one JSON file per skillId,
+  // soft-delete via status='revoked', ledger emits skill_agent.*
+  // events with pointer + meta only (never the FE prompt body —
+  // that ships in the FE bundle, not the registry).
+  skillAgentFile(skillId) {
+    return path.join(this.skillAgentsPath, `${safeName(skillId)}.json`);
+  }
+
+  async saveSkillAgent(skillAgent) {
+    await this.init();
+    await writeJson(this.skillAgentFile(skillAgent.skillId), skillAgent);
+    await this.appendLedger({
+      type: skillAgent.status === 'revoked'
+        ? 'skill_agent.revoked'
+        : 'skill_agent.registered',
+      skillId: skillAgent.skillId,
+      category: skillAgent.category,
+      protocolVersion: skillAgent.protocolVersion,
+      operator: skillAgent.status === 'revoked'
+        ? skillAgent.revokedBy
+        : skillAgent.registeredBy,
+      at: new Date().toISOString()
+    });
+    return skillAgent;
+  }
+
+  async readSkillAgent(skillId) {
+    return readJson(this.skillAgentFile(skillId));
+  }
+
+  async listSkillAgents() {
+    return listJson(this.skillAgentsPath);
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

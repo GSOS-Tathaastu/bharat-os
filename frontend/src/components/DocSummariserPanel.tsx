@@ -31,6 +31,9 @@ import {
   renderSummaryPlaintext,
   type DocPdfFingerprintInput
 } from '@/lib/doc-summary-source';
+// Phase 13.4 — publish the last successful summary to the bridge
+// so the sibling SkillAgentPanel can read it without prop drilling.
+import { useLastDocSummaryBridge } from '@/lib/last-doc-summary-bridge';
 
 // Phase 13.0.2 adversarial fix SF-5 — citizen-safe copy keyed on
 // BE error code. The raw err.message is reserved for the DEV
@@ -158,8 +161,27 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     // the only visible output during summarisation.
     setLastResult(null);
     setSaveState({ kind: 'idle' });
+    // Phase 13.4 — clear the bridge BEFORE we start a new run so a
+    // SkillAgentPanel reading from the bridge can't accidentally
+    // render guidance against the prior summary while the new one
+    // is mid-stream.
+    useLastDocSummaryBridge.getState().clear();
     const out = await summarise(docKind, docText);
-    if (out) setLastResult(out);
+    if (out) {
+      setLastResult(out);
+      // Phase 13.4 — publish the parsed summary to the bridge so
+      // SkillAgentPanel can compose. Only when parse succeeded
+      // (a null parse means honest-hide on this panel and on
+      // skill panels too).
+      if (out.parsed && identityId) {
+        useLastDocSummaryBridge.getState().setSnapshot({
+          ownerIdentityId: identityId,
+          docKind,
+          parsed: out.parsed,
+          capturedAt: new Date().toISOString()
+        });
+      }
+    }
   }
 
   function handleTrySample() {
@@ -169,6 +191,9 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     setPdfNotice(null);
     setLastPdfFingerprint(null);
     setSaveState({ kind: 'idle' });
+    // Phase 13.4 — clear the SLM-H bridge so a stale snapshot
+    // can't drive the SkillAgentPanel chip block.
+    useLastDocSummaryBridge.getState().clear();
     reset();
   }
 
@@ -179,6 +204,7 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     setPdfNotice(null);
     setLastPdfFingerprint(null);
     setSaveState({ kind: 'idle' });
+    useLastDocSummaryBridge.getState().clear();
     reset();
   }
 
@@ -311,7 +337,15 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
               role="radio"
               aria-checked={active}
               disabled={isBusy}
-              onClick={() => setDocKind(kind)}
+              onClick={() => {
+                if (kind === docKind) return;
+                setDocKind(kind);
+                // Phase 13.4 SF-1 — pill change signals "I'm moving
+                // on from the previous doc". Clear the SLM-H bridge
+                // so the SkillAgentPanel doesn't render guidance
+                // against a stale summary for a different doc kind.
+                useLastDocSummaryBridge.getState().clear();
+              }}
               className={
                 'rounded-full border px-3 py-1 text-caption font-semibold transition-colors disabled:opacity-60 ' +
                 (active

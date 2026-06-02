@@ -244,6 +244,15 @@ import {
   INSTALLED_SLM_STATUSES
 } from '../phase1/installed-slm.mjs';
 import {
+  buildSkillAgent,
+  revokeSkillAgent,
+  filterSkillAgentsByPackFamily,
+  SKILL_AGENT_PROTOCOL_VERSION,
+  SKILL_AGENT_CATEGORIES,
+  SKILL_AGENT_SUPPORTED_DOC_KINDS
+} from '../phase1/skill-agent.mjs';
+import { SKILL_AGENT_SEED_LIST } from '../phase1/skill-agent-seed.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -770,6 +779,50 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
   // requires BHARAT_OS_GST_MODE=live + BHARAT_OS_GST_PROVIDER.
   const gstAdapter = createGstAdapter({ store });
 
+  // Phase 13.4 — boot-time skill-agent seed registration. Idempotent
+  // (skip if the content-derived skillId already exists). Runs once
+  // on first request after server start; we use a promise sentinel
+  // so concurrent requests don't double-seed. Failures are logged
+  // but don't block request handling — the catalog just stays empty
+  // until the next boot retries.
+  //
+  // SF-3 (adversarial review): the sentinel is reset on completion
+  // IF the catalog still ended up empty so a transient filesystem
+  // hiccup during the first request doesn't permanently lock the
+  // catalog at zero. A successful seed (at least one row landed)
+  // pins the sentinel forever for the server's lifetime — what we
+  // actually want for the idempotency path.
+  let seedSkillAgentsPromise = null;
+  function ensureSkillAgentsSeeded() {
+    if (seedSkillAgentsPromise) return seedSkillAgentsPromise;
+    seedSkillAgentsPromise = (async () => {
+      let savedAnyThisRun = false;
+      for (const seed of SKILL_AGENT_SEED_LIST) {
+        try {
+          const candidate = buildSkillAgent(seed);
+          const existing = await store.readSkillAgent(candidate.skillId).catch(() => null);
+          if (existing) {
+            savedAnyThisRun = true;
+            continue;
+          }
+          await store.saveSkillAgent(candidate);
+          savedAnyThisRun = true;
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[skill-agent-seed] failed to register', seed.displayName, err.message);
+        }
+      }
+      // SF-3 — if nothing landed, drop the sentinel so the next
+      // request retries. (Catalog still being empty is the same
+      // condition the FE will see, so retrying costs only one
+      // round trip per request until success.)
+      if (!savedAnyThisRun) {
+        seedSkillAgentsPromise = null;
+      }
+    })();
+    return seedSkillAgentsPromise;
+  }
+
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     const parts = url.pathname.split('/').filter(Boolean);
@@ -1254,6 +1307,81 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           reason: revoked.revocationReason
         });
         jsonResponse(response, 200, { ok: true, modelPack: revoked });
+        return;
+      }
+
+      // Phase 13.4 — SLM-H skill-agent admin write. Same gating +
+      // ledger posture as slm-model-packs above. Most operators
+      // never touch this — the boot seed registers the built-in
+      // list. POST is for operator overrides; DELETE is for
+      // emergency revocation when a skill ships a bad prompt.
+      if (request.method === 'POST' && url.pathname === '/api/admin/skill-agents') {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const body = await readRequestJson(request);
+        let skill;
+        try {
+          skill = buildSkillAgent({ ...body, registeredBy: auth.operator });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_skill_agent', message: error.message }
+          });
+          return;
+        }
+        const existing = await store.readSkillAgent(skill.skillId).catch(() => null);
+        if (existing && existing.status !== 'revoked') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'duplicate_skill_agent',
+              message: `Skill agent ${skill.skillId} is already registered.`
+            }
+          });
+          return;
+        }
+        await store.saveSkillAgent(skill);
+        logger.info('admin_skill_agent_registered', {
+          requestId,
+          operator: auth.operator,
+          skillId: skill.skillId,
+          category: skill.category
+        });
+        jsonResponse(response, 201, { ok: true, skillAgent: skill });
+        return;
+      }
+
+      const skillRevokeMatch = /^\/api\/admin\/skill-agents\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'DELETE' && skillRevokeMatch) {
+        const auth = checkAdminAuth(request, response, { requestId });
+        if (!auth) return;
+        const skillId = decodeURIComponent(skillRevokeMatch[1]);
+        const existing = await store.readSkillAgent(skillId).catch(() => null);
+        if (!existing) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_skill_agent', message: 'Skill agent not found.' }
+          });
+          return;
+        }
+        const body = await readRequestJson(request).catch(() => ({}));
+        let revoked;
+        try {
+          revoked = revokeSkillAgent(existing, {
+            revokedBy: auth.operator,
+            reason: body?.reason ?? null
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_revoke', message: error.message }
+          });
+          return;
+        }
+        await store.saveSkillAgent(revoked);
+        logger.info('admin_skill_agent_revoked', {
+          requestId,
+          operator: auth.operator,
+          skillId,
+          reason: revoked.revokeReason
+        });
+        jsonResponse(response, 200, { ok: true, skillAgent: revoked });
         return;
       }
 
@@ -5884,6 +6012,51 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           return;
         }
         jsonResponse(response, 200, { modelPack: pack });
+        return;
+      }
+
+      // Phase 13.4 — SLM-H skill-agent registry, public read.
+      // Returns every registered skill (including revoked, marked
+      // with status: 'revoked') so the FE can render history
+      // honestly. `?activeOnly=true` excludes revoked.
+      // `?installedFamilies=phi-3-mini,gemma-2b-it` filters to
+      // skills compatible with the citizen's installed packs.
+      // Admin POST/DELETE under /api/admin/skill-agents (gated).
+      if (parts[0] === 'api' && parts[1] === 'skill-agents' && parts.length === 2) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        await ensureSkillAgentsSeeded();
+        const all = await store.listSkillAgents();
+        const activeOnly = url.searchParams.get('activeOnly') === 'true';
+        const candidates = activeOnly
+          ? all.filter((skill) => skill.status !== 'revoked')
+          : all;
+        let skillAgents = candidates;
+        const installedFamiliesParam = url.searchParams.get('installedFamilies');
+        if (installedFamiliesParam) {
+          const families = installedFamiliesParam.split(',').map((f) => f.trim()).filter(Boolean);
+          skillAgents = filterSkillAgentsByPackFamily(candidates, families);
+        }
+        jsonResponse(response, 200, {
+          skillAgents,
+          totalRegistered: all.length,
+          totalActive: all.filter((skill) => skill.status !== 'revoked').length,
+          supportedCategories: SKILL_AGENT_CATEGORIES,
+          supportedDocKinds: SKILL_AGENT_SUPPORTED_DOC_KINDS,
+          protocolVersion: SKILL_AGENT_PROTOCOL_VERSION
+        });
+        return;
+      }
+
+      if (parts[0] === 'api' && parts[1] === 'skill-agents' && parts.length === 3) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        await ensureSkillAgentsSeeded();
+        const skillId = decodeURIComponent(parts[2]);
+        const skill = await store.readSkillAgent(skillId);
+        if (!skill) {
+          jsonResponse(response, 404, { error: { code: 'unknown_skill_agent', message: 'Skill agent not found.' } });
+          return;
+        }
+        jsonResponse(response, 200, { skillAgent: skill });
         return;
       }
 

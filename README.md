@@ -152,6 +152,36 @@ Implemented pieces:
 
 ---
 
+## 🛠️ 2026-06-02 — Phase 13.4 shipped: SLM-H skill-agent substrate + electricity bill explainer
+
+Closes the SLM USP arc per the
+[phase-12-13-sequencing-set memory](../.claude/projects/d--bharat-os/memory/phase-12-13-sequencing-set.md).
+On-device skill agents are tightly-scoped agents that compose existing
+SLM substrates (intent parser / doc summariser / PII redactor /
+personalization) with a skill-specific prompt + structured-output parser
+to give the citizen concrete next-step guidance.
+
+This phase ships the substrate + the FIRST concrete skill (electricity
+bill explainer). The demo composition: SLM-E parses your discom bill →
+SkillAgentPanel reads the parsed summary from an in-memory bridge → runs
+a second on-device pass on the same wllama runtime → renders RISK /
+DEVIATION / TARIFF + EXPECTED RANGE + 2-5 typed action steps drawn from
+a fixed 8-verb allowlist.
+
+The BE registry carries pointers only (skillId / category / docKinds /
+license / caps) — the prompt body itself ships in the FE bundle and
+never crosses into a BE row, preserving the on-device pitch beat.
+
+Adversarial review: 0 must-fix + 3 should-fix applied. SF-1 docKind
+pill change clears the bridge. SF-3 boot seed retries on empty
+catalog. SF-4 synchronous `runningRef` guard against same-tick
+double-click. ADR 0156.
+
+Future 13.4.x sub-phases add the consumer-complaint drafter,
+PM-KISAN status checker, and wire the action verbs to real launchers.
+
+Tests: 419 vitest + 1282 Node + tsc clean. Zero new external API.
+
 ## 💾 2026-06-02 — Phase 13.0.2 shipped: SLM-E document summary persistence (MemoryRecord + audit ledger)
 
 Closes the Phase 13.0 ADR 0149 "persistence is the 13.0.x roll-up"

@@ -15,18 +15,17 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.0.2 — SLM-E document summary
-persistence shipped: MemoryRecord with `source.type =
-'doc_summary_v1'` + `doc.summarised` ledger event. **Still zero
-new external-API dependencies.** This phase extends the existing
-POST /api/memory-records boundary with a new accepted envelope
-shape; nothing crosses the network beyond the existing same-origin
-API. The encrypted bundle persists on this device's BE store; the
-ledger event carries only counts + enums + pointers. The whole
-13.x SLM USP arc continues to add capability without external
-services. The parallel revenue-lines Phase 13.x items at §4.1 UPI
-rails and §4.2 IFSC lookup are still the only remaining 13.x
-entries that will touch this doc.)
+Last updated: 2026-06-02 (Phase 13.4 — SLM-H on-device skill-agent
+substrate + first concrete skill (electricity bill explainer)
+shipped. **Still zero new external-API dependencies.** The skill
+agent runs on the existing Phase 9.0c wllama runtime; no new
+service / env var / partner credential. The new BE registry at
+`/api/skill-agents` serves SAME-ORIGIN catalog metadata (admin-
+curated pointers; the FE prompt body never crosses into a BE row).
+The SLM USP arc (SLM-E/F/G/H) is now arc-complete with zero
+cumulative external-API dependencies. The parallel revenue-lines
+Phase 13.x items at §4.1 UPI rails and §4.2 IFSC lookup remain
+the only outstanding 13.x entries that will touch this doc.)
 
 ## Legend
 

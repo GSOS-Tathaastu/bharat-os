@@ -508,6 +508,45 @@ export function useSlmCatalog() {
   });
 }
 
+// --- Phase 13.4 SLM-H skill-agent catalog ----------------------------
+
+export interface SkillAgentRecord {
+  skillId: string;
+  category: string;
+  displayName: string;
+  shortDescription: string;
+  supportedDocKinds: string[];
+  requiredCapabilities: string[];
+  compatibleModelPackFamilies: string[];
+  license: string;
+  maxInputChars: number;
+  maxOutputChars: number;
+  protocolVersion: string;
+  status: 'registered' | 'revoked';
+  registeredBy: string;
+  registeredAt: string;
+  revokedBy: string | null;
+  revokedAt: string | null;
+  revokeReason: string | null;
+}
+
+export interface SkillAgentCatalogResponse {
+  skillAgents: SkillAgentRecord[];
+  totalRegistered: number;
+  totalActive: number;
+  supportedCategories: string[];
+  supportedDocKinds: string[];
+  protocolVersion: string;
+}
+
+export function useSkillAgentsCatalog() {
+  return useQuery({
+    queryKey: ['skill-agents-catalog'],
+    queryFn: () =>
+      api<SkillAgentCatalogResponse>('/api/skill-agents?activeOnly=true')
+  });
+}
+
 export interface InstalledSlm {
   installId: string;
   identityId: string;

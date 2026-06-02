@@ -402,6 +402,11 @@ const SCHEMAS = `
   );
   CREATE INDEX IF NOT EXISTS idx_installed_slms_identity ON installed_slms(identity_id);
 
+  CREATE TABLE IF NOT EXISTS skill_agents (
+    skill_id TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -1895,6 +1900,40 @@ export class SqliteStore {
   async listSlmModelPacks() {
     await this.init();
     return this._listAll('slm_model_packs');
+  }
+
+  // Phase 13.4 — Tier-4 SLM-H skill-agent registry. Admin-curated
+  // metadata; not per-identity (no DPDP §12(3) cascade). Mirrors
+  // slm_model_packs persistence shape.
+  async saveSkillAgent(skillAgent) {
+    await this.init();
+    this._upsert(
+      'skill_agents',
+      ['skill_id', 'json'],
+      [skillAgent.skillId, JSON.stringify(skillAgent)]
+    );
+    await this.appendLedger({
+      type: skillAgent.status === 'revoked'
+        ? 'skill_agent.revoked'
+        : 'skill_agent.registered',
+      skillId: skillAgent.skillId,
+      category: skillAgent.category,
+      protocolVersion: skillAgent.protocolVersion,
+      operator: skillAgent.status === 'revoked'
+        ? skillAgent.revokedBy
+        : skillAgent.registeredBy
+    });
+    return skillAgent;
+  }
+
+  async readSkillAgent(skillId) {
+    await this.init();
+    return this._readOne('skill_agents', 'skill_id', skillId);
+  }
+
+  async listSkillAgents() {
+    await this.init();
+    return this._listAll('skill_agents');
   }
 
   // Phase 9.0b — per-identity SLM install records. Pointer-not-

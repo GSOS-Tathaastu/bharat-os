@@ -16,6 +16,7 @@ import {
 import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
 import { DocSummariserPanel } from '@/components/DocSummariserPanel';
+import { SkillAgentPanel } from '@/components/SkillAgentPanel';
 import { loadSlmRuntime, releaseSharedSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
@@ -321,6 +322,16 @@ export function LabsPage() {
           citizen A's pasted bytes on the same browser. */}
       <DocSummariserPanel
         key={identity?.id ?? 'anon'}
+        identityId={identity?.id}
+      />
+
+      {/* Phase 13.4 — SLM-H skill agent panel. Subscribes to the
+          last-doc-summary bridge; renders nothing until the
+          DocSummariserPanel above publishes a parsed
+          electricity_bill summary. Keyed on identity for the same
+          remount-on-flip protection. */}
+      <SkillAgentPanel
+        key={`skill-${identity?.id ?? 'anon'}`}
         identityId={identity?.id}
       />
 
