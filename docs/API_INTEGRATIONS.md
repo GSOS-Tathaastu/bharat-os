@@ -15,19 +15,17 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.5.1 — sponsor browse +
-purchase flow shipped, closing the 13.5 revenue loop
-end-to-end. **Still zero new external-API dependencies.** All
-3 new endpoints (`GET /api/sponsors/:id/data-offers/browse`,
-`POST /api/sponsors/:id/data-offers/:offerId/purchase`, `GET
-/api/sponsors/:id/data-offer-purchases`) are intra-BE only,
-bearer-gated through the existing sponsor-bearer pattern;
-escrow debit + mesh credit + ledger emission all happen
-through existing substrates. Outstanding 13.x entries that
-will eventually touch this doc: pmkisan.gov.in beneficiary
-status JSON (future 13.4.x), §4.1 UPI rails (sponsor payouts
-+ citizen mesh-balance fiat-instant withdrawals), §4.2 IFSC
-lookup.)
+Last updated: 2026-06-02 (Phase 13.5.2 — signed
+citizen-data-offer audit-export bundle shipped. **Still zero
+new external-API dependencies.** The new endpoint
+`GET /api/sponsors/:id/data-offer-purchases/export.ndjson` is
+intra-BE only; it composes the existing audit signer at
+`/api/audit-signer/public-key` (Ed25519 public key) so sponsors
+can verify bundle signatures independently. Outstanding 13.x
+entries that will eventually touch this doc: pmkisan.gov.in
+beneficiary status JSON (future 13.4.x), §4.1 UPI rails (sponsor
+payouts + citizen mesh-balance fiat-instant withdrawals), §4.2
+IFSC lookup, per-data-point delivery substrate (future 13.5.x).)
 
 ## Legend
 

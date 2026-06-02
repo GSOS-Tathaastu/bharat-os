@@ -152,6 +152,37 @@ Implemented pieces:
 
 ---
 
+## ✍️ 2026-06-02 — Phase 13.5.2 shipped: Signed audit-export bundle for citizen-data-offer purchases
+
+Closes the 13.5 revenue loop with a tamper-evident provenance trail.
+Mirrors the Phase 10.5 labeling-export pattern: sponsor downloads a
+signed NDJSON of every purchase, verifies the Ed25519 signature
+against the Bharat OS audit signer's public key
+(`/api/audit-signer/public-key`), and proves "we paid for these N
+data points from these (rotated-identified) citizens on these dates
+for these purposes."
+
+- New endpoint `GET /api/sponsors/:id/data-offer-purchases/export.ndjson`
+  — bearer-gated; emits `citizen_data_offer_export.signed` ledger
+  event with the content SHA-256.
+- Per-(sponsor, publisher) rotated identityHash prevents cross-sponsor
+  correlation.
+- `dataPointKind` denormalised onto the purchase record so the bundle
+  stays self-contained after DPDP §12 cascade wipes the source offer.
+- FE `ExportButton` with honest verdict surface: verified / signature
+  failed / signer fetch failed.
+
+The per-data-point delivery signature (binding citizen-signed bytes
+to the at-sale-time signature) is deferred to a future sub-phase
+that needs a separate data-delivery substrate. The audit bundle is
+useful WITHOUT it for accounting / DPDP / dispute proofs.
+
+Adversarial review: ship_with_no_fixes. Privacy invariants pinned at
+test layer (publisherId never in bundle; identityHash rotation
+verified). ADR 0163.
+
+Tests: 500 vitest + 1347 Node + tsc clean.
+
 ## 🛒 2026-06-02 — Phase 13.5.1 shipped: Sponsor browse + purchase (closes 13.5 revenue loop end-to-end)
 
 The 13.5 citizen data marketplace is now end-to-end. Citizens publish

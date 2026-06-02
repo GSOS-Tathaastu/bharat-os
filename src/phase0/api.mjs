@@ -268,6 +268,11 @@ import {
   CITIZEN_DATA_OFFER_PURCHASE_PROTOCOL_VERSION
 } from '../phase1/citizen-data-offer-purchase.mjs';
 import {
+  buildCitizenDataOfferExportLines,
+  bundleNdjson as bundleCitizenDataOfferNdjson,
+  CITIZEN_DATA_OFFER_EXPORT_PROTOCOL_VERSION
+} from '../phase1/citizen-data-offer-export.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -4091,7 +4096,11 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             sponsorId,
             publisherId: offer.publisherId,
             pricePerSalePaise: offer.pricePerSalePaise,
-            sponsorPurpose
+            sponsorPurpose,
+            // Phase 13.5.2 — denormalise dataPointKind onto the
+            // purchase so the audit-export bundle is self-contained
+            // even after the offer is wiped by DPDP cascade.
+            dataPointKind: offer.dataPointKind
           });
         } catch (error) {
           jsonResponse(response, 400, {
@@ -4170,6 +4179,52 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           purchases,
           protocolVersion: CITIZEN_DATA_OFFER_PURCHASE_PROTOCOL_VERSION
         });
+        return;
+      }
+
+      // Phase 13.5.2 — Signed citizen-data-offer-purchase audit
+      // export. Sponsor-bearer gated. Returns NDJSON: header + one
+      // line per purchase + trailer with content sha256 + Ed25519
+      // signature from the Bharat OS audit signer. identityHash
+      // rotates per (sponsor, publisher). Emits a
+      // citizen_data_offer_export.signed ledger event so the
+      // sponsor cannot quietly downgrade a verified bundle.
+      const sponsorDataOfferExportMatch =
+        /^\/api\/sponsors\/([^/]+)\/data-offer-purchases\/export\.ndjson$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorDataOfferExportMatch) {
+        const sponsorId = decodeURIComponent(sponsorDataOfferExportMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        let signer = await store.readAuditSigner().catch(() => null);
+        if (!signer) {
+          signer = createIdentity({ displayName: 'Bharat OS audit signer' });
+          await store.saveAuditSigner(signer);
+        }
+        const purchases = await store.listCitizenDataOfferPurchases({ sponsorId });
+        const exportedAt = new Date().toISOString();
+        const lines = buildCitizenDataOfferExportLines({
+          sponsorId,
+          purchases,
+          signerIdentity: signer,
+          exportedAt
+        });
+        const body = bundleCitizenDataOfferNdjson(lines);
+        const trailer = JSON.parse(lines[lines.length - 1]);
+        await store.appendLedger({
+          type: 'citizen_data_offer_export.signed',
+          sponsorId,
+          signerId: signer.id,
+          contentSha256: trailer.contentSha256,
+          purchaseCount: lines.length - 2,
+          exportedAt,
+          protocolVersion: CITIZEN_DATA_OFFER_EXPORT_PROTOCOL_VERSION
+        });
+        textResponse(
+          response,
+          200,
+          body,
+          'application/x-ndjson; charset=utf-8'
+        );
         return;
       }
 

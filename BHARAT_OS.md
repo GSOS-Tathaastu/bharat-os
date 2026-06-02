@@ -2201,6 +2201,60 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.5.2 — SHIPPED 2026-06-02 (ADR 0163).** Signed
+  citizen-data-offer audit-export bundle. Mirrors the Phase
+  10.5 labeling-export pattern (ADR 0124). NEW
+  `src/phase1/citizen-data-offer-export.mjs` (~220 lines) —
+  protocol pinned at `bos.phase13.citizen-data-offer-export.v0`,
+  `identityHashFor(sponsorId, publisherId)` rotates per (sponsor,
+  publisher) so cross-sponsor correlation is prevented,
+  `buildCitizenDataOfferExportLines` produces sorted NDJSON
+  (header + per-purchase + Ed25519-signed trailer with content
+  SHA-256), `verifyCitizenDataOfferExportLines` for server-side
+  verification. EXTENDED
+  `src/phase1/citizen-data-offer-purchase.mjs` — added
+  `dataPointKind` to PERMITTED_PURCHASE_KEYS so the audit-export
+  bundle stays self-contained after DPDP §12 cascade wipes the
+  source offer record. API handler reads `offer.dataPointKind`
+  and denormalises onto the purchase at sale time. NEW endpoint
+  `GET /api/sponsors/:sponsorId/data-offer-purchases/export.ndjson`
+  — bearer-gated; lazy-loads audit signer identity; emits
+  `citizen_data_offer_export.signed` ledger event with
+  content SHA-256 + purchase count; returns
+  `application/x-ndjson`. FE: NEW
+  `verifyCitizenDataOfferExportLinesAsync` in
+  sponsor-export-verify.ts (thin wrapper over labeling-export
+  async verifier with `purchaseCount` rename); NEW
+  `useSponsorDataOfferExport` mutation hook — fetches bundle +
+  fetches audit signer public key + runs async crypto verify +
+  returns blob for download. EXTENDED SponsorDataOffers page
+  with `ExportButton` next to "Recent purchases" — honest
+  verdict surface (verified / verification failed / signer
+  fetch failed). **Adversarial review** (3 lenses): **0
+  fixes**. Privacy invariants pinned at test layer
+  (publisherId never in bundle — sha256 hex output structurally
+  cannot contain non-hex chars in publisher tokens; identityHash
+  rotation per sponsor; bearer auth; pointer-only ledger
+  event). Accuracy: stable bundle for same inputs regardless of
+  array order; empty bundle still well-formed; signature
+  mismatch + content tampering + bearer failures all caught at
+  boundary. **Why per-data-point delivery signature is
+  deferred**: the audit-export bundle is the FINANCIAL +
+  CONSENT provenance trail (proves what was paid for + when +
+  by whom + for which purpose); the actual byte flow needs a
+  separate data-delivery substrate that doesn't yet exist.
+  Audit bundle is useful WITHOUT delivery flow for accounting /
+  dispute resolution / DPDP compliance proofs. **§15
+  bindings**: rotated identityHash; signed-and-verifiable
+  bundle; bearer-gated read; ledger emits POINTER + count
+  meta. **API_INTEGRATIONS.md impact**: ZERO new external API
+  (composes the existing audit signer at
+  `/api/audit-signer/public-key`). Last-updated bumped.
+  **FE-BE parity**: BE delta = builder + verifier + endpoint +
+  purchase denormalisation; FE delta = verifier wrapper + hook
+  + ExportButton. Tests: vitest 500 unchanged (FE wires existing
+  verify path); Node 1334 → **1347** (+13
+  citizen-data-offer-export.test). tsc clean.
 - **Phase 13.5.1 — SHIPPED 2026-06-02 (ADR 0162).** Sponsor
   browse + purchase flow — closes the 13.5 revenue loop
   end-to-end. NEW

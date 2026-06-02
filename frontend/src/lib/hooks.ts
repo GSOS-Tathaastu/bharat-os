@@ -716,6 +716,74 @@ export function useSponsorDataOfferPurchases() {
   });
 }
 
+// Phase 13.5.2 — signed citizen-data-offer-purchase audit export.
+// Mirrors useSponsorJobExport (Phase 10.5 labeling export).
+
+import { verifyCitizenDataOfferExportLinesAsync } from './sponsor-export-verify';
+
+export interface CitizenDataOfferExportResult {
+  lines: string[];
+  contentSha256: string | null;
+  verdict: { ok: boolean; reason?: string; purchaseCount?: number } | null;
+  verifyFetchFailed: boolean;
+  signerPublicRecord: AuditSignerPublicRecord | null;
+  blob: Blob;
+  filename: string;
+}
+
+export function useSponsorDataOfferExport() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useMutation({
+    mutationFn: async (): Promise<CitizenDataOfferExportResult> => {
+      const res = await fetchWithBearer(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/data-offer-purchases/export.ndjson`
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const err = new Error(`Export failed: HTTP ${res.status}`) as Error & {
+          status?: number;
+          code?: string;
+          body?: string;
+        };
+        err.status = res.status;
+        if (res.status === 401) err.code = 'invalid_token';
+        else if (res.status === 403) err.code = 'forbidden';
+        err.body = body;
+        throw err;
+      }
+      const text = await res.text();
+      const lines = text.trimEnd().split('\n').filter(Boolean);
+      let signerPublicRecord: AuditSignerPublicRecord | null = null;
+      let verdict: CitizenDataOfferExportResult['verdict'] = null;
+      let verifyFetchFailed = false;
+      try {
+        signerPublicRecord = await api<AuditSignerPublicRecord>(
+          '/api/audit-signer/public-key'
+        );
+        verdict = await verifyCitizenDataOfferExportLinesAsync(lines, signerPublicRecord);
+      } catch (_err) {
+        signerPublicRecord = null;
+        verdict = null;
+        verifyFetchFailed = true;
+      }
+      const blob = new Blob([text], { type: 'application/x-ndjson' });
+      const filename = `bharat-os-data-offer-purchases-${sponsorId?.replace(/[^a-zA-Z0-9_-]/g, '_') ?? 'sponsor'}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.ndjson`;
+      let contentSha256: string | null = null;
+      try {
+        const trailer = JSON.parse(lines[lines.length - 1]);
+        if (trailer?.type === 'trailer' && typeof trailer.contentSha256 === 'string') {
+          contentSha256 = trailer.contentSha256;
+        }
+      } catch (_err) {
+        // ignored
+      }
+      return { lines, contentSha256, verdict, verifyFetchFailed, signerPublicRecord, blob, filename };
+    }
+  });
+}
+
 export interface InstalledSlm {
   installId: string;
   identityId: string;

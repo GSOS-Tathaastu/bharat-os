@@ -91,6 +91,10 @@ test('strict allowlist rejects forbidden top-level keys', () => {
 
 test('PERMITTED_PURCHASE_KEYS contains exactly the documented set', () => {
   assert.deepEqual([...PERMITTED_PURCHASE_KEYS].sort(), [
+    // Phase 13.5.2 added dataPointKind (denormalised from the offer
+    // so the audit-export bundle stays self-contained even after
+    // the offer is wiped by DPDP cascade).
+    'dataPointKind',
     'meshContributionEventId',
     'offerId',
     'pricePerSalePaise',

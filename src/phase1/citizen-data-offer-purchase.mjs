@@ -43,6 +43,11 @@ export const PERMITTED_PURCHASE_KEYS = Object.freeze([
   'publisherId',
   'pricePerSalePaise',
   'sponsorPurpose',
+  // Phase 13.5.2 — denormalised from the offer at purchase time so
+  // the audit-export bundle stays self-contained even after the
+  // citizen revokes the offer (DPDP §12 cascade removes the offer
+  // record but the purchase row + sponsor's signed export remain).
+  'dataPointKind',
   'protocolVersion',
   'purchasedAt',
   'meshContributionEventId'
@@ -74,6 +79,10 @@ function purchaseIdFrom(payload) {
  * @param {string} input.publisherId
  * @param {number} input.pricePerSalePaise
  * @param {string} input.sponsorPurpose — one of the offer's allowed purposes
+ * @param {string} [input.dataPointKind] — denormalised from the offer
+ *   so the audit-export bundle remains self-contained even after
+ *   the offer record is wiped by DPDP §12 cascade. v1 accepts null;
+ *   v2 will require this field.
  */
 export function buildCitizenDataOfferPurchase(input) {
   if (input == null || typeof input !== 'object') {
@@ -94,6 +103,11 @@ export function buildCitizenDataOfferPurchase(input) {
   if (!Number.isInteger(pricePerSalePaise) || pricePerSalePaise <= 0) {
     throw new Error('pricePerSalePaise must be a positive integer.');
   }
+  // dataPointKind is optional for backward-compat with any pre-13.5.2
+  // purchase records on disk; new purchases always set it.
+  const dataPointKind = input.dataPointKind != null
+    ? assertNonEmptyString(input.dataPointKind, 'dataPointKind', 64)
+    : null;
   const purchasedAt = nowIso().replace(/\.\d{1,3}Z$/, 'Z');
   // Content-derived purchase id. salt with the timestamp so multiple
   // purchases of the same offer by the same sponsor for the same
@@ -112,6 +126,7 @@ export function buildCitizenDataOfferPurchase(input) {
     publisherId,
     pricePerSalePaise,
     sponsorPurpose,
+    dataPointKind,
     protocolVersion: CITIZEN_DATA_OFFER_PURCHASE_PROTOCOL_VERSION,
     purchasedAt,
     meshContributionEventId: null

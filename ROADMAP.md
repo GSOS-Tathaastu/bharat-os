@@ -1291,9 +1291,15 @@ picked "minimum onboarding load, maximum coverage"):
   persist → emit pointer ledger events). New
   `citizen_data_sale` workload type in MESH_WORKLOAD_TYPES.
   Sponsor surface gets a "Data" tab. Closes the 13.5 revenue
-  loop end-to-end. **Phase 13.5.2 next** — signed audit-export
-  NDJSON bundle for sponsors + per-data-point delivery
-  signature.
+  loop end-to-end.
+  **Phase 13.5.2 shipped 2026-06-02 (ADR 0163)** — signed
+  citizen-data-offer audit-export bundle (NDJSON; Ed25519
+  trailer signature; per-(sponsor, publisher) rotated
+  identityHash). New endpoint
+  `/data-offer-purchases/export.ndjson`; `dataPointKind`
+  denormalised onto purchases so bundles stay self-contained
+  after DPDP cascade. Per-data-point delivery signature
+  deferred (needs separate data-delivery substrate).
 
 #### Phase 13.6 — Public marketing pages ✅ SHIPPED 2026-06-02 (ADR 0161)
 

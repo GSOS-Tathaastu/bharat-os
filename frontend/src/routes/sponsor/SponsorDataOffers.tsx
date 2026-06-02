@@ -20,6 +20,7 @@ import {
   useSponsorBrowseDataOffers,
   useSponsorPurchaseDataOffer,
   useSponsorDataOfferPurchases,
+  useSponsorDataOfferExport,
   useSponsorSelf
 } from '@/lib/hooks';
 import {
@@ -127,7 +128,10 @@ export function SponsorDataOffers() {
       )}
 
       <section>
-        <h2 className="mb-2 text-heading font-semibold text-text">Recent purchases</h2>
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-heading font-semibold text-text">Recent purchases</h2>
+          {(purchases.data ?? []).length > 0 && <ExportButton />}
+        </div>
         {purchases.isPending ? (
           <p className="text-body text-text-muted">Loading purchase history…</p>
         ) : (purchases.data ?? []).length === 0 ? (
@@ -240,5 +244,58 @@ function OfferRow({ offer }: { offer: CitizenDataOffer }) {
         </p>
       )}
     </li>
+  );
+}
+
+// Phase 13.5.2 — signed audit-export download button. Downloads
+// the NDJSON, verifies the trailer's Ed25519 signature against
+// the audit signer's published public key, then triggers a
+// browser download. Surfaces an honest verdict line below the
+// button (verified / fetch-failed / mismatch).
+function ExportButton() {
+  const exportMut = useSponsorDataOfferExport();
+
+  async function handleDownload() {
+    const result = await exportMut.mutateAsync();
+    const url = URL.createObjectURL(result.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = result.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const verdict = exportMut.data?.verdict;
+  const verifyFetchFailed = exportMut.data?.verifyFetchFailed === true;
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Action
+        variant="ghost"
+        size="sm"
+        onClick={handleDownload}
+        disabled={exportMut.isPending}
+      >
+        {exportMut.isPending ? 'Exporting…' : 'Download signed audit bundle'}
+      </Action>
+      {verdict?.ok && (
+        <span className="text-caption text-trust-700">
+          Signature verified · {verdict.purchaseCount} purchase
+          {verdict.purchaseCount === 1 ? '' : 's'}
+        </span>
+      )}
+      {verdict && !verdict.ok && (
+        <span className="text-caption text-error">
+          Signature verification failed: {verdict.reason}
+        </span>
+      )}
+      {verifyFetchFailed && (
+        <span className="text-caption text-orange-700">
+          Couldn't fetch audit signer public key — bundle downloaded unverified.
+        </span>
+      )}
+    </div>
   );
 }

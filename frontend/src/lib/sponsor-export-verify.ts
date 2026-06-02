@@ -131,6 +131,38 @@ export function verifyLabelingExportLines(
   return { ok: true, contentSha256: trailer.contentSha256, submissionCount };
 }
 
+// Phase 13.5.2 — citizen-data-offer-purchase export verdict shape.
+// Structurally identical to ExportVerdict but renames the count
+// field to purchaseCount for clarity in sponsor UIs.
+export interface CitizenDataOfferExportVerdict {
+  ok: boolean;
+  reason?: string;
+  contentSha256?: string;
+  purchaseCount?: number;
+}
+
+/**
+ * Phase 13.5.2 — async crypto verifier for the
+ * citizen-data-offer-purchase export bundle. Same trailer format
+ * as the labeling export (Phase 10.5) so the crypto path
+ * delegates; we only rename `submissionCount` → `purchaseCount`
+ * in the verdict.
+ */
+export async function verifyCitizenDataOfferExportLinesAsync(
+  lines: string[],
+  signerPublicRecord: AuditSignerPublicRecord
+): Promise<CitizenDataOfferExportVerdict> {
+  const inner = await verifyLabelingExportLinesAsync(lines, signerPublicRecord);
+  if (!inner.ok) {
+    return { ok: false, reason: inner.reason, contentSha256: inner.contentSha256 };
+  }
+  return {
+    ok: true,
+    contentSha256: inner.contentSha256,
+    purchaseCount: inner.submissionCount
+  };
+}
+
 /**
  * Async crypto-verified version. Use this when you need a
  * definitive verdict (post-download in the export UI).
