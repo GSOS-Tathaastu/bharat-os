@@ -35,6 +35,23 @@ plus the first half of the on-device-SLM arc.
   runtime stub, real Tesseract.js OCR for health docs, Phase 2a.25
   UX overhaul (de-jargoned copy), Phase 2a.26 reset-device flow.
 
+#### Phase 2a.0 — PWA install + offline shell ✅ SHIPPED 2026-06-03 (ADR 0170)
+- Hand-authored manifest (`/app/` scope + start_url) + SVG icons
+  (any + maskable) + service worker (NEVER caches /api/* per §15)
+  + offline fallback shell + useBeforeInstallPrompt hook +
+  InstallPwaBanner with iOS-Safari + Chromium branches. Zero new
+  dep. Opens the §2a distribution arc.
+- [x] Manifest + icons
+- [x] Service worker (network-first navigation; never cache /api/*)
+- [x] Offline shell (honest about online-only surfaces)
+- [x] Install banner (Chromium + iOS Safari branches)
+- [ ] **Phase 2a.1 next** — HTTPS hosting + COOP/COEP headers for
+  wllama multi-thread + Lighthouse PWA audit + PNG icon fallbacks
+  for iOS Safari pre-16.
+- [ ] **Phase 2a.2** — Android TWA wrapper (Bubblewrap) for Play Store.
+- [ ] **Phase 2a.3** — In-app "Update available · Reload" banner UI
+  (SW supports SKIP_WAITING already).
+
 ### Phase 3 — Federated learning
 - Federated round substrate, on-device 216-param intent classifier
   (multinomial logistic regression), gradient composition with

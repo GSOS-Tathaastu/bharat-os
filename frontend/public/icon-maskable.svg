@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bharat OS">
+  <!-- Maskable icon: safe zone is the inner 40% (center ~ radius 205).
+       All meaningful content stays well within the safe circle so
+       Android can clip to circle/squircle/rounded-rect without
+       cropping the brand mark. -->
+  <rect width="512" height="512" fill="#FF9933"/>
+  <g transform="translate(106 106) scale(0.59)">
+    <rect width="512" height="512" rx="0" fill="#FFFFFF"/>
+    <rect x="0" y="0" width="512" height="170" fill="#FF9933"/>
+    <rect x="0" y="170" width="512" height="172" fill="#FFFFFF"/>
+    <rect x="0" y="342" width="512" height="170" fill="#138808"/>
+    <circle cx="256" cy="256" r="68" fill="#FFFFFF" stroke="#000080" stroke-width="10"/>
+    <text x="50%" y="62%" text-anchor="middle" font-family="Manrope, system-ui, sans-serif" font-weight="700" font-size="96" fill="#000080">B</text>
+  </g>
+</svg>

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#FF9933" />
+    <title>Bharat OS — Offline</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Manrope, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #FFF7ED;
+        color: #1C1917;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        max-width: 560px;
+        width: 100%;
+        background: #FFFFFF;
+        border-radius: 8px;
+        border: 1px solid #FED7AA;
+        padding: 32px;
+        text-align: left;
+      }
+      .badge {
+        display: inline-block;
+        background: #FF9933;
+        color: #FFFFFF;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 16px;
+      }
+      h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin: 0 0 12px 0;
+      }
+      p {
+        margin: 0 0 12px 0;
+        line-height: 1.6;
+        color: #44403C;
+      }
+      ul {
+        margin: 12px 0;
+        padding-left: 20px;
+        color: #44403C;
+        line-height: 1.7;
+      }
+      button {
+        background: #FF9933;
+        color: #FFFFFF;
+        border: 0;
+        border-radius: 4px;
+        padding: 10px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      button:hover { background: #EA7F00; }
+      code {
+        background: #FFF7ED;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <span class="badge">Offline</span>
+      <h1>You're offline.</h1>
+      <p>
+        Bharat OS is an on-device-first OS. Most of what makes it useful
+        actually still works without a connection &mdash; the parts that
+        need the BE are the ones that read or write live state.
+      </p>
+      <p><strong>While offline, you can still:</strong></p>
+      <ul>
+        <li>Run the on-device SLM (document summary, PII redactor,
+            skill agents) on text you paste in &mdash; the model lives
+            in your browser's storage.</li>
+        <li>Browse your previously-loaded shell pages from this device.</li>
+        <li>Read your local personalisation profile (it never leaves
+            the device anyway).</li>
+      </ul>
+      <p><strong>What needs you back online:</strong></p>
+      <ul>
+        <li>Publishing a citizen-data offer (signed envelope posts to BE).</li>
+        <li>Submitting an SLM-H skill action verb (calls the BE skill
+            registry).</li>
+        <li>Compute-network dispatch + serve (real-time peer flow).</li>
+      </ul>
+      <button onclick="window.location.assign('/app/')">Try again</button>
+    </div>
+  </body>
+</html>

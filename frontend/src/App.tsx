@@ -19,6 +19,7 @@ import { TopBar } from '@/components/TopBar';
 // Phase 13.6 — public marketing pages (no auth, no protected surface)
 import { AboutPage } from '@/routes/AboutPage';
 import { HowItWorksPage } from '@/routes/HowItWorksPage';
+import { InstallPwaBanner } from '@/components/InstallPwaBanner';
 import { ForCitizensPage } from '@/routes/ForCitizensPage';
 import { ForSponsorsPage } from '@/routes/ForSponsorsPage';
 
@@ -59,6 +60,7 @@ export default function App() {
   return (
     <>
       <GlobalQueueDrainer />
+      <InstallPwaBanner />
       <Routes>
         <Route path="/" element={<OnboardingPage />} />
         {/* Phase 13.6 — public marketing pages. No auth required. */}

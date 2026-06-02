@@ -2201,6 +2201,59 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.0 — SHIPPED 2026-06-03 (ADR 0170).** PWA install
+  + offline shell. Founder authorised the move 2026-06-03
+  ("Lets do the PWA only as we need to test it first. From now
+  onwards, we will be adding the APIs to make the product
+  live") — see new memory binding
+  [[apis-going-live-mode]]. Zero new dep (hand-authored —
+  rejected vite-plugin-pwa to preserve §13.x substrate
+  posture). Five hand-authored assets in
+  `frontend/public/`: `manifest.webmanifest` (Bharat OS
+  branding + lang en-IN + scope `/app/` + start_url `/app/` +
+  display standalone + theme-color #FF9933 + 2 SVG icons +
+  /app/labs + /app/settings shortcuts); `icon.svg` (tricolour
+  + "B" mark on navy Ashok Chakra, 512×512); `icon-maskable.svg`
+  (maskable safe zone with saffron bleed); `service-worker.js`
+  (~125 lines — versioned `bharat-os-pwa-v1`; cache strategy:
+  NEVER caches /api/* per §15 + network-first for navigation
+  with /app/ + /app/offline.html fallback +
+  stale-while-revalidate for same-origin hashed assets +
+  cache-first for fonts.googleapis.com + fonts.gstatic.com +
+  cdn.jsdelivr.net; listens for SKIP_WAITING postMessage);
+  `offline.html` (standalone HTML; honest list of what works
+  offline — on-device SLM, previously-loaded shell, local
+  personalisation — vs what needs network — citizen data
+  offer publish, SLM-H skill actions, compute network
+  dispatch). NEW `frontend/src/lib/register-service-worker.ts`
+  — pure-function helper; HTTPS-or-localhost guard; dev
+  builds skip; updatefound listener for future "Update
+  available" banner. NEW `frontend/src/lib/use-pwa-install.ts`
+  — captures Chromium beforeinstallprompt; detects ios-safari
+  via UA; surfaces isInstalled via display-mode standalone +
+  navigator.standalone. NEW
+  `frontend/src/components/InstallPwaBanner.tsx` — three
+  branches (chromium with fired event → "Install Bharat OS"
+  button; iOS Safari → Share→Add-to-Home instructions;
+  installed / unsupported → renders nothing). 7-day
+  dismissal cooldown persisted in localStorage. Mounted in
+  App.tsx above route tree. `frontend/index.html` extended
+  with manifest link + svg icon + apple-touch-icon + 4 iOS
+  install meta tags + mobile-web-app-capable. `main.tsx`
+  registers SW on production builds only. Adversarial review:
+  ship_with_no_must_fix. Privacy posture sound — SW NEVER
+  caches /api/* (regression pinned); scope-limited to /app/;
+  dismissal key has timestamp only (no PII); iOS detection
+  via standard property. Notes: SF-1 SVG-only icons may not
+  render reliably on iOS Safari pre-16 (PNG fallback in
+  2a.1); SF-2 1.29 MB main bundle warning predates this
+  phase; SF-3 no FE Update-available banner yet (SW supports
+  SKIP_WAITING); SF-4 no A2HS install analytics. vitest
+  526 → 542 (+16: 10 hook + 6 banner). Node 1441 → 1466 (+25
+  pwa-manifest regression pin). tsc clean. vite build
+  succeeds. Zero new external API; ADR 0170.
+  **Opens §2a distribution arc. 2a.1 lands hosting + COOP/COEP;
+  2a.2 lands Android TWA.**
 - **Phase 13.7.4 — SHIPPED 2026-06-03 (ADR 0169).** wllama
   runtime auto-serve mode — closes the compute network's last
   manual-click step. EXTENDED

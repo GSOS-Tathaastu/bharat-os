@@ -152,6 +152,72 @@ Implemented pieces:
 
 ---
 
+## 📲 2026-06-03 — Phase 2a.0 shipped: PWA install + offline shell (Bharat OS is installable on Android + iOS)
+
+Opens the §2a distribution arc. The substrate is now installable as
+a Progressive Web App on Android Chrome / Edge / Samsung Internet
+(programmatic install prompt) and iOS Safari 16+ (Add to Home Screen).
+
+What the user sees:
+- Visit Bharat OS in any modern browser on a phone.
+- A dismissible "Install Bharat OS on this device" banner appears
+  bottom-center.
+- On Android: tap "Install Bharat OS" → home-screen icon → app
+  opens standalone (no browser chrome).
+- On iOS: tap Share → Add to Home Screen → home-screen icon →
+  app opens standalone.
+
+Zero new deps (rejected vite-plugin-pwa to preserve §13.x posture).
+Five hand-authored files in `frontend/public/`:
+- `manifest.webmanifest` — Bharat OS branding + lang en-IN + scope
+  /app/ + start_url /app/ + display standalone + theme-color
+  #FF9933 + 2 SVG icons + /app/labs + /app/settings shortcuts.
+- `icon.svg` + `icon-maskable.svg` — tricolour + "B" mark on navy
+  Ashok Chakra; maskable variant has saffron bleed for Android
+  clip-to-circle/squircle/rounded-rect.
+- `service-worker.js` — versioned `bharat-os-pwa-v1`. NEVER caches
+  /api/* (regression-pinned per §15). Network-first navigation
+  with /app/ + /app/offline.html fallback. Stale-while-revalidate
+  for same-origin hashed assets. Cache-first for fonts.googleapis
+  + fonts.gstatic + cdn.jsdelivr (wllama runtime).
+- `offline.html` — standalone HTML. Honest list of what works
+  offline (on-device SLM, previously-loaded shell, local
+  personalisation) vs what needs network (citizen data offer
+  publish, SLM-H skill actions, compute network dispatch).
+
+New FE files:
+- `frontend/src/lib/register-service-worker.ts` — HTTPS-or-localhost
+  guard; dev builds skip (no HMR breakage); updatefound listener.
+- `frontend/src/lib/use-pwa-install.ts` — captures Chromium
+  beforeinstallprompt; detects ios-safari via UA; surfaces
+  isInstalled via display-mode standalone + navigator.standalone.
+- `frontend/src/components/InstallPwaBanner.tsx` — three branches
+  (Chromium with fired event → Install button; iOS Safari → A2HS
+  instructions; installed / unsupported → renders nothing).
+  7-day dismissal cooldown.
+
+Founder authorised the move 2026-06-03: "Lets do the PWA only as we
+need to test it first. From now onwards, we will be adding the APIs
+to make the product live." New memory binding: APIs going live
+mode (stub-first → live-first for external rails).
+
+Adversarial review: ship_with_no_must_fix. Three-lens pass —
+privacy posture sound (SW never caches /api/*; scope /app/-limited;
+no PII in dismissal key); honest about offline-vs-online
+boundaries; HTTPS-or-localhost guard; iOS-vs-Chromium branches.
+
+Notes for follow-up: SF-1 SVG icons may not render reliably on iOS
+Safari pre-16 (PNG fallback in 2a.1); SF-2 1.29 MB main bundle
+warning predates this phase; SF-3 no FE Update-available banner
+yet; SF-4 no A2HS install analytics.
+
+Tests: 542 vitest (+16: 10 usePwaInstall + 6 InstallPwaBanner) +
+1466 Node (+25 pwa-manifest regression pin) + tsc clean +
+`vite build` succeeds. Zero new external API. ADR 0170.
+
+Next: Phase 2a.1 (hosting + COOP/COEP for wllama multi-thread) or
+Phase 14.0 (Sahayak).
+
 ## 🤖 2026-06-03 — Phase 13.7.4 shipped: wllama auto-serve mode (compute network closes end-to-end with automation)
 
 Closes the compute network's last manual-click step. When a worker

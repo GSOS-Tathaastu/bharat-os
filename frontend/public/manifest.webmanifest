@@ -1,0 +1,44 @@
+{
+  "name": "Bharat OS",
+  "short_name": "Bharat OS",
+  "description": "India-first AI-native OS. On-device Small Language Model. You own your data.",
+  "lang": "en-IN",
+  "dir": "ltr",
+  "scope": "/app/",
+  "start_url": "/app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#FF9933",
+  "background_color": "#FFFFFF",
+  "categories": ["productivity", "utilities", "government"],
+  "icons": [
+    {
+      "src": "/app/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Labs",
+      "short_name": "Labs",
+      "description": "Try on-device Small Language Model features",
+      "url": "/app/labs",
+      "icons": [{ "src": "/app/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings",
+      "description": "Manage data, consents, and compute serving",
+      "url": "/app/settings",
+      "icons": [{ "src": "/app/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

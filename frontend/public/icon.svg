@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bharat OS">
+  <rect width="512" height="512" rx="96" ry="96" fill="#FFFFFF"/>
+  <g>
+    <rect x="48" y="80" width="416" height="112" fill="#FF9933"/>
+    <rect x="48" y="200" width="416" height="112" fill="#FFFFFF"/>
+    <rect x="48" y="320" width="416" height="112" fill="#138808"/>
+  </g>
+  <circle cx="256" cy="256" r="46" fill="#FFFFFF" stroke="#000080" stroke-width="6"/>
+  <text x="50%" y="62%" text-anchor="middle" font-family="Manrope, system-ui, sans-serif" font-weight="700" font-size="64" fill="#000080">B</text>
+</svg>

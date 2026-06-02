@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#FF9933" />
 
+    <!-- Phase 2a.0 — PWA install metadata. App base is /app/ per
+         vite.config (build outputs to public/app/build/), so PWA
+         assets are served at /app/* not at the origin root. -->
+    <link rel="manifest" href="/app/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/app/icon.svg" />
+    <link rel="apple-touch-icon" href="/app/icon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Bharat OS" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
     <!-- Phase 13.6.1 SEO defaults. Per-route overrides apply via useDocumentMeta. -->
     <title>Bharat OS — India's first AI-native OS where YOU own your data</title>
     <meta
