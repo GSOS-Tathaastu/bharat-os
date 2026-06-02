@@ -15,20 +15,18 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.0.1 — PDF upload + on-device
-text extraction for SLM-E shipped. **Still zero new external-
-API dependencies.** The pdfjs-dist npm dep is a build-time +
-runtime FE dependency, not an external service — no env var,
-no auth flow, no partner credentials. pdfjs's worker is
-bundled locally by Vite via the `?url` import; cMapUrl /
-standardFontDataUrl / wasmUrl are deliberately never set so
-its BinaryDataFactory throws rather than silently CDN-fetching.
-The pitch beat (Network tab stays empty during pick + extract +
-summarise) holds. The whole 13.x SLM USP arc continues to add
-capability without external services. The parallel revenue-
-lines Phase 13.x items at §4.1 UPI rails and §4.2 IFSC lookup
-are still the only remaining 13.x entries that will touch
-this doc.)
+Last updated: 2026-06-02 (Phase 13.0.2 — SLM-E document summary
+persistence shipped: MemoryRecord with `source.type =
+'doc_summary_v1'` + `doc.summarised` ledger event. **Still zero
+new external-API dependencies.** This phase extends the existing
+POST /api/memory-records boundary with a new accepted envelope
+shape; nothing crosses the network beyond the existing same-origin
+API. The encrypted bundle persists on this device's BE store; the
+ledger event carries only counts + enums + pointers. The whole
+13.x SLM USP arc continues to add capability without external
+services. The parallel revenue-lines Phase 13.x items at §4.1 UPI
+rails and §4.2 IFSC lookup are still the only remaining 13.x
+entries that will touch this doc.)
 
 ## Legend
 

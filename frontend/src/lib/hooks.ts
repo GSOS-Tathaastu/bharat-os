@@ -1717,6 +1717,12 @@ export interface CreateMemoryRecordInput {
   label?: string;
   sensitivity?: MemorySensitivity;
   tags?: string[];
+  /** Phase 13.0.2 — opaque source-envelope passthrough. When the FE
+   *  is saving an SLM-E document summary it passes the
+   *  doc_summary_v1 envelope here; the BE strictly normalises it at
+   *  the boundary and emits a pointer-not-payload `doc.summarised`
+   *  ledger event. */
+  source?: Record<string, unknown>;
 }
 
 export function useCreateMemoryRecord() {
@@ -1732,7 +1738,8 @@ export function useCreateMemoryRecord() {
           sensitivity: input.sensitivity ?? 'personal',
           tags: input.tags ?? [],
           contentType: 'text/plain; charset=utf-8',
-          scopes: ['memory.read', 'consent.record']
+          scopes: ['memory.read', 'consent.record'],
+          ...(input.source ? { source: input.source } : {})
         })
       }),
     onSuccess: (_data, { identityId }) => {

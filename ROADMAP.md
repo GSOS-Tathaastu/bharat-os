@@ -1225,9 +1225,11 @@ picked "minimum onboarding load, maximum coverage"):
   cut shipped 2026-06-01 (ADR 0149)** — paste-text-only, 6-pill
   picker + streaming on /labs. **Phase 13.0.1 shipped 2026-06-02
   (ADR 0154)** — PDF upload + on-device text extraction via
-  pdfjs-dist (founder-approved npm dep). Deferred to 13.0.2
-  (MemoryRecord persistence + `doc.summarised` pointer-not-
-  payload ledger).
+  pdfjs-dist (founder-approved npm dep). **Phase 13.0.2 shipped
+  2026-06-02 (ADR 0155)** — first BE delta in the SLM-E arc:
+  Save summary to consent-gated encrypted MemoryRecord +
+  `doc.summarised` pointer-not-payload ledger event with
+  strict-allowlist count-only envelope. SLM-E arc complete.
 - [x] **F.** On-device PII redactor on outgoing actions.
   **Phase 13.1 shipped 2026-06-01 (ADR 0151)** —
   regex-primary (11 Indian PII kinds: PAN/Aadhaar/mobile/

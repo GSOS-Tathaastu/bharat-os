@@ -35,6 +35,13 @@ import {
   readMemoryRecordWithConsent,
   searchMemoryRecords
 } from '../phase1/memory.mjs';
+// Phase 13.0.2 — doc-summary `source` envelope normaliser +
+// pointer-not-payload ledger event builder.
+import {
+  DOC_SUMMARY_SOURCE_TYPE,
+  normaliseDocSummarySource,
+  buildDocSummarisedLedgerEvent
+} from './doc-summary-envelope.mjs';
 import {
   evaluateSkillPreflight,
   listSkills,
@@ -5298,16 +5305,53 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         if (request.method === 'POST') {
           const body = await readRequestJson(request);
           const identity = await store.readIdentity(body.identityId);
+          // Phase 13.0.2 — when the FE is saving an SLM-E document
+          // summary, validate the source envelope strictly. Other
+          // memory-record creates (citizen notes etc.) flow
+          // unchanged. The strict-allowlist normaliser throws on any
+          // forbidden key / unsupported enum value so the audit
+          // ledger never holds an unexpected payload shape.
+          let normalisedSource = body.source ?? { type: 'api' };
+          let isDocSummary = false;
+          if (normalisedSource && typeof normalisedSource === 'object'
+              && normalisedSource.type === DOC_SUMMARY_SOURCE_TYPE) {
+            try {
+              normalisedSource = normaliseDocSummarySource(normalisedSource);
+              isDocSummary = true;
+            } catch (err) {
+              jsonResponse(response, 400, {
+                error: {
+                  code: 'invalid_doc_summary_source',
+                  message: err.message
+                }
+              });
+              return;
+            }
+          }
           const { record, bundle } = createMemoryRecord(identity, body.text, {
             label: body.label,
             contentType: body.contentType ?? 'text/plain; charset=utf-8',
             scopes: body.scopes ?? ['memory.read', 'consent.record'],
-            source: body.source ?? { type: 'api' },
+            source: normalisedSource,
             tags: body.tags ?? [],
             sensitivity: body.sensitivity ?? 'personal'
           });
           await store.saveBundle(bundle);
           await store.saveMemoryRecord(record);
+          // Phase 13.0.2 — pointer-not-payload ledger event ONLY for
+          // doc-summary creates. The event carries counts + enum
+          // meta + the recordId pointer; never the title / TLDR /
+          // bullet strings themselves.
+          if (isDocSummary) {
+            await store.appendLedger(
+              buildDocSummarisedLedgerEvent({
+                recordId: record.recordId,
+                ownerId: record.ownerId,
+                source: normalisedSource,
+                at: record.createdAt
+              })
+            );
+          }
           jsonResponse(response, 201, { ok: true, memory: memorySummary(record) });
           return;
         }

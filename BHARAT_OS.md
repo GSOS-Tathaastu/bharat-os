@@ -2201,6 +2201,82 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.0.2 — SHIPPED 2026-06-02 (ADR 0155).** SLM-E
+  document summary persistence — first BE delta in the SLM-E
+  arc, closes the ADR 0149 "v1 is generate-and-render, persist
+  in 13.0.x" deferral. NEW
+  `src/phase0/doc-summary-envelope.mjs` (~305 lines) — strict-
+  allowlist normaliser + ledger-event builder modelled on the
+  Phase 13.2 piiRedaction posture (ADR 0152).
+  `DOC_SUMMARY_PROTOCOL_VERSION = 'bos.phase13.doc-summary.v1'`,
+  `DOC_SUMMARY_SOURCE_TYPE = 'doc_summary_v1'`,
+  `PERMITTED_SOURCE_KEYS` + `PERMITTED_PDF_FINGERPRINT_KEYS`,
+  `FORBIDDEN_LEDGER_SUBSTRINGS` (23 entries — shared probe across
+  every test in this surface so the allowlist-rejection guard and
+  the JSON-grep guard can't drift). `normaliseDocSummarySource`
+  validates `docKind` / `language` against frozen allowlists
+  mirrored from the FE, caps counts (titleLength ≤ 240, tldrLength
+  ≤ 240, bulletCount ≤ 16, modelPackId ≤ 128), clamps confidence
+  to [0,1], regex-then-`Date.parse` validates `generatedAt` as a
+  calendar-valid ISO-8601 instant, drops ms precision (mirrors
+  Phase 13.2 MF-3 typing-speed defence).
+  `buildDocSummarisedLedgerEvent` emits ONLY counts + enums +
+  pointers — strings (title / TLDR / bullets / extracted text /
+  PDF bytes) live encrypted in the MemoryRecord bundle and never
+  reach the audit ledger. `at` field is also ms-stripped so the
+  typing-speed defence isn't cosmetic. EXTENDED `src/phase0/
+  api.mjs`: POST /api/memory-records branches on
+  `source.type === 'doc_summary_v1'`, normalises, persists then
+  emits `doc.summarised` with `at: record.createdAt`; 400
+  `invalid_doc_summary_source` on malformed envelopes; other
+  source.type values flow unchanged (citizen notes still work).
+  NEW `frontend/src/lib/doc-summary-source.ts` (~110 lines) —
+  `buildDocSummarySource({ parsed, modelPackId, pdf, now })` and
+  `renderSummaryPlaintext(parsed)` (stable
+  TITLE/TLDR/BULLET_N/LANGUAGE/CONFIDENCE/RISK_FLAG/DOC_KIND line
+  shape). EXTENDED `DocSummariserPanel.tsx` — Save summary button
+  in the SummaryChipBlock area, wired to `useCreateMemoryRecord`
+  with `sensitivity: 'sensitive'`, `tags: ['document_summary']`,
+  `source: <envelope>`. PDF fingerprint captured at pick-time
+  (`pages`, `truncatedReason`) flows onto the envelope if present;
+  manual text edits invalidate it and surface a notice.
+  **Adversarial review** (3 lenses: privacy + UX + edge-cases +
+  triage synthesiser): **3 MUST_FIX + 6 SHOULD_FIX + 7 defer**;
+  all 9 applied in-phase. MF-1 strip ms from `at` (was
+  cosmetic typing-speed defence). MF-2 `savingRef` synchronous
+  in-flight guard + textarea onChange when transitioning out of
+  `saved` also clears `lastResult` + calls `reset()` so the Save
+  badge can't linger over text that no longer matches the saved
+  record. MF-3 cleartext label is `${DOC_KIND_LABEL[kind]} ·
+  ${YYYY-MM-DD}` (meta only — not the parsed document title
+  which can carry PII like consumer numbers); badge copy tightened
+  to "body readable from /citizen/notes under your active
+  memory.read consent". SF-1 FE↔BE convergence test now reads
+  `frontend/src/lib/doc-summariser.ts` at runtime and regex-extracts
+  the DocKind / DocLanguage unions, asserting set-equality (was
+  literal-array sanity check that drift could pass silently).
+  SF-2 `FORBIDDEN_LEDGER_SUBSTRINGS` constant + 23-substring list
+  (includes synonyms: caption / excerpt / plain / summary /
+  content / transcript / firstPageText / headline / paragraph).
+  SF-3 `Date.parse` round-trip rejects calendar-invalid instants
+  like `2026-13-99T99:99:99Z`. SF-4 textarea onChange surfaces
+  "Edited after PDF pick — this summary will be saved as pasted
+  text" instead of silently dropping the prior notice. SF-5
+  `SAVE_ERROR_COPY` map keyed on `err.code`; raw `err.message`
+  goes to `console.warn` in DEV only. SF-6 drop docKind from
+  MemoryRecord `tags` array — it already lives on the
+  doc.summarised event (a separate consent-gated surface).
+  **§15 bindings**: pointer-not-payload (recordId on the event,
+  encrypted body in the record); strict allowlist > denylist
+  (envelope keys + nested pdfFingerprint keys); count-only meta;
+  ms-dropped timestamps both places; no PII to ledger.
+  **API_INTEGRATIONS.md impact**: ZERO new external API; the
+  doc_summary_v1 source.type extends the existing
+  POST /api/memory-records boundary. Last-updated header bumped.
+  **FE-BE parity**: BE delta = normaliser + branch in api.mjs
+  + new ledger event type; FE delta = lib + panel extension.
+  Tests: vitest 382 → **388** (+6 doc-summary-source); Node
+  1233 → **1256** (+23 doc-summary-envelope). tsc clean.
 - **Phase 13.0.1 — SHIPPED 2026-06-02 (ADR 0154).** PDF
   upload + on-device text extraction for SLM-E doc summariser.
   Closes the Phase 13.0 ADR 0149 deferral. NEW

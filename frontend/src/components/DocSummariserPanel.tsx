@@ -24,6 +24,28 @@ import {
   MAX_PDF_BYTES,
   type PdfExtractErrorCode
 } from '@/lib/pdf-text-extract';
+import { useCreateMemoryRecord } from '@/lib/hooks';
+import type { ApiError } from '@/lib/api';
+import {
+  buildDocSummarySource,
+  renderSummaryPlaintext,
+  type DocPdfFingerprintInput
+} from '@/lib/doc-summary-source';
+
+// Phase 13.0.2 adversarial fix SF-5 — citizen-safe copy keyed on
+// BE error code. The raw err.message is reserved for the DEV
+// console.warn below; the user never sees verbatim server errors
+// (which the BE today returns scrubbed but the FE shouldn't trust
+// going forward). 'invalid_doc_summary_source' is the only known
+// 400 path; everything else collapses to a generic line.
+const SAVE_ERROR_COPY: Record<string, string> = {
+  invalid_doc_summary_source:
+    "Couldn't save — the summary shape this device produced didn't pass the on-device guard. Try Summarise again.",
+  unauthenticated: 'Sign in again to save summaries to your notes.',
+  forbidden: 'This identity isn’t allowed to save notes here.'
+};
+const SAVE_ERROR_FALLBACK = "Couldn't save just now. Try again in a moment.";
+const DOC_KIND_DATE_LEN = 10; // YYYY-MM-DD slice of generatedAt
 
 interface DocSummariserPanelProps {
   identityId: string | null | undefined;
@@ -64,8 +86,28 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
   // a slower extract overwrite a faster one. We bump on entry and
   // gate every state-write on still being the latest generation.
   const pickGenRef = useRef(0);
+  // Phase 13.0.2 adversarial fix MF-2 — synchronous in-flight guard
+  // for handleSaveSummary. The disabled-button check is the happy
+  // path defence but doesn't survive a double-click that lands in
+  // the same React batch (both clicks see saveState.kind ==='idle'
+  // and both fire the mutation). The ref flips before any state
+  // write so the second call short-circuits even within a single
+  // React tick.
+  const savingRef = useRef(false);
 
-  const { status, summarise, reset, partialText, hasSlm } = useSlmDocSummariser({ identityId });
+  const { status, summarise, reset, partialText, hasSlm, modelPackId } = useSlmDocSummariser({ identityId });
+  // Phase 13.0.2 — Save summary state. `lastPdfFingerprint` is
+  // captured at PDF-pick time and lives across re-renders until a
+  // fresh paste or sample clears it. `saveState` drives the button
+  // copy + the post-save acknowledgement chip.
+  const [lastPdfFingerprint, setLastPdfFingerprint] = useState<DocPdfFingerprintInput | null>(null);
+  const [saveState, setSaveState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'saving' }
+    | { kind: 'saved'; recordId: string }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+  const createMemoryRecord = useCreateMemoryRecord();
 
   const overCap = docText.length > DOC_INPUT_CHAR_CAP;
   const charCounter = `${docText.length.toLocaleString()} / ${DOC_INPUT_CHAR_CAP.toLocaleString()} chars`;
@@ -115,6 +157,7 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     // BEFORE awaiting so the new generation's streamed <pre> is
     // the only visible output during summarisation.
     setLastResult(null);
+    setSaveState({ kind: 'idle' });
     const out = await summarise(docKind, docText);
     if (out) setLastResult(out);
   }
@@ -124,6 +167,8 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     setLastResult(null);
     setPdfError(null);
     setPdfNotice(null);
+    setLastPdfFingerprint(null);
+    setSaveState({ kind: 'idle' });
     reset();
   }
 
@@ -132,7 +177,68 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     setLastResult(null);
     setPdfError(null);
     setPdfNotice(null);
+    setLastPdfFingerprint(null);
+    setSaveState({ kind: 'idle' });
     reset();
+  }
+
+  function handleSaveSummary() {
+    if (!identityId || !lastResult?.parsed || !modelPackId) return;
+    // Phase 13.0.2 MF-2 — synchronous in-flight guard. The button's
+    // `disabled` clause catches re-renders but a same-tick double
+    // click can still arrive here twice; the ref flips before any
+    // state write so the second call short-circuits.
+    if (savingRef.current) return;
+    if (saveState.kind === 'saving') return;
+    savingRef.current = true;
+    setSaveState({ kind: 'saving' });
+    const source = buildDocSummarySource({
+      parsed: lastResult.parsed,
+      modelPackId,
+      pdf: lastPdfFingerprint,
+      now: new Date().toISOString()
+    });
+    // Phase 13.0.2 MF-3 — citizen-readable cleartext label MUST NOT
+    // be the parsed document title (titles can carry PII such as
+    // consumer numbers or counterparty names). The label that
+    // surfaces in the unencrypted MemoryRecord row is `<kind> ·
+    // <yyyy-mm-dd>` — purely meta. The title itself lives in the
+    // encrypted body and only renders after a memory.read consent.
+    const cleartextLabel = `${DOC_KIND_LABEL[source.docKind]} · ${source.generatedAt.slice(0, DOC_KIND_DATE_LEN)}`;
+    createMemoryRecord.mutate(
+      {
+        identityId,
+        text: renderSummaryPlaintext(lastResult.parsed),
+        label: cleartextLabel,
+        sensitivity: 'sensitive',
+        // Phase 13.0.2 SF-6 — drop docKind from the unencrypted tag
+        // set. docKind already lives on the doc.summarised ledger
+        // event (a separate consent-gated surface); duplicating it
+        // here would create a second cleartext channel that leaks
+        // even when the citizen revokes memory.read.
+        tags: ['document_summary'],
+        source: source as unknown as Record<string, unknown>
+      },
+      {
+        onSuccess: (data) => {
+          savingRef.current = false;
+          setSaveState({ kind: 'saved', recordId: data.memory.recordId });
+        },
+        onError: (err: Error) => {
+          savingRef.current = false;
+          // Phase 13.0.2 SF-5 — never echo raw server text. Keyed
+          // copy map drives the user-visible message; the verbatim
+          // err.message goes to the dev console only.
+          const code = (err as ApiError).code;
+          const copy = (code && SAVE_ERROR_COPY[code]) || SAVE_ERROR_FALLBACK;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[doc-summariser] save failed', { code, message: err.message });
+          }
+          setSaveState({ kind: 'error', message: copy });
+        }
+      }
+    );
   }
 
   async function handlePickPdf(event: React.ChangeEvent<HTMLInputElement>) {
@@ -154,8 +260,15 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
       // image-only / etc.) preserves whatever the citizen already
       // had on screen.
       setLastResult(null);
+      setSaveState({ kind: 'idle' });
       reset();
       setDocText(result.text);
+      // Phase 13.0.2 — capture the count-only PDF provenance so a
+      // later Save attaches it to the doc-summary source envelope.
+      setLastPdfFingerprint({
+        pages: result.pageCount,
+        truncatedReason: result.truncatedReason
+      });
       // Phase 13.0.1 SF-5 — render the notice by the precise
       // truncation reason rather than a single contradictory
       // "Read N of N pages — truncated".
@@ -240,7 +353,33 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
       )}
       <textarea
         value={docText}
-        onChange={(e) => setDocText(e.target.value)}
+        onChange={(e) => {
+          setDocText(e.target.value);
+          // Phase 13.0.2 — manual edits invalidate the PDF
+          // provenance so a later Save can't claim the text came
+          // from the prior PDF pick.
+          // SF-4 — keep the citizen informed instead of silently
+          // dropping the pdfNotice. A visible warning is the right
+          // posture because the edit changes the meaning of the
+          // upcoming Save (the saved bytes are now the typed text,
+          // not the extracted PDF text).
+          if (lastPdfFingerprint) {
+            setLastPdfFingerprint(null);
+            setPdfNotice(
+              'Edited after PDF pick — this summary will be saved as pasted text, not as the PDF you picked.'
+            );
+          }
+          // Phase 13.0.2 MF-2 — when transitioning OUT of 'saved'
+          // we also nuke the prior chip block + reset the SLM hook
+          // so the Save button + Badge can't linger over text that
+          // no longer matches the saved record. The honest UI is:
+          // edit → chip gone → fresh Summarise → fresh Save.
+          if (saveState.kind === 'saved') {
+            setSaveState({ kind: 'idle' });
+            setLastResult(null);
+            reset();
+          }
+        }}
         rows={8}
         placeholder="Paste your electricity bill / Form 16 / T&Cs / insurance policy / lender contract here."
         className="block w-full rounded-sm border border-border bg-white p-2 text-body focus:border-primary focus:outline-none"
@@ -318,10 +457,46 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
 
       {/* Structured chip block — visible after parser succeeds. */}
       {isReady && lastResult?.parsed && (
-        <SummaryChipBlock
-          parsed={lastResult.parsed}
-          generationMs={lastResult.generationMs}
-        />
+        <>
+          <SummaryChipBlock
+            parsed={lastResult.parsed}
+            generationMs={lastResult.generationMs}
+          />
+          {/* Phase 13.0.2 — Save summary to a consent-gated
+              MemoryRecord. The body is encrypted at rest; the
+              audit ledger gets a pointer-not-payload
+              doc.summarised event with count-only meta. */}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Action
+              variant="secondary"
+              onClick={handleSaveSummary}
+              disabled={
+                !identityId ||
+                !modelPackId ||
+                saveState.kind === 'saving' ||
+                saveState.kind === 'saved'
+              }
+            >
+              {saveState.kind === 'saving'
+                ? 'Encrypting + saving…'
+                : saveState.kind === 'saved'
+                  ? 'Saved'
+                  : 'Save summary to my notes'}
+            </Action>
+            {saveState.kind === 'saved' && (
+              <Badge variant="trust">
+                {/* Phase 13.0.2 MF-3 — tighter copy. The cleartext
+                    label IS visible in the notes list (it carries
+                    <kind> · <date> only, no body); only the body
+                    needs an active memory.read consent to surface. */}
+                Saved as a sensitive note · body readable from /citizen/notes under your active memory.read consent.
+              </Badge>
+            )}
+            {saveState.kind === 'error' && (
+              <span className="text-caption text-error">{saveState.message}</span>
+            )}
+          </div>
+        </>
       )}
 
       {/* Honest framing: SLM returned a completion but parser

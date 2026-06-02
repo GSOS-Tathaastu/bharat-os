@@ -152,6 +152,35 @@ Implemented pieces:
 
 ---
 
+## 💾 2026-06-02 — Phase 13.0.2 shipped: SLM-E document summary persistence (MemoryRecord + audit ledger)
+
+Closes the Phase 13.0 ADR 0149 "persistence is the 13.0.x roll-up"
+deferral. Citizens can now Save the on-device summary to a
+consent-gated, encrypted MemoryRecord; an audit-ledger
+`doc.summarised` event carries the pointer + count-only meta
+(docKind / titleLength / bulletCount / confidence / riskFlag /
+language / pdfFingerprint) — NEVER the title / TLDR / bullet
+strings, which live encrypted in the bundle and only render under
+an active memory.read consent.
+
+First BE delta in the SLM-E arc. The new
+`src/phase0/doc-summary-envelope.mjs` mirrors the Phase 13.2
+piiRedaction posture: strict allowlist on top-level envelope keys +
+nested pdfFingerprint keys, ms-stripped ISO-8601 timestamps,
+calendar-valid `Date.parse` round-trip on `generatedAt`, single
+`FORBIDDEN_LEDGER_SUBSTRINGS` source-of-truth shared between the
+allowlist-rejection probe AND the JSON-grep guard.
+
+Adversarial review caught 3 must-fix + 6 should-fix — all applied
+before commit. Highlights: synchronous `savingRef` guard against
+same-tick double-clicks; cleartext label is `${kind} ·
+${YYYY-MM-DD}` (meta only, no parsed title in cleartext); textarea
+edits clear the saved chip + warn "Edited after PDF pick — saved
+as pasted text"; error-code-keyed copy map keeps raw `err.message`
+in the DEV console only. ADR 0155.
+
+Tests: vitest 388 + Node 1256 + tsc clean. Zero new external API.
+
 ## 📎 2026-06-02 — Phase 13.0.1 shipped: PDF upload + on-device text extraction (SLM-E demo cut completes)
 
 Closes the Phase 13.0 ADR 0149 deferral. Citizens can now PICK
