@@ -1287,6 +1287,20 @@ picked "minimum onboarding load, maximum coverage"):
   browse + purchase flow (debit sponsor escrow, credit citizen
   mesh balance, emit citizen_data_offer.purchased; per-data-
   point delivery signature).
+
+#### Phase 13.6 — Public marketing pages ✅ SHIPPED 2026-06-02 (ADR 0161)
+
+The investor / partner-facing website at 4 public routes
+alongside the existing onboarding at `/`. Story-first landing
+for investors; sign-up at `/` for demo users. Every factual
+claim backed by an ADR or memory binding.
+
+- [x] `/about`, `/how-it-works`, `/for-citizens`, `/for-sponsors`
+- [x] Shared `MarketingLayout` (header + nav + footer)
+- [ ] /pricing once legal review per
+  `memory/citizen-data-as-product-revenue.md` clears.
+- [ ] /team + /contact once team is hired.
+- [ ] SEO meta tags + landing video.
 - [ ] **Compute network mesh workload.** Add `compute_serving`
   to `MESH_WORKLOAD_TYPES`. Worker phones serve Phi-3-mini
   inferences to OTHER citizens for fiat-credit. See

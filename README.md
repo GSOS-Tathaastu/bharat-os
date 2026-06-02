@@ -152,6 +152,34 @@ Implemented pieces:
 
 ---
 
+## 🌐 2026-06-02 — Phase 13.6 shipped: Public marketing pages (/about, /how-it-works, /for-citizens, /for-sponsors)
+
+The investor / partner-facing website now lives at 4 public routes
+alongside the existing onboarding at `/`. Investors landing on a
+Bharat OS link see the story (vision, substrate, persona pitch);
+demo users continue to land at `/` for sign-up. Each marketing
+page carries a "Try the demo →" CTA back to `/`.
+
+- `/about` — vision, founder thesis, market sizing (700M + 700M),
+  3 pillars (on-device / citizen-owned / economically aligned)
+- `/how-it-works` — the 6 substrates (each with Shipped badge),
+  5 §15 privacy invariants, 3-step distribution path (each
+  marked Planned)
+- `/for-citizens` — Use / Earn / Provide trio, 5 data point
+  kinds, Sahayak path for the 700M without smartphones
+- `/for-sponsors` — 3 sponsor surfaces (labeling marketplace
+  + federated rounds + citizen data marketplace), bearer-token
+  escrow + Ed25519 signed audit posture, DPDP + RBI compliance
+
+Adversarial review caught 2 must-fix + 2 should-fix, all applied:
+"no PII required" was misleading (phone is PII) → softened;
+"open-source substrate" claim removed (no LICENSE file at root
+yet); aria-label on nav; Planned badges on the 3 distribution
+cards. Every concrete factual claim is backed by an ADR or memory
+binding (table in ADR 0161).
+
+Tests: 500 vitest + Node 1315 unchanged + tsc clean. ADR 0161.
+
 ## 💰 2026-06-02 — Phase 13.5 shipped: Citizen data offer substrate (new revenue line for citizens)
 
 Opens the 13.x revenue-line track per the

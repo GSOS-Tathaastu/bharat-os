@@ -2201,6 +2201,56 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.6 — SHIPPED 2026-06-02 (ADR 0161).** Public
+  marketing pages — the investor / partner-facing website that
+  lives alongside the existing citizen onboarding at `/`. 4
+  new public routes (no ProtectedSurface wrapper): `/about`,
+  `/how-it-works`, `/for-citizens`, `/for-sponsors`. NEW
+  `frontend/src/components/MarketingLayout.tsx` — shared
+  header (Bharat OS logo + 4-link nav + "Try the demo" CTA) +
+  semantic `<main>` + footer (per-pillar columns +
+  compliance posture + cross-link to demo). NEW
+  `frontend/src/routes/AboutPage.tsx` — what Bharat OS is,
+  founder thesis ("AI built somewhere else, for someone else"),
+  market sizing (700M smartphone users + 700M without), 3
+  pillars (on-device / citizen-owned / economically aligned),
+  what-it-is vs what-it-is-not lists, demo CTA. NEW
+  `frontend/src/routes/HowItWorksPage.tsx` — 6 substrate
+  cards (on-device SLM, summariser/redactor/personalisation,
+  skill agents, citizen data marketplace, worker marketplace,
+  provider marketplace) each with `Shipped` badge; 5 §15
+  privacy invariants (pointer-not-payload, strict allowlist,
+  DPDP §12 cascade, signed consent, allowlisted launchers);
+  3-step distribution path (App → AOSP → full ROM) each with
+  `Planned` badge per SF-2 below. NEW
+  `frontend/src/routes/ForCitizensPage.tsx` — Use/Earn/Provide
+  trio per [[onboarding-hero-earn-use]]; 5 data point kinds
+  per [[citizen-data-as-product-revenue]]; Sahayak section per
+  [[sahayak-no-smartphone-onboarding]]; privacy guarantees
+  list. NEW `frontend/src/routes/ForSponsorsPage.tsx` — 3
+  sponsor surfaces (labeling marketplace / federated rounds /
+  citizen data marketplace) with shipped badges; bearer-token
+  + escrow + QC + signed-export posture; DPDP Act 2023 + RBI
+  / NPCI compliance section. EXTENDED `App.tsx` — 4 new
+  public routes registered above the catch-all.
+  **Adversarial review** (3 lenses: factual accuracy /
+  accessibility / cross-links): **2 MUST_FIX + 2 SHOULD_FIX**.
+  MF-1 "Sign up takes 30 seconds (phone OTP, no PII required)"
+  was misleading — phone is PII under DPDP; rewritten to
+  "Your number is the only personal field we collect at this
+  stage — everything else is opt-in per surface and gated by
+  signed consent." MF-2 "open-source substrate" claims
+  removed (no LICENSE file at repo root yet); replaced with
+  "strict-allowlist boundary normalisers" in the footer
+  posture. SF-1 `aria-label="Marketing site navigation"` on
+  the nav. SF-2 `Planned` warning badges on the 3 distribution
+  cards so investors don't read them as already-shipped.
+  **§15 bindings**: pages don't access any citizen data (public
+  routes); no fetch calls; copy adversarially-reviewed against
+  shipped reality (every factual claim backed by an ADR or
+  memory binding). **FE-BE parity**: BE delta = NONE (FE-only
+  marketing). Tests: vitest 490 → **500** (+10 render smoke
+  tests). Node 1315 unchanged. tsc clean.
 - **Phase 13.5 — SHIPPED 2026-06-02 (ADR 0160).** Opens the
   13.x revenue-line track per [[citizen-data-as-product-revenue]]:
   citizens publish per-data-point sale offers to Bharat OS

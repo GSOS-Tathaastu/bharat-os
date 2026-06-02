@@ -16,6 +16,11 @@ import { KycLevel1Page } from '@/routes/onboarding/KycLevel1Page';
 import { SettingsPage } from '@/routes/Settings';
 import { SponsorSurface } from '@/routes/sponsor/SponsorSurface';
 import { TopBar } from '@/components/TopBar';
+// Phase 13.6 — public marketing pages (no auth, no protected surface)
+import { AboutPage } from '@/routes/AboutPage';
+import { HowItWorksPage } from '@/routes/HowItWorksPage';
+import { ForCitizensPage } from '@/routes/ForCitizensPage';
+import { ForSponsorsPage } from '@/routes/ForSponsorsPage';
 
 // Phase 12.1b.2 — Mount the offline-queue drainer once at the
 // session level. Drainer is a no-op when there's no active
@@ -56,6 +61,11 @@ export default function App() {
       <GlobalQueueDrainer />
       <Routes>
         <Route path="/" element={<OnboardingPage />} />
+        {/* Phase 13.6 — public marketing pages. No auth required. */}
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/how-it-works" element={<HowItWorksPage />} />
+        <Route path="/for-citizens" element={<ForCitizensPage />} />
+        <Route path="/for-sponsors" element={<ForSponsorsPage />} />
         <Route
           path="/worker/*"
           element={
