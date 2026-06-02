@@ -152,6 +152,53 @@ Implemented pieces:
 
 ---
 
+## 📎 2026-06-02 — Phase 13.0.1 shipped: PDF upload + on-device text extraction (SLM-E demo cut completes)
+
+Closes the Phase 13.0 ADR 0149 deferral. Citizens can now PICK
+a PDF instead of pasting — extraction runs entirely in this
+browser via the locally-bundled pdfjs worker; the PDF blob
+never leaves the device. DevTools Network tab stays empty
+during pick + extract + summarise.
+
+- **ADR 0154** — NEW pure-FE shared CORE substrate at
+  `frontend/src/lib/pdf-text-extract.ts`. `extractPdfText(file,
+  opts?)` returns a typed envelope. Five typed error codes
+  (`unsupported_mime / too_large / encrypted / corrupt /
+  no_text_layer`) map to citizen-friendly copy in the panel —
+  the raw pdfjs error string never reaches the DOM.
+- **npm dep**: `pdfjs-dist@^6.0.227`, founder-approved. Worker
+  bundled locally via Vite `?url` import (no CDN fetch).
+  pdfjs's `cMapUrl / standardFontDataUrl / wasmUrl` are never
+  set so BinaryDataFactory throws rather than silently
+  fetching.
+- **DocSummariserPanel** extended with a file input next to
+  the existing textarea. Image-only / encrypted / corrupt
+  PDFs surface specific citizen-facing messages instead of
+  silent empty pastes.
+- **Adversarial review** (3 lenses): **1 MUST_FIX + 6
+  SHOULD_FIX + 17 defer**; all 7 must+should fixed in-phase.
+  Verdict ship_with_fixes. **MF-1 was critical** — Rules-of-
+  Hooks crash on the install-pack demo flow, fixed by moving
+  the PDF state hooks above the existing conditional early
+  returns. SF-1 race-safety, SF-2 per-page failure tracking
+  (all-pages-fail → `corrupt`, not the misleading
+  `no_text_layer`), SF-3 failed pick preserves prior summary,
+  SF-4 `MAX_EXTRACT_CHARS` aligned to SLM-E
+  `DOC_INPUT_CHAR_CAP`, SF-5 `truncatedReason` field +
+  branched panel notice, SF-6 `pdfBusy` in disable clauses.
+- **Pure FE; zero BE changes** — by design AND as the pitch
+  beat. A `/api/extract-pdf/*` endpoint would falsify the
+  binding. Future cross-device PDF intake (if ever needed)
+  must round-trip through the existing vault-key + memory-
+  records substrate.
+- **API_INTEGRATIONS.md impact**: zero new external API.
+  `pdfjs-dist` is a build/runtime FE dep, not an external
+  service — no env var, no auth flow, no partner credentials.
+- **Tests**: vitest 356 → **382** (+26 PDF cases). Node 1233
+  unchanged. tsc clean.
+
+---
+
 ## 🎛 2026-06-02 — Phase 13.3 shipped: SLM-G on-device personalization (preferences never leave the device)
 
 Third of four SLM USP features. Citizens flip a few enum knobs
@@ -559,12 +606,14 @@ smartphones is captured as a binding.
   unchanged. tsc clean. Build green. Bundle unchanged.
 
 **Next: Phase 13.4 SLM-H** (skill agents for Indian tasks —
-electricity bill / consumer complaint / PM-KISAN scheme) OR
-**Phase 13.3.x** (SLM-F substrate cleanups: standalone
-piiRedaction-only annotation path + per-identity persisted
-opt-in + offline-queue replay redaction) OR **Phase 13.0.1**
-(PDF.js upload — needs npm-dep approval) OR **Phase 14
-Sahayak**. Direction flexible.
+electricity bill / consumer complaint / PM-KISAN scheme;
+closes the 4/4 SLM USP arc) OR **Phase 13.3.x** (SLM-F
+substrate cleanups: standalone piiRedaction-only annotation
+path + per-identity persisted opt-in + offline-queue replay
+redaction) OR **Phase 13.0.2** (PDF hardening pass — explicit
+pdfjs defensive flags + `pdf.destroy()` cleanup + the 15
+deferred SHOULD_FIX items) OR **Phase 14 Sahayak**. Direction
+flexible.
 
 ---
 

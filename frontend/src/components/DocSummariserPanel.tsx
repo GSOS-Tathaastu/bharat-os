@@ -7,7 +7,7 @@
 // Renders nothing when the citizen has no SLM installed (honest
 // empty state binding — no upsell, no greyed-out CTA).
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Action, Badge, Card } from '@/components/ui';
 import {
   DOC_INPUT_CHAR_CAP,
@@ -18,6 +18,12 @@ import {
   type ParsedDocSummary
 } from '@/lib/doc-summariser';
 import { useSlmDocSummariser } from '@/lib/use-slm-doc-summariser';
+import {
+  extractPdfText,
+  classifyPdfError,
+  MAX_PDF_BYTES,
+  type PdfExtractErrorCode
+} from '@/lib/pdf-text-extract';
 
 interface DocSummariserPanelProps {
   identityId: string | null | undefined;
@@ -43,6 +49,21 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
     rawCompletion: string;
     generationMs: number;
   } | null>(null);
+  // Phase 13.0.1 adversarial fix MF-1 — PDF state hooks MUST be
+  // declared BEFORE any conditional early return below, otherwise a
+  // mount where `hasSlm` flips false→true (the literal install-pack
+  // demo flow) triggers React 19's "Rendered more hooks than during
+  // the previous render" crash. Cost of holding these refs while
+  // unavailable is zero.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<PdfExtractErrorCode | null>(null);
+  const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  // Phase 13.0.1 adversarial fix SF-1 — generation counter for
+  // race-safe concurrent picks. Two rapid picks would otherwise see
+  // a slower extract overwrite a faster one. We bump on entry and
+  // gate every state-write on still being the latest generation.
+  const pickGenRef = useRef(0);
 
   const { status, summarise, reset, partialText, hasSlm } = useSlmDocSummariser({ identityId });
 
@@ -101,14 +122,59 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
   function handleTrySample() {
     setDocText(SAMPLE_FIXTURES[docKind]);
     setLastResult(null);
+    setPdfError(null);
+    setPdfNotice(null);
     reset();
   }
 
   function handleClear() {
     setDocText('');
     setLastResult(null);
+    setPdfError(null);
+    setPdfNotice(null);
     reset();
   }
+
+  async function handlePickPdf(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    // Always clear the input so picking the SAME file twice re-fires.
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+    // Phase 13.0.1 SF-1 — bump the pick-generation; any earlier
+    // in-flight extract's writes are now stale and will no-op.
+    const myGen = ++pickGenRef.current;
+    setPdfBusy(true);
+    setPdfError(null);
+    setPdfNotice(null);
+    try {
+      const result = await extractPdfText(file);
+      if (myGen !== pickGenRef.current) return; // stale pick
+      // Phase 13.0.1 SF-3 — only nuke the prior summary AFTER a
+      // successful extract. A failed pick (encrypted / corrupt /
+      // image-only / etc.) preserves whatever the citizen already
+      // had on screen.
+      setLastResult(null);
+      reset();
+      setDocText(result.text);
+      // Phase 13.0.1 SF-5 — render the notice by the precise
+      // truncation reason rather than a single contradictory
+      // "Read N of N pages — truncated".
+      setPdfNotice(buildExtractNotice(result));
+    } catch (err) {
+      if (myGen !== pickGenRef.current) return; // stale pick
+      setPdfError(classifyPdfError(err));
+    } finally {
+      if (myGen === pickGenRef.current) setPdfBusy(false);
+    }
+  }
+
+  const PDF_ERROR_MESSAGE: Record<PdfExtractErrorCode, string> = {
+    unsupported_mime: 'That file is not a PDF. Pick a .pdf to extract its text on this device.',
+    too_large: `That PDF is over the ${Math.round(MAX_PDF_BYTES / (1024 * 1024))} MB limit. Paste the text instead.`,
+    encrypted: 'This PDF is password-protected. Open it in your PDF viewer, copy the text, and paste here.',
+    corrupt: "Couldn't read this PDF. It may be damaged. Try opening it in your PDF viewer first.",
+    no_text_layer: 'This PDF has no readable text layer — likely a scanned image. Paste the text instead.'
+  };
 
   return (
     <Card
@@ -147,8 +213,31 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
       </div>
 
       <label className="mb-1 block text-caption font-semibold uppercase tracking-wide text-text-muted">
-        Paste the document text
+        Paste or pick a PDF
       </label>
+      {/* Phase 13.0.1 — PDF picker. Extraction runs entirely
+          in-browser via pdfjs; the blob never leaves this device. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={handlePickPdf}
+          disabled={pdfBusy || isBusy}
+          className="block text-caption text-text-muted file:mr-2 file:rounded-sm file:border-0 file:bg-trust-50 file:px-3 file:py-1 file:text-caption file:font-semibold file:text-trust-700 hover:file:bg-trust-100 disabled:opacity-50"
+        />
+        {pdfBusy && (
+          <span className="text-caption text-text-muted">Reading PDF on this device…</span>
+        )}
+        {!pdfBusy && pdfNotice && !pdfError && (
+          <span className="text-caption text-trust-700">{pdfNotice}</span>
+        )}
+      </div>
+      {pdfError && (
+        <p className="mb-2 rounded-sm border border-orange-100 bg-orange-50 p-2 text-caption text-orange-700">
+          {PDF_ERROR_MESSAGE[pdfError]}
+        </p>
+      )}
       <textarea
         value={docText}
         onChange={(e) => setDocText(e.target.value)}
@@ -170,7 +259,7 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
             variant="ghost"
             size="sm"
             onClick={handleTrySample}
-            disabled={isBusy}
+            disabled={isBusy || pdfBusy}
           >
             Try sample
           </Action>
@@ -179,7 +268,7 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
               variant="ghost"
               size="sm"
               onClick={handleClear}
-              disabled={isBusy}
+              disabled={isBusy || pdfBusy}
             >
               Clear
             </Action>
@@ -191,7 +280,10 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
         <Action
           variant="trust"
           onClick={handleSummarise}
-          disabled={isBusy || isCoolingDown || docText.trim().length === 0}
+          /* Phase 13.0.1 SF-6 — gate Summarise on pdfBusy so the
+             citizen can't fire a summary against pre-pick textarea
+             content mid-extract. */
+          disabled={isBusy || isCoolingDown || pdfBusy || docText.trim().length === 0}
         >
           {isBusy ? 'Working…' : 'Summarise on my phone'}
         </Action>
@@ -252,13 +344,16 @@ export function DocSummariserPanel({ identityId }: DocSummariserPanelProps) {
           How this works
         </summary>
         <p className="mt-2">
-          When you tap Summarise, the document text is passed to the SLM
-          pack you installed in this browser via the Phase 9.0c
+          You can either paste the document text or pick a PDF —
+          extraction runs in this browser via pdfjs and the PDF blob is
+          never uploaded. When you tap Summarise the text is passed to
+          the SLM pack you installed in this browser via the Phase 9.0c
           llama.cpp-WASM runtime. Generation streams locally, the raw
           completion is parsed into TITLE / TLDR / bullets / language /
           confidence / risk-flag, and the structured output renders here.
-          Nothing about the document or the summary touches the network —
-          open DevTools → Network and try it.
+          Nothing about the document or the summary touches the network
+          — open DevTools → Network and try it. Image-only / scanned PDFs
+          have no text layer to extract; paste them instead.
         </p>
       </details>
     </Card>
@@ -297,4 +392,27 @@ function SummaryChipBlock({ parsed, generationMs }: SummaryChipBlockProps) {
       )}
     </div>
   );
+}
+
+// Phase 13.0.1 SF-5 — branch the citizen-facing notice by the
+// precise truncation reason so a single-page char-clamp doesn't say
+// "Read 1 of 1 page — truncated" (contradictory) and a multi-page
+// page-clamp doesn't hide the page math.
+function buildExtractNotice(result: {
+  pagesExtracted: number;
+  pageCount: number;
+  truncatedReason: 'pages' | 'chars' | 'both' | null;
+}): string {
+  const { pagesExtracted, pageCount, truncatedReason } = result;
+  const plural = (n: number) => (n === 1 ? '' : 's');
+  if (truncatedReason === 'chars') {
+    return `Read all ${pageCount} page${plural(pageCount)} — kept the first ${DOC_INPUT_CHAR_CAP.toLocaleString()} characters to fit the on-device model.`;
+  }
+  if (truncatedReason === 'pages') {
+    return `Read ${pagesExtracted} of ${pageCount} pages on this device — the rest were skipped to fit the on-device model.`;
+  }
+  if (truncatedReason === 'both') {
+    return `Read ${pagesExtracted} of ${pageCount} pages and kept the first ${DOC_INPUT_CHAR_CAP.toLocaleString()} characters — truncated twice to fit the on-device model.`;
+  }
+  return `Read ${pagesExtracted} page${plural(pagesExtracted)} on this device.`;
 }

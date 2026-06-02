@@ -2201,6 +2201,52 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.0.1 — SHIPPED 2026-06-02 (ADR 0154).** PDF
+  upload + on-device text extraction for SLM-E doc summariser.
+  Closes the Phase 13.0 ADR 0149 deferral. NEW
+  `frontend/src/lib/pdf-text-extract.ts` (~250 lines) — pure-FE
+  shared CORE substrate composing pdfjs-dist (first user-
+  approved npm dep this arc). `extractPdfText(file, opts?)`
+  returns a typed envelope with `text` + `pageCount` +
+  `pagesExtracted` + `charsExtracted` + `truncated` +
+  `truncatedReason: 'pages'|'chars'|'both'|null`. Five typed
+  error codes (`unsupported_mime | too_large | encrypted |
+  corrupt | no_text_layer`) mapped to citizen-friendly copy in
+  the panel — citizen never sees raw pdfjs error strings.
+  Caps: 10 MB file, 32 pages, 6000 chars (aligned to SLM-E
+  `DOC_INPUT_CHAR_CAP` so the panel notice doesn't lie about
+  truncation). Worker bundled locally via Vite `?url` import;
+  no CDN fetch; `cMapUrl`/`standardFontDataUrl`/`wasmUrl`
+  never set so pdfjs's BinaryDataFactory throws rather than
+  silently fetching. NEW `vite-env.d.ts` declares the `?url`
+  module shape. DocSummariserPanel extended with a file picker
+  next to the existing textarea. **Adversarial review**
+  (3 lenses + triage): **1 MUST_FIX + 6 SHOULD_FIX + 17 defer**;
+  all 7 applied in-phase. MF-1 was critical — Rules-of-Hooks
+  crash: PDF state hooks were declared AFTER conditional early
+  returns (`if (!hasSlm) return null`), so the install-pack
+  demo flow would have triggered React 19's "Rendered more
+  hooks than during the previous render". Fixed by moving the
+  4 state hooks to the top of the component. SF-1 `pickGenRef`
+  race-safety on concurrent picks; SF-2 per-page error
+  tracking — all-pages-fail now throws `corrupt` rather than
+  the misleading `no_text_layer`; SF-3 failed pick preserves
+  prior summary on screen; SF-4 `MAX_EXTRACT_CHARS` aligned to
+  `DOC_INPUT_CHAR_CAP`; SF-5 new `truncatedReason` field with
+  branched panel notice (no more "Read 1 of 1 page —
+  truncated" contradictions); SF-6 `pdfBusy` in
+  Summarise/TrySample/Clear disable clauses. **§15 bindings**:
+  bytes-never-leave-device (worker bundled local; PDF blob
+  read once, transferred to worker, never persisted; zero
+  fetch in either new file); honest empty state (5 typed
+  error codes with specific copy); protocol version pinned;
+  pointer-not-payload (only extracted text crosses to the SLM
+  runtime). **API_INTEGRATIONS.md impact**: ZERO new external
+  API. `pdfjs-dist` is a build-time + runtime FE dep, not an
+  external service. Last-updated header bumped. **FE-BE
+  parity**: BE delta = none, by design — `/api/extract-pdf/*`
+  would falsify the binding. Tests: vitest 356 → **382** (+26
+  PDF cases); Node 1233 unchanged (FE-only). tsc clean.
 - **Phase 13.3 — SHIPPED 2026-06-02 (ADR 0153).** SLM-G
   on-device personalization. Third SLM USP feature. NEW
   `profile-store.ts` — Zustand+persist+localStorage with

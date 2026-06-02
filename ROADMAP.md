@@ -1223,9 +1223,11 @@ picked "minimum onboarding load, maximum coverage"):
 - [x] **E.** On-device document summariser (electricity bill /
   Form 16 / T&Cs / insurance / lender docs). **Phase 13.0 demo
   cut shipped 2026-06-01 (ADR 0149)** — paste-text-only, 6-pill
-  picker + streaming on /labs. Deferred to 13.0.1 (PDF.js
-  upload — needs npm-dep approval) and 13.0.2 (MemoryRecord
-  persistence + `doc.summarised` pointer-not-payload ledger).
+  picker + streaming on /labs. **Phase 13.0.1 shipped 2026-06-02
+  (ADR 0154)** — PDF upload + on-device text extraction via
+  pdfjs-dist (founder-approved npm dep). Deferred to 13.0.2
+  (MemoryRecord persistence + `doc.summarised` pointer-not-
+  payload ledger).
 - [x] **F.** On-device PII redactor on outgoing actions.
   **Phase 13.1 shipped 2026-06-01 (ADR 0151)** —
   regex-primary (11 Indian PII kinds: PAN/Aadhaar/mobile/
