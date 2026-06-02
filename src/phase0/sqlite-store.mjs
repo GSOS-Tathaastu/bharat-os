@@ -407,6 +407,13 @@ const SCHEMAS = `
     json TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS citizen_data_offers (
+    offer_id TEXT PRIMARY KEY,
+    publisher_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_citizen_data_offers_publisher ON citizen_data_offers(publisher_id);
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -1936,6 +1943,46 @@ export class SqliteStore {
     return this._listAll('skill_agents');
   }
 
+  // Phase 13.5 — citizen data offers. Per-identity (publisher_id);
+  // DPDP §12(3) cascade entry in deleteIdentityCascade below.
+  async saveCitizenDataOffer(offer) {
+    await this.init();
+    this._upsert(
+      'citizen_data_offers',
+      ['offer_id', 'publisher_id', 'json'],
+      [offer.offerId, offer.publisherId, JSON.stringify(offer)]
+    );
+    const eventType =
+      offer.status === 'revoked'
+        ? 'citizen_data_offer.revoked'
+        : offer.status === 'paused'
+          ? 'citizen_data_offer.paused'
+          : 'citizen_data_offer.published';
+    await this.appendLedger({
+      type: eventType,
+      offerId: offer.offerId,
+      publisherId: offer.publisherId,
+      dataPointKind: offer.dataPointKind,
+      pricePerSalePaise: offer.pricePerSalePaise,
+      maxSales: offer.maxSales,
+      salesCount: offer.salesCount,
+      purposeCount: offer.sponsorPurposeAllowlist.length
+    });
+    return offer;
+  }
+
+  async readCitizenDataOffer(offerId) {
+    await this.init();
+    return this._readOne('citizen_data_offers', 'offer_id', offerId);
+  }
+
+  async listCitizenDataOffers({ publisherId } = {}) {
+    await this.init();
+    const all = this._listAll('citizen_data_offers');
+    if (!publisherId) return all;
+    return all.filter((o) => o.publisherId === publisherId);
+  }
+
   // Phase 9.0b — per-identity SLM install records. Pointer-not-
   // payload (model bytes are client-side OPFS). DPDP §12(3)
   // cascade entry below in deleteIdentityCascade.
@@ -2825,6 +2872,10 @@ export class SqliteStore {
       sections.bookings = sweep('bookings', ['citizen_root_identity_id', 'provider_root_identity_id']);
       // Citizen-escrow envelope cascades on citizen erasure.
       sections.citizenEscrows = sweep('citizen_escrows', ['citizen_root_identity_id']);
+      // Phase 13.5 — citizen data offers cascade by publisher_id.
+      // Outstanding offers from a since-erased citizen become
+      // unhonourable per §15.
+      sections.citizenDataOffers = sweep('citizen_data_offers', ['publisher_id']);
       // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
       // per-role docs, dispute evidence) cascade by
       // root_identity_id. The bytes column goes with the row so

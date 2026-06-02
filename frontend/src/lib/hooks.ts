@@ -547,6 +547,100 @@ export function useSkillAgentsCatalog() {
   });
 }
 
+// --- Phase 13.5 Citizen data offers ---------------------------------
+
+import type {
+  CitizenDataOffer,
+  CitizenDataOffersResponse,
+  DataPointKind,
+  SponsorPurpose
+} from './citizen-data-offer';
+
+export function useCitizenDataOffers(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['citizen-data-offers', identityId],
+    queryFn: () =>
+      api<CitizenDataOffersResponse>(
+        `/api/identities/${encodeURIComponent(identityId!)}/data-offers`
+      ),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface CreateCitizenDataOfferInput {
+  identityId: string;
+  dataPointKind: DataPointKind;
+  pricePerSalePaise: number;
+  maxSales: number;
+  sponsorPurposeAllowlist: SponsorPurpose[];
+  expiresAt: string;
+}
+
+export function useCreateCitizenDataOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateCitizenDataOfferInput) =>
+      api<{ ok: boolean; offer: CitizenDataOffer }>(
+        `/api/identities/${encodeURIComponent(input.identityId)}/data-offers`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            dataPointKind: input.dataPointKind,
+            pricePerSalePaise: input.pricePerSalePaise,
+            maxSales: input.maxSales,
+            sponsorPurposeAllowlist: input.sponsorPurposeAllowlist,
+            expiresAt: input.expiresAt
+          })
+        }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['citizen-data-offers', identityId] });
+    }
+  });
+}
+
+export function useRevokeCitizenDataOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      offerId,
+      reason
+    }: {
+      identityId: string;
+      offerId: string;
+      reason?: string;
+    }) =>
+      api<{ ok: boolean; offer: CitizenDataOffer }>(
+        `/api/identities/${encodeURIComponent(identityId)}/data-offers/${encodeURIComponent(offerId)}`,
+        { method: 'DELETE', body: JSON.stringify({ reason }) }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['citizen-data-offers', identityId] });
+    }
+  });
+}
+
+export function usePauseCitizenDataOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      offerId
+    }: {
+      identityId: string;
+      offerId: string;
+    }) =>
+      api<{ ok: boolean; offer: CitizenDataOffer }>(
+        `/api/identities/${encodeURIComponent(identityId)}/data-offers/${encodeURIComponent(offerId)}/pause`,
+        { method: 'POST' }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['citizen-data-offers', identityId] });
+    }
+  });
+}
+
 export interface InstalledSlm {
   installId: string;
   identityId: string;

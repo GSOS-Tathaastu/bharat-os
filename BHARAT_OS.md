@@ -2201,6 +2201,75 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.5 — SHIPPED 2026-06-02 (ADR 0160).** Opens the
+  13.x revenue-line track per [[citizen-data-as-product-revenue]]:
+  citizens publish per-data-point sale offers to Bharat OS
+  sponsors via signed-consent, revocable, paid into mesh balance.
+  This phase ships the CITIZEN-SIDE substrate (publish + list +
+  pause + revoke); sponsor browse + purchase flow lands in 13.5.1.
+  NEW `src/phase1/citizen-data-offer.mjs` (~310 lines) — strict
+  allowlist validator + revoke/pause functions + ledger-event
+  builder. Protocol pinned
+  `CITIZEN_DATA_OFFER_PROTOCOL_VERSION = 'bos.phase13.citizen-data-offer.v1'`.
+  Three frozen enums: `DATA_POINT_KINDS` (5 kinds: intent_text /
+  doc_summary / pii_redaction / skill_run / mesh_contribution),
+  `SPONSOR_PURPOSES` (6 purposes: model_training /
+  model_evaluation / safety_benchmark / product_research /
+  academic_research / gov_audit), `CITIZEN_DATA_OFFER_STATUSES`
+  (active / paused / revoked / exhausted). Strict allowlist on
+  14 PERMITTED_CITIZEN_DATA_OFFER_KEYS + 10-entry
+  CITIZEN_DATA_OFFER_FORBIDDEN_SUBSTRINGS probe. Caps:
+  pricePerSalePaise ∈ [₹1, ₹100,000], maxSales ∈ [1, 1000],
+  TTL ∈ [24 hours, 365 days]. Content-derived offerId via sha256
+  → re-publishing identical envelope returns 409 (no spam).
+  `revokeCitizenDataOffer` requires publisher attribution
+  (defence-in-depth alongside the API handler gate).
+  `buildCitizenDataOfferLedgerEvent` emits POINTER + count-only
+  meta (offerId / publisherId / dataPointKind / price / maxSales
+  / salesCount / purposeCount / at); never the data points
+  themselves. `at` ms-stripped per Phase 13.0.2 MF-1 pattern.
+  EXTENDED `src/phase0/store.mjs` + `src/phase0/sqlite-store.mjs`
+  — saveCitizenDataOffer / readCitizenDataOffer /
+  listCitizenDataOffers({publisherId?}); new `citizen_data_offers`
+  table + `citizen-data-offers/` directory; emits
+  citizen_data_offer.{published|paused|revoked} ledger events.
+  DPDP §12(3) cascade entry added to both backends — offers wipe
+  on identity erase. EXTENDED `src/phase0/api.mjs` — 4 endpoints
+  under `/api/identities/:id/data-offers`: GET (list + supported
+  enums), POST (publish; 400 invalid_citizen_data_offer; 409
+  duplicate_offer), DELETE (publisher-gated revoke), POST :id/pause.
+  Sponsor-side browse + purchase endpoints explicitly deferred
+  to 13.5.1. NEW `frontend/src/lib/citizen-data-offer.ts` —
+  mirrors BE enums + citizen-facing labels + formatRupees +
+  defaultExpiresAt helpers. EXTENDED `frontend/src/lib/hooks.ts`
+  — 4 TanStack Query hooks (useCitizenDataOffers + create +
+  revoke + pause). NEW
+  `frontend/src/components/CitizenDataOffersPanel.tsx` (~340
+  lines) — citizen-facing publish + manage panel; pill picker
+  for DataPointKind + number inputs for price/maxSales + chip
+  multi-select for purposes + inline error surface on 409/400 +
+  honest empty state + Pause/Revoke actions per offer. Mounted
+  on /labs keyed on `data-offers-<identityId>` for identity-flip
+  remount. **Adversarial review** (3 lenses): **0 fixes**.
+  Privacy posture sound by construction (strict allowlist +
+  FORBIDDEN_SUBSTRINGS probe + count-only ledger + publisher-
+  gated revoke + DPDP cascade); UX honest (revoked offers stay
+  listed; explicit "v1 ships publish, 13.5.1 ships purchase"
+  framing); edge cases covered (calendar-invalid timestamps
+  reject at boundary; same-second double-publish 409s via
+  content-hash; cross-publisher revoke 403/404s).
+  **§15 bindings**: pointer-only ledger; strict allowlist;
+  publisher-gated mutations; DPDP cascade; bytes-stay-on-device
+  until citizen-signed delivery (Phase 13.5.1).
+  **API_INTEGRATIONS.md impact**: ZERO new external API. The
+  endpoints are intra-BE only; sponsor purchase will reuse
+  existing escrow + mesh substrates in 13.5.1. Last-updated
+  header bumped. **FE-BE parity**: BE delta = validator + store
+  + 4 endpoints + 1 cascade entry; FE delta = lib + hooks +
+  panel + Labs wiring + test files. Tests: vitest 490
+  unchanged (FE↔BE convergence tested via Node-side regex
+  extraction of FE source); Node 1284 → **1315** (+31
+  citizen-data-offer.test). tsc clean.
 - **Phase 13.4.3 — SHIPPED 2026-06-02 (ADR 0159).** Closes
   the 13.4.x sub-arc — wires SLM-H action verbs to real
   next-step launchers (URLs / tel: / in_app routes). EXTENDED

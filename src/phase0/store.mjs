@@ -65,6 +65,9 @@ export class BosStore {
     // JSON file per skillId; same shape + admin-curation posture as
     // slm-model-packs. Not per-identity (no DPDP §12(3) cascade).
     this.skillAgentsPath = path.join(rootPath, 'skill-agents');
+    // Phase 13.5 — citizen data offers. Per-identity (citizen
+    // publishes); DPDP §12(3) cascade entry below in eraseUserData.
+    this.citizenDataOffersPath = path.join(rootPath, 'citizen-data-offers');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -118,6 +121,7 @@ export class BosStore {
     await fs.mkdir(this.slmModelPacksPath, { recursive: true });
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.skillAgentsPath, { recursive: true });
+    await fs.mkdir(this.citizenDataOffersPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -438,6 +442,22 @@ export class BosStore {
       this.installedSlmFile,
       'installId'
     );
+    // Phase 13.5 — citizen data offers cascade by publisherId.
+    // Outstanding offers from a since-erased citizen become
+    // unhonourable per §15 (sponsor's at-sale-time signature is
+    // still in the audit ledger but the citizen's offer record is
+    // gone — sponsor cannot reattach against a wiped publisher).
+    const citizenDataOffers = await this.listCitizenDataOffers({ publisherId: identityId }).catch(() => []);
+    let citizenDataOffersRemoved = 0;
+    for (const offer of citizenDataOffers) {
+      try {
+        await fs.unlink(this.citizenDataOfferFile(offer.offerId));
+        citizenDataOffersRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.citizenDataOffers = citizenDataOffersRemoved;
     // Phase 10.1 — labeling submissions are per-worker; cascade
     // on identity erase. Jobs and items are sponsor-owned and stay.
     const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
@@ -1362,6 +1382,49 @@ export class BosStore {
 
   async listSkillAgents() {
     return listJson(this.skillAgentsPath);
+  }
+
+  // Phase 13.5 — citizen data offers. Per-identity (citizen-owned);
+  // emits citizen_data_offer.* ledger events with POINTER + count-
+  // only meta (never the data point bodies). DPDP §12(3) cascade
+  // entry below in eraseUserData.
+  citizenDataOfferFile(offerId) {
+    return path.join(this.citizenDataOffersPath, `${safeName(offerId)}.json`);
+  }
+
+  async saveCitizenDataOffer(offer) {
+    await this.init();
+    await writeJson(this.citizenDataOfferFile(offer.offerId), offer);
+    // Audit ledger event — kind depends on status transition. The
+    // caller chooses the event type via the offer.status value.
+    const eventType =
+      offer.status === 'revoked'
+        ? 'citizen_data_offer.revoked'
+        : offer.status === 'paused'
+          ? 'citizen_data_offer.paused'
+          : 'citizen_data_offer.published';
+    await this.appendLedger({
+      type: eventType,
+      offerId: offer.offerId,
+      publisherId: offer.publisherId,
+      dataPointKind: offer.dataPointKind,
+      pricePerSalePaise: offer.pricePerSalePaise,
+      maxSales: offer.maxSales,
+      salesCount: offer.salesCount,
+      purposeCount: offer.sponsorPurposeAllowlist.length,
+      at: new Date().toISOString()
+    });
+    return offer;
+  }
+
+  async readCitizenDataOffer(offerId) {
+    return readJson(this.citizenDataOfferFile(offerId));
+  }
+
+  async listCitizenDataOffers({ publisherId } = {}) {
+    const all = await listJson(this.citizenDataOffersPath);
+    if (!publisherId) return all;
+    return all.filter((o) => o.publisherId === publisherId);
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

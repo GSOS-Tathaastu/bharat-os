@@ -1272,12 +1272,21 @@ picked "minimum onboarding load, maximum coverage"):
   panels. Closes the 13.4.x sub-arc.
 
 #### Phase 13.x — New revenue lines (~4 wks)
-- [ ] **Citizen data labelling + sponsor sale.** Citizens
+- [~] **Citizen data labelling + sponsor sale.** Citizens
   monetize THEIR own data (intents / conversations / document
   interactions) via signed consent + per-data-point payouts +
   revocation. Reuses Phase 9.1 sponsor + Phase 10.x labeling
   substrate + Phase 11.8 per-scope consent. See
   `memory/citizen-data-as-product-revenue.md`.
+  **Phase 13.5 shipped 2026-06-02 (ADR 0160)** — citizen-side
+  substrate: publish + list + pause + revoke per-data-point
+  sale offers (5 DATA_POINT_KINDS × 6 SPONSOR_PURPOSES); BE
+  registry with content-derived offerId + DPDP cascade; ledger
+  emits citizen_data_offer.{published|paused|revoked} pointer
+  events with count-only meta. **Phase 13.5.1 next** — sponsor
+  browse + purchase flow (debit sponsor escrow, credit citizen
+  mesh balance, emit citizen_data_offer.purchased; per-data-
+  point delivery signature).
 - [ ] **Compute network mesh workload.** Add `compute_serving`
   to `MESH_WORKLOAD_TYPES`. Worker phones serve Phi-3-mini
   inferences to OTHER citizens for fiat-credit. See

@@ -152,6 +152,37 @@ Implemented pieces:
 
 ---
 
+## 💰 2026-06-02 — Phase 13.5 shipped: Citizen data offer substrate (new revenue line for citizens)
+
+Opens the 13.x revenue-line track per the
+[citizen-data-as-product-revenue binding](../.claude/projects/d--bharat-os/memory/citizen-data-as-product-revenue.md).
+Citizens can now publish per-data-point sale offers: "I am willing
+to sell my [intent prompts / document summaries / PII-redacted text
+/ skill runs / federated contributions] for ₹X per sale, up to N
+sales, for purposes [model training / safety benchmark / academic
+research / …]". Sponsors purchase against these offers, paying into
+the citizen's mesh balance.
+
+This phase ships the **citizen-side substrate** (publish + list +
+pause + revoke). The sponsor browse + purchase flow lands in
+Phase 13.5.1.
+
+§15 invariants in place: strict allowlist (10-entry forbidden-
+substring probe) + content-derived offerId (no spam) + ms-stripped
+timestamps + publisher-gated revoke + DPDP §12 cascade (offers wipe
+on identity erase). Audit ledger emits POINTER + count-only meta —
+NEVER the data points themselves.
+
+Adversarial review: ship_with_no_fixes (privacy posture sound by
+construction; edge cases covered at boundary). ADR 0160.
+
+Tests: 490 vitest + 1315 Node + tsc clean. Zero new external API.
+
+**13.x sequencing**: SLM USP arc complete (E/F/G/H). Revenue lines
+arc now open with citizen data offers as the first concrete shipped
+substrate. Compute network mesh workload + Bharat ID + Sahayak are
+still ahead.
+
 ## 🔗 2026-06-02 — Phase 13.4.3 shipped: SLM-H action-verb launchers (close 13.4.x sub-arc)
 
 Closes the SLM-H rollout. The 18 SKILL_ACTION_VERBS introduced across

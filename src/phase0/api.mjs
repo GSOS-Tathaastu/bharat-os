@@ -253,6 +253,15 @@ import {
 } from '../phase1/skill-agent.mjs';
 import { SKILL_AGENT_SEED_LIST } from '../phase1/skill-agent-seed.mjs';
 import {
+  buildCitizenDataOffer,
+  revokeCitizenDataOffer,
+  pauseCitizenDataOffer,
+  CITIZEN_DATA_OFFER_PROTOCOL_VERSION,
+  DATA_POINT_KINDS,
+  SPONSOR_PURPOSES,
+  CITIZEN_DATA_OFFER_STATUSES
+} from '../phase1/citizen-data-offer.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -6181,6 +6190,127 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         }
 
         return methodNotAllowed(response, parts.length === 4 ? ['GET', 'POST'] : ['DELETE']);
+      }
+
+      // Phase 13.5 — citizen data offers. Per-identity (citizen
+      // publishes); BE persists a strict-allowlist envelope; audit
+      // ledger emits citizen_data_offer.* pointer events.
+      //
+      //   GET    /api/identities/:id/data-offers           — list publisher's offers
+      //   POST   /api/identities/:id/data-offers           — publish a new offer
+      //   DELETE /api/identities/:id/data-offers/:offerId  — revoke an offer
+      //   POST   /api/identities/:id/data-offers/:offerId/pause — pause an offer
+      //
+      // The sponsor browse + purchase endpoints land in Phase 13.5.1.
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'identities'
+        && parts.length >= 4
+        && parts[3] === 'data-offers'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+
+        if (parts.length === 4 && request.method === 'GET') {
+          const offers = await store.listCitizenDataOffers({ publisherId: identityId });
+          jsonResponse(response, 200, {
+            offers,
+            protocolVersion: CITIZEN_DATA_OFFER_PROTOCOL_VERSION,
+            supportedDataPointKinds: DATA_POINT_KINDS,
+            supportedSponsorPurposes: SPONSOR_PURPOSES,
+            supportedStatuses: CITIZEN_DATA_OFFER_STATUSES
+          });
+          return;
+        }
+
+        if (parts.length === 4 && request.method === 'POST') {
+          const body = await readRequestJson(request);
+          let offer;
+          try {
+            offer = buildCitizenDataOffer({
+              publisherId: identityId,
+              dataPointKind: body.dataPointKind,
+              pricePerSalePaise: body.pricePerSalePaise,
+              maxSales: body.maxSales,
+              sponsorPurposeAllowlist: body.sponsorPurposeAllowlist,
+              expiresAt: body.expiresAt
+            });
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_citizen_data_offer', message: error.message }
+            });
+            return;
+          }
+          const existing = await store.readCitizenDataOffer(offer.offerId).catch(() => null);
+          if (existing && existing.status !== 'revoked') {
+            jsonResponse(response, 409, {
+              error: {
+                code: 'duplicate_offer',
+                message: 'You already have an identical active offer. Revoke it first or change the price / max sales / purposes.'
+              }
+            });
+            return;
+          }
+          await store.saveCitizenDataOffer(offer);
+          jsonResponse(response, 201, { ok: true, offer });
+          return;
+        }
+
+        if (parts.length === 5 && request.method === 'DELETE') {
+          const offerId = decodeURIComponent(parts[4]);
+          const existing = await store.readCitizenDataOffer(offerId).catch(() => null);
+          if (!existing || existing.publisherId !== identityId) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_offer', message: 'Citizen data offer not found.' }
+            });
+            return;
+          }
+          const body = await readRequestJson(request).catch(() => ({}));
+          let revoked;
+          try {
+            revoked = revokeCitizenDataOffer(existing, {
+              revokedBy: identityId,
+              reason: body?.reason ?? null
+            });
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_revoke', message: error.message }
+            });
+            return;
+          }
+          await store.saveCitizenDataOffer(revoked);
+          jsonResponse(response, 200, { ok: true, offer: revoked });
+          return;
+        }
+
+        if (parts.length === 6 && request.method === 'POST' && parts[5] === 'pause') {
+          const offerId = decodeURIComponent(parts[4]);
+          const existing = await store.readCitizenDataOffer(offerId).catch(() => null);
+          if (!existing || existing.publisherId !== identityId) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_offer', message: 'Citizen data offer not found.' }
+            });
+            return;
+          }
+          let paused;
+          try {
+            paused = pauseCitizenDataOffer(existing);
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_pause', message: error.message }
+            });
+            return;
+          }
+          await store.saveCitizenDataOffer(paused);
+          jsonResponse(response, 200, { ok: true, offer: paused });
+          return;
+        }
+
+        return methodNotAllowed(
+          response,
+          parts.length === 4 ? ['GET', 'POST'] : ['DELETE', 'POST']
+        );
       }
 
       if (parts[0] === 'api' && parts[1] === 'integrity' && parts[2] === 'verify') {

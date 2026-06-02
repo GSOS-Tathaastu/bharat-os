@@ -19,6 +19,7 @@ import { DocSummariserPanel } from '@/components/DocSummariserPanel';
 import { SkillAgentPanel } from '@/components/SkillAgentPanel';
 import { ConsumerComplaintPanel } from '@/components/ConsumerComplaintPanel';
 import { PmKisanStatusPanel } from '@/components/PmKisanStatusPanel';
+import { CitizenDataOffersPanel } from '@/components/CitizenDataOffersPanel';
 import { loadSlmRuntime, releaseSharedSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
@@ -353,6 +354,14 @@ export function LabsPage() {
           the likely blocker + next steps. */}
       <PmKisanStatusPanel
         key={`pmkisan-${identity?.id ?? 'anon'}`}
+        identityId={identity?.id}
+      />
+
+      {/* Phase 13.5 — Citizen data revenue. Lets the citizen
+          publish per-data-point sale offers to Bharat OS sponsors.
+          Keyed on identity for the same remount-on-flip protection. */}
+      <CitizenDataOffersPanel
+        key={`data-offers-${identity?.id ?? 'anon'}`}
         identityId={identity?.id}
       />
 
