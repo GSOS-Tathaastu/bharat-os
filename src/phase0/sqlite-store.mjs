@@ -444,6 +444,17 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_compute_serving_dispatches_worker ON compute_serving_dispatches(worker_id);
   CREATE INDEX IF NOT EXISTS idx_compute_serving_dispatches_status ON compute_serving_dispatches(status);
 
+  CREATE TABLE IF NOT EXISTS compute_serving_encrypted_prompts (
+    envelope_id TEXT PRIMARY KEY,
+    dispatch_id TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_encrypted_prompts_dispatch ON compute_serving_encrypted_prompts(dispatch_id);
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_encrypted_prompts_requester ON compute_serving_encrypted_prompts(requester_id);
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_encrypted_prompts_worker ON compute_serving_encrypted_prompts(worker_id);
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -2131,6 +2142,42 @@ export class SqliteStore {
     });
   }
 
+  // Phase 13.7.3 — encrypted-prompt envelopes.
+  async saveComputeServingEncryptedPrompt(envelope) {
+    await this.init();
+    this._upsert(
+      'compute_serving_encrypted_prompts',
+      ['envelope_id', 'dispatch_id', 'requester_id', 'worker_id', 'json'],
+      [
+        envelope.envelopeId,
+        envelope.dispatchId,
+        envelope.requesterId,
+        envelope.workerId,
+        JSON.stringify(envelope)
+      ]
+    );
+    return envelope;
+  }
+
+  async readComputeServingEncryptedPrompt(envelopeId) {
+    await this.init();
+    return this._readOne('compute_serving_encrypted_prompts', 'envelope_id', envelopeId);
+  }
+
+  async findComputeServingEncryptedPromptByDispatch(dispatchId) {
+    await this.init();
+    const all = this._listAll('compute_serving_encrypted_prompts');
+    return all.find((e) => e.dispatchId === dispatchId) ?? null;
+  }
+
+  async deleteComputeServingEncryptedPrompt(envelopeId) {
+    await this.init();
+    const result = this.db
+      .prepare('DELETE FROM compute_serving_encrypted_prompts WHERE envelope_id = ?')
+      .run(envelopeId);
+    return result.changes > 0;
+  }
+
   // Phase 9.0b — per-identity SLM install records. Pointer-not-
   // payload (model bytes are client-side OPFS). DPDP §12(3)
   // cascade entry below in deleteIdentityCascade.
@@ -3038,6 +3085,10 @@ export class SqliteStore {
       // wipes the dispatch row; the serve ledger event keeps
       // the at-serve-time proof with identity fields redacted.
       sections.computeServingDispatches = sweep('compute_serving_dispatches', ['requester_id', 'worker_id']);
+      // Phase 13.7.3 — encrypted-prompt envelopes cascade by
+      // EITHER requester_id OR worker_id. Forward-secret ephemeral
+      // pubkeys + short TTL make this defence-in-depth.
+      sections.computeServingEncryptedPrompts = sweep('compute_serving_encrypted_prompts', ['requester_id', 'worker_id']);
       // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
       // per-role docs, dispute evidence) cascade by
       // root_identity_id. The bytes column goes with the row so

@@ -84,6 +84,10 @@ export class BosStore {
     // bucket. Cascades by BOTH requesterId and workerId — if
     // either side erases, the dispatch row goes.
     this.computeServingDispatchesPath = path.join(rootPath, 'compute-serving-dispatches');
+    // Phase 13.7.3 — encrypted-prompt envelopes. Ciphertext +
+    // nonce + ephemeral pubkey, tied to a dispatch. 15-min TTL.
+    // Cascade with either requesterId or workerId; wipe at serve.
+    this.computeServingEncryptedPromptsPath = path.join(rootPath, 'compute-serving-encrypted-prompts');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -141,6 +145,7 @@ export class BosStore {
     await fs.mkdir(this.citizenDataOfferPurchasesPath, { recursive: true });
     await fs.mkdir(this.computeServingCapacitiesPath, { recursive: true });
     await fs.mkdir(this.computeServingDispatchesPath, { recursive: true });
+    await fs.mkdir(this.computeServingEncryptedPromptsPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -525,6 +530,23 @@ export class BosStore {
       }
     }
     sections.computeServingDispatches = computeServingDispatchesRemoved;
+    // Phase 13.7.3 — encrypted-prompt envelopes cascade by
+    // EITHER requesterId OR workerId. The ciphertext is
+    // forward-secret (ephemeral pubkey is fresh per dispatch);
+    // wiping the row removes any chance of post-erase decryption
+    // even if a leaked long-term worker key existed.
+    const envelopesAll = await listJson(this.computeServingEncryptedPromptsPath).catch(() => []);
+    let envelopesRemoved = 0;
+    for (const e of envelopesAll) {
+      if (e.requesterId !== identityId && e.workerId !== identityId) continue;
+      try {
+        await fs.unlink(this.computeServingEncryptedPromptFile(e.envelopeId));
+        envelopesRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.computeServingEncryptedPrompts = envelopesRemoved;
     // Phase 10.1 — labeling submissions are per-worker; cascade
     // on identity erase. Jobs and items are sponsor-owned and stay.
     const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
@@ -1593,6 +1615,38 @@ export class BosStore {
       if (status && d.status !== status) return false;
       return true;
     });
+  }
+
+  // Phase 13.7.3 — encrypted-prompt envelopes. One row per
+  // dispatch. The ciphertext + nonce + ephemeral pubkey are
+  // stored; the BE NEVER sees plaintext. Caller (API handler)
+  // emits the audit ledger event.
+  computeServingEncryptedPromptFile(envelopeId) {
+    return path.join(this.computeServingEncryptedPromptsPath, `${safeName(envelopeId)}.json`);
+  }
+
+  async saveComputeServingEncryptedPrompt(envelope) {
+    await this.init();
+    await writeJson(this.computeServingEncryptedPromptFile(envelope.envelopeId), envelope);
+    return envelope;
+  }
+
+  async readComputeServingEncryptedPrompt(envelopeId) {
+    return readJson(this.computeServingEncryptedPromptFile(envelopeId));
+  }
+
+  async findComputeServingEncryptedPromptByDispatch(dispatchId) {
+    const all = await listJson(this.computeServingEncryptedPromptsPath);
+    return all.find((e) => e.dispatchId === dispatchId) ?? null;
+  }
+
+  async deleteComputeServingEncryptedPrompt(envelopeId) {
+    try {
+      await fs.unlink(this.computeServingEncryptedPromptFile(envelopeId));
+      return true;
+    } catch (_error) {
+      return false;
+    }
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

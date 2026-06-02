@@ -97,6 +97,8 @@ test('strict allowlist rejects forbidden top-level keys', () => {
 
 test('PERMITTED_CAPACITY_KEYS contains exactly the documented set', () => {
   // Sort comparison ignores ordering — assert set equality.
+  // Phase 13.7.3 added workerEncryptionPubKeyBase64 (optional
+  // P-256 ECDH pubkey for encrypted-prompt dispatch).
   assert.deepEqual([...PERMITTED_CAPACITY_KEYS].sort(), [
     'capacityId',
     'constraints',
@@ -110,6 +112,7 @@ test('PERMITTED_CAPACITY_KEYS contains exactly the documented set', () => {
     'revokeReason',
     'revokedAt',
     'status',
+    'workerEncryptionPubKeyBase64',
     'workerId'
   ].sort());
 });

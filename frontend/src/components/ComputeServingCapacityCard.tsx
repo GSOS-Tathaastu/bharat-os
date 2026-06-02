@@ -27,8 +27,11 @@ import {
   useRevokeComputeServingCapacity,
   usePauseComputeServingCapacity,
   useComputeServingDispatchesPending,
-  useServeComputeServingDispatch
+  useServeComputeServingDispatch,
+  useFetchEncryptedPrompt
 } from '@/lib/hooks';
+import { useWorkerKeypairStore } from '@/lib/worker-encryption-keypair-store';
+import { decryptPromptFromCitizen } from '@/lib/compute-encryption';
 import {
   COMPUTE_SERVING_STATUS_LABEL,
   DEFAULT_PRICE_PER_K_PAISE,
@@ -86,6 +89,10 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
     if (!identityId) return;
     setFormError(null);
     try {
+      // Phase 13.7.3 — generate (or reuse) this worker's P-256
+      // ECDH keypair and publish the pubkey on the capacity
+      // envelope so citizens can encrypt prompts to it.
+      const keypair = await useWorkerKeypairStore.getState().ensureKeypair(identityId);
       await createMut.mutateAsync({
         identityId,
         pricePerKTokensPaise: Math.round(formPriceRupees * 100),
@@ -96,7 +103,8 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
           requireWifi: formRequireWifi,
           requireCharging: formRequireCharging
         },
-        expiresAt: defaultExpiresAt(DEFAULT_TTL_DAYS)
+        expiresAt: defaultExpiresAt(DEFAULT_TTL_DAYS),
+        workerEncryptionPubKeyBase64: keypair.publicKeyBase64
       });
       setShowForm(false);
     } catch (err) {
@@ -342,16 +350,19 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
       <details className="mt-3 text-caption text-text-muted">
         <summary className="cursor-pointer font-semibold">How this works</summary>
         <p className="mt-2">
-          When another Bharat OS citizen submits an intent that needs an SLM
-          inference, the server can route the work to YOUR phone if your
-          capacity is active. Your phone serves the inference via the same
-          Phase 9.0c wllama runtime, signs the response hash, and your mesh
-          balance ticks up. The Phase 13.7.1 BE substrate is live — your
-          pending queue polls every 5 seconds. v1 manual-serve flow has you
-          enter the actual tokens served + sha256 of your response text
-          below. Phase 13.7.3 replaces this with the encryption substrate
-          (citizen-encrypted prompt → your WASM runtime auto-decrypts and
-          serves).
+          When you publish a capacity, this device generates a long-lived
+          P-256 ECDH keypair (stored locally only — private key never
+          leaves your device). The pubkey gets published with the
+          capacity. Citizens encrypt their prompts to that pubkey before
+          dispatch (ECDH + HKDF + AES-256-GCM, forward-secret ephemeral
+          keypair per dispatch).
+        </p>
+        <p className="mt-2">
+          When a dispatch lands, hit "Fetch &amp; decrypt prompt" — the
+          envelope downloads, your local private key decrypts, and the
+          plaintext shows above. Run it on your installed SLM (Phase
+          9.0c), paste the response text + actual tokens below, and your
+          mesh balance ticks up.
         </p>
       </details>
     </Card>
@@ -394,10 +405,55 @@ function PendingDispatchRow({
   workerId: string;
 }) {
   const serve = useServeComputeServingDispatch();
+  const fetchEnc = useFetchEncryptedPrompt();
   const [showForm, setShowForm] = useState<boolean>(false);
   const [responseText, setResponseText] = useState<string>('');
   const [actualTokens, setActualTokens] = useState<number>(dispatch.estimatedTokens);
   const [error, setError] = useState<string | null>(null);
+  // Phase 13.7.3 — decrypted citizen prompt. Lives in component
+  // state ONLY (never persisted; goes away on unmount).
+  const [decryptedPrompt, setDecryptedPrompt] = useState<string | null>(null);
+  const [decryptError, setDecryptError] = useState<string | null>(null);
+  const [decrypting, setDecrypting] = useState<boolean>(false);
+
+  async function handleFetchAndDecrypt() {
+    setDecryptError(null);
+    setDecrypting(true);
+    try {
+      const { envelope } = await fetchEnc.mutateAsync({
+        dispatchId: dispatch.dispatchId,
+        workerId
+      });
+      const keypair = useWorkerKeypairStore.getState().getKeypair(workerId);
+      if (!keypair) {
+        setDecryptError(
+          "No encryption keypair on this device for this persona. Republish your capacity to generate one."
+        );
+        return;
+      }
+      const plaintext = await decryptPromptFromCitizen(
+        {
+          ciphertextBase64: envelope.ciphertextBase64,
+          nonceBase64: envelope.nonceBase64,
+          ephemeralPubKeyBase64: envelope.ephemeralPubKeyBase64
+        },
+        keypair.privateKeyPkcs8Base64
+      );
+      setDecryptedPrompt(plaintext);
+      setShowForm(true);
+    } catch (err) {
+      const apiErr = err as { code?: string };
+      if (apiErr.code === 'envelope_not_found') {
+        setDecryptError(
+          "Citizen hasn't posted the encrypted prompt yet — try again in a few seconds."
+        );
+      } else {
+        setDecryptError("Couldn't decrypt. The envelope may be malformed or your keypair has changed.");
+      }
+    } finally {
+      setDecrypting(false);
+    }
+  }
 
   async function handleServe() {
     setError(null);
@@ -446,7 +502,35 @@ function PendingDispatchRow({
       <p className="text-caption text-text-muted">
         Prompt hash: <span className="font-mono">{dispatch.promptHash.slice(0, 24)}…</span>
       </p>
-      {!showForm && (
+      {decryptedPrompt && (
+        <div className="mt-2 rounded-sm border border-trust-100 bg-trust-50 p-2">
+          <p className="text-caption font-semibold uppercase tracking-wide text-trust-700">
+            Decrypted prompt (from citizen, this device only)
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-body text-text">{decryptedPrompt}</p>
+        </div>
+      )}
+      {decryptError && (
+        <p className="mt-2 rounded-sm border border-orange-100 bg-orange-50 p-2 text-caption text-orange-700">
+          {decryptError}
+        </p>
+      )}
+      {!showForm && !decryptedPrompt && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Action
+            variant="trust"
+            size="sm"
+            onClick={handleFetchAndDecrypt}
+            disabled={decrypting}
+          >
+            {decrypting ? 'Decrypting…' : 'Fetch & decrypt prompt'}
+          </Action>
+          <Action variant="ghost" size="sm" onClick={() => setShowForm(true)}>
+            Skip · serve manually
+          </Action>
+        </div>
+      )}
+      {!showForm && decryptedPrompt && (
         <Action
           variant="trust"
           size="sm"

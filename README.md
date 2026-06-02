@@ -152,6 +152,40 @@ Implemented pieces:
 
 ---
 
+## 🔐 2026-06-03 — Phase 13.7.3 shipped: Encrypted-prompt substrate (compute network verifiable end-to-end)
+
+Closes the verifiable-serve loop. The 13.7.2 honor-system manual-serve
+is now an honest verification path — the worker actually sees the
+citizen's prompt on-device via P-256 ECDH + HKDF-SHA256 + AES-256-GCM
+encryption.
+
+Flow:
+1. Worker publishes capacity → P-256 ECDH keypair generated locally
+   (private key never leaves device); pubkey published on capacity.
+2. Citizen sends dispatch → encrypts prompt locally to worker's
+   pubkey with a fresh ephemeral keypair (forward-secret per
+   dispatch); only ciphertext + nonce + ephemeral pubkey reach BE.
+3. Worker hits "Fetch & decrypt prompt" → fetches envelope, decrypts
+   client-side, sees plaintext above the serve form.
+4. Worker runs prompt on installed SLM, posts response → BE
+   credits mesh balance; envelope is auto-wiped after serve
+   (forward secrecy + reduced surface area).
+
+§15 bindings: plaintext NEVER reaches BE; worker privkey NEVER off
+device; AEAD auth-tag detects tampering (vitest pinned); ledger
+events POINTER + count meta only (test asserts ciphertext absent);
+DPDP §12 cascade by either side; envelope auto-wiped after serve.
+
+Adversarial review: ship_with_no_must_fix. Privacy posture sound by
+construction. ADR 0167.
+
+Tests: 513 vitest (+7 crypto roundtrip including forward secrecy +
+tamper detection + multi-byte UTF-8) + 1426 Node (+20 entity +
+endpoints + cascade + convergence) + tsc clean. Zero new external API.
+
+Phase 13.7.4 (deferred) — Phase 9.0c wllama runtime serve-mode
+extension that automates the last manual step.
+
 ## 🔁 2026-06-03 — Phase 13.7.2 shipped: Compute network FE wiring (v1 demo loop closes)
 
 Closes the v1 compute network demo loop on top of the 13.7.1 BE

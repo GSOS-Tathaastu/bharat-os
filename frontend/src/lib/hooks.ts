@@ -757,6 +757,10 @@ export interface CreateComputeServingCapacityInput {
   maxDailyTokens: number;
   constraints: ComputeServingConstraints;
   expiresAt: string;
+  // Phase 13.7.3 — optional P-256 ECDH pubkey for the
+  // encrypted-prompt envelope substrate. When present, citizens
+  // can encrypt prompts to this key before dispatch.
+  workerEncryptionPubKeyBase64?: string;
 }
 
 export function useCreateComputeServingCapacity() {
@@ -772,7 +776,10 @@ export function useCreateComputeServingCapacity() {
             maxConcurrent: input.maxConcurrent,
             maxDailyTokens: input.maxDailyTokens,
             constraints: input.constraints,
-            expiresAt: input.expiresAt
+            expiresAt: input.expiresAt,
+            ...(input.workerEncryptionPubKeyBase64
+              ? { workerEncryptionPubKeyBase64: input.workerEncryptionPubKeyBase64 }
+              : {})
           })
         }
       ),
@@ -863,6 +870,49 @@ export interface ServeComputeServingDispatchInput {
   workerId: string;
   actualTokens: number;
   responseHash: string;
+}
+
+// Phase 13.7.3 — encrypted-prompt envelope hooks.
+
+export interface EncryptedPromptEnvelopeRecord {
+  envelopeId: string;
+  dispatchId: string;
+  requesterId: string;
+  workerId: string;
+  ciphertextBase64: string;
+  nonceBase64: string;
+  ephemeralPubKeyBase64: string;
+  algorithm: string;
+  protocolVersion: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PostEncryptedPromptInput {
+  dispatchId: string;
+  requesterId: string;
+  ciphertextBase64: string;
+  nonceBase64: string;
+  ephemeralPubKeyBase64: string;
+}
+
+export function usePostEncryptedPrompt() {
+  return useMutation({
+    mutationFn: ({ dispatchId, ...body }: PostEncryptedPromptInput) =>
+      api<{ ok: boolean; envelope: EncryptedPromptEnvelopeRecord }>(
+        `/api/compute-serving-dispatches/${encodeURIComponent(dispatchId)}/encrypted-prompt`,
+        { method: 'POST', body: JSON.stringify(body) }
+      )
+  });
+}
+
+export function useFetchEncryptedPrompt() {
+  return useMutation({
+    mutationFn: ({ dispatchId, workerId }: { dispatchId: string; workerId: string }) =>
+      api<{ envelope: EncryptedPromptEnvelopeRecord; protocolVersion: string }>(
+        `/api/compute-serving-dispatches/${encodeURIComponent(dispatchId)}/encrypted-prompt?workerId=${encodeURIComponent(workerId)}`
+      )
+  });
 }
 
 export function useServeComputeServingDispatch() {

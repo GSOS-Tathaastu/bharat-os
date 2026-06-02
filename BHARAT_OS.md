@@ -2201,6 +2201,76 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.7.3 — SHIPPED 2026-06-03 (ADR 0167).**
+  Encrypted-prompt substrate — closes the verifiable-serve loop
+  for the compute network. Worker now actually sees the
+  citizen's prompt on-device (via P-256 ECDH + HKDF-SHA256 +
+  AES-256-GCM); the 13.7.2 honor-system manual-serve is now
+  an honest verification path. NEW
+  `src/phase1/compute-serving-encrypted-prompt.mjs` (~210
+  lines) — strict-allowlist validator + ledger event builder.
+  Protocol pinned `bos.phase13.compute-serving-encrypted-
+  prompt.v1`. 11-entry PERMITTED_ENCRYPTED_PROMPT_KEYS +
+  13-entry FORBIDDEN_SUBSTRINGS probe (rejects any key that
+  could leak plaintext). 8 KB ciphertext cap; canonical base64
+  validation; ms-stripped timestamps; 15-minute TTL aligned
+  with dispatch. Content-derived envelopeId so a citizen
+  can't post two envelopes per dispatch. EXTENDED
+  `src/phase1/compute-serving-capacity.mjs` with optional
+  `workerEncryptionPubKeyBase64` field (P-256 raw uncompressed
+  point base64). OPTIONAL — older capacities keep working.
+  EXTENDED store + sqlite-store with envelope persistence; new
+  `compute_serving_encrypted_prompts` table indexed on
+  dispatch_id, requester_id, worker_id. DPDP §12 cascade by
+  EITHER requesterId OR workerId. EXTENDED `src/phase0/api.mjs`
+  — 2 new endpoints under
+  `/api/compute-serving-dispatches/:id/encrypted-prompt`:
+  POST (citizen attaches envelope; emits
+  compute_serving.encrypted_prompt_posted ledger event);
+  GET ?workerId=... (worker fetches for client-side
+  decryption). Serve endpoint extended to auto-wipe envelope
+  after successful serve (forward secrecy + reduced surface).
+  Error codes: 400 invalid_encrypted_prompt / workerId_required
+  / 403 not_requester / not_assigned / 404 unknown_dispatch /
+  envelope_not_found / 409 envelope_already_posted /
+  dispatch_not_pending / dispatch_expired. NEW
+  `frontend/src/lib/compute-encryption.ts` (~200 lines) —
+  pure Web Crypto helpers: generateWorkerEncryptionKeypair
+  (P-256), encryptPromptForWorker (ECDH + HKDF + AES-GCM
+  with fresh ephemeral keypair for forward secrecy),
+  decryptPromptFromCitizen (inverse). NEW
+  `frontend/src/lib/worker-encryption-keypair-store.ts` —
+  Zustand + persist (localStorage) keyed on identityId. Worker
+  private key NEVER crosses network. EXTENDED hooks.ts with
+  usePostEncryptedPrompt + useFetchEncryptedPrompt. WIRED
+  ComputeServingCapacityCard — generates keypair on publish +
+  passes pubkey; PendingDispatchRow adds "Fetch & decrypt
+  prompt" affordance with skip-option for older capacities.
+  WIRED ComputeNetworkTestCard — when capacity has pubkey,
+  encrypts prompt locally before sending; partial-success path
+  surfaced honestly. Both cards' "How this works" copy updated.
+  **Adversarial review** verdict: **ship_with_no_must_fix**.
+  Privacy posture sound by construction (plaintext never on BE;
+  worker privkey never off device; forward secrecy via
+  ephemeral keypair per dispatch; AEAD auth-tag detects
+  tampering — vitest pinned; ledger emits POINTER + count meta
+  only — test asserts ciphertext absent in JSON; DPDP cascade
+  + auto-wipe after serve). Notes for SF-1 (empty HKDF salt
+  acceptable due to ephemeral pubkey uniqueness), SF-2 (no AAD
+  binding to dispatchId yet — helper supports it), SF-3
+  (generic decrypt error preserves AEAD privacy posture).
+  **§15 bindings**: plaintext never on BE; pointer-only ledger
+  emit; FORBIDDEN_SUBSTRINGS probe rejects plaintext-leak
+  fields at boundary; forward-secret ephemeral keys per
+  dispatch; DPDP cascade. **API_INTEGRATIONS.md impact**: ZERO
+  new external API. **FE-BE parity**: BE delta = validator +
+  capacity extension + store + 2 endpoints + serve-wipe +
+  cascade; FE delta = crypto helpers + keypair store + 2 hooks
+  + wiring on both cards + test files. Tests: vitest 506 →
+  **513** (+7 crypto roundtrip including multi-byte UTF-8 +
+  forward secrecy + tamper detection); Node 1406 → **1426**
+  (+20 encrypted-prompt entity + endpoints + cascade + FE↔BE
+  convergence). tsc clean.
 - **Phase 13.7.2 — SHIPPED 2026-06-03 (ADR 0166).** FE wiring
   for the compute network — closes the v1 demo loop on top of
   the 13.7.1 BE substrate. EXTENDED

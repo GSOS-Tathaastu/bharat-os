@@ -39,6 +39,11 @@ export interface ComputeServingCapacity {
   revokedAt: string | null;
   revokeReason: string | null;
   pausedAt: string | null;
+  // Phase 13.7.3 — optional P-256 ECDH pubkey for the encrypted-
+  // prompt envelope substrate. Older capacities published before
+  // 13.7.3 don't have this; FE detects and renders honest "not
+  // encryption-enabled" UI.
+  workerEncryptionPubKeyBase64?: string | null;
 }
 
 export interface ComputeServingCapacitiesResponse {

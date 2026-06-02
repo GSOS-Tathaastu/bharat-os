@@ -288,6 +288,11 @@ import {
   COMPUTE_SERVING_DISPATCH_STATUSES
 } from '../phase1/compute-serving-dispatch.mjs';
 import {
+  buildComputeServingEncryptedPrompt,
+  buildEncryptedPromptPostedLedgerEvent,
+  COMPUTE_SERVING_ENCRYPTED_PROMPT_PROTOCOL_VERSION
+} from '../phase1/compute-serving-encrypted-prompt.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -6909,6 +6914,14 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
             at: new Date().toISOString()
           })
         );
+        // Phase 13.7.3 — wipe the encrypted-prompt envelope after
+        // successful serve. Reduces post-serve surface area; the
+        // ciphertext is no longer needed. Best-effort (the audit
+        // ledger already has the at-serve-time proof).
+        const envelope = await store.findComputeServingEncryptedPromptByDispatch(served.dispatchId);
+        if (envelope) {
+          await store.deleteComputeServingEncryptedPrompt(envelope.envelopeId);
+        }
         jsonResponse(response, 200, {
           ok: true,
           dispatch: served,
@@ -6940,6 +6953,132 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           dispatches,
           protocolVersion: COMPUTE_SERVING_DISPATCH_PROTOCOL_VERSION,
           supportedStatuses: COMPUTE_SERVING_DISPATCH_STATUSES
+        });
+        return;
+      }
+
+      // Phase 13.7.3 — Encrypted-prompt envelope endpoints.
+      //
+      //   POST /api/compute-serving-dispatches/:dispatchId/encrypted-prompt
+      //     body: {requesterId, ciphertextBase64, nonceBase64,
+      //            ephemeralPubKeyBase64}
+      //     → 201 envelope. Emits
+      //       compute_serving.encrypted_prompt_posted.
+      //   GET /api/compute-serving-dispatches/:dispatchId/encrypted-prompt
+      //     query: workerId=<bos:person:...>
+      //     → 200 envelope (worker-only). Returns the ciphertext +
+      //       nonce + ephemeral pubkey so the worker can decrypt
+      //       client-side.
+      //
+      // Both gated on dispatch existence + state. The BE never
+      // sees plaintext.
+      const dispatchEncPromptMatch =
+        /^\/api\/compute-serving-dispatches\/([^/]+)\/encrypted-prompt$/.exec(url.pathname);
+      if (request.method === 'POST' && dispatchEncPromptMatch) {
+        const dispatchId = decodeURIComponent(dispatchEncPromptMatch[1]);
+        const body = await readRequestJson(request);
+        if (!body?.requesterId) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_encrypted_prompt', message: 'requesterId is required.' }
+          });
+          return;
+        }
+        const dispatch = await store.readComputeServingDispatch(dispatchId).catch(() => null);
+        if (!dispatch) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_dispatch', message: 'dispatch not found.' }
+          });
+          return;
+        }
+        if (dispatch.requesterId !== body.requesterId) {
+          jsonResponse(response, 403, {
+            error: { code: 'not_requester', message: 'only the dispatch requester may post the encrypted prompt.' }
+          });
+          return;
+        }
+        if (dispatch.status !== 'pending') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'dispatch_not_pending',
+              message: `cannot attach encrypted prompt to dispatch in status ${dispatch.status}.`
+            }
+          });
+          return;
+        }
+        if (Date.parse(dispatch.expiresAt) < Date.now()) {
+          jsonResponse(response, 409, {
+            error: { code: 'dispatch_expired', message: 'this dispatch has expired.' }
+          });
+          return;
+        }
+        const existing = await store.findComputeServingEncryptedPromptByDispatch(dispatchId);
+        if (existing) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'envelope_already_posted',
+              message: 'an encrypted prompt envelope is already attached to this dispatch.'
+            }
+          });
+          return;
+        }
+        let envelope;
+        try {
+          envelope = buildComputeServingEncryptedPrompt({
+            dispatchId,
+            requesterId: dispatch.requesterId,
+            workerId: dispatch.workerId,
+            ciphertextBase64: body.ciphertextBase64,
+            nonceBase64: body.nonceBase64,
+            ephemeralPubKeyBase64: body.ephemeralPubKeyBase64
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_encrypted_prompt', message: error.message }
+          });
+          return;
+        }
+        await store.saveComputeServingEncryptedPrompt(envelope);
+        await store.appendLedger(
+          buildEncryptedPromptPostedLedgerEvent({
+            envelope,
+            at: new Date().toISOString()
+          })
+        );
+        jsonResponse(response, 201, { ok: true, envelope });
+        return;
+      }
+      if (request.method === 'GET' && dispatchEncPromptMatch) {
+        const dispatchId = decodeURIComponent(dispatchEncPromptMatch[1]);
+        const workerId = url.searchParams.get('workerId');
+        if (!workerId) {
+          jsonResponse(response, 400, {
+            error: { code: 'workerId_required', message: 'workerId query param is required.' }
+          });
+          return;
+        }
+        const dispatch = await store.readComputeServingDispatch(dispatchId).catch(() => null);
+        if (!dispatch) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_dispatch', message: 'dispatch not found.' }
+          });
+          return;
+        }
+        if (dispatch.workerId !== workerId) {
+          jsonResponse(response, 403, {
+            error: { code: 'not_assigned', message: 'only the assigned worker may fetch the encrypted prompt.' }
+          });
+          return;
+        }
+        const envelope = await store.findComputeServingEncryptedPromptByDispatch(dispatchId);
+        if (!envelope) {
+          jsonResponse(response, 404, {
+            error: { code: 'envelope_not_found', message: 'no encrypted prompt attached to this dispatch yet.' }
+          });
+          return;
+        }
+        jsonResponse(response, 200, {
+          envelope,
+          protocolVersion: COMPUTE_SERVING_ENCRYPTED_PROMPT_PROTOCOL_VERSION
         });
         return;
       }

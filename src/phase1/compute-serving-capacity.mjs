@@ -57,7 +57,13 @@ export const PERMITTED_CAPACITY_KEYS = Object.freeze([
   'expiresAt',
   'revokedAt',
   'revokeReason',
-  'pausedAt'
+  'pausedAt',
+  // Phase 13.7.3 — worker's P-256 ECDH long-lived public key
+  // (base64-encoded uncompressed point). OPTIONAL on the
+  // envelope so existing capacities published before 13.7.3
+  // keep working. When present, citizens use this key to
+  // encrypt prompts before dispatch.
+  'workerEncryptionPubKeyBase64'
 ]);
 
 // Strict allowlist on the nested constraints envelope.
@@ -215,6 +221,23 @@ export function buildComputeServingCapacity(input) {
   if (input.capacityId != null && input.capacityId !== capacityId) {
     throw new Error('capacityId does not match content-derived hash.');
   }
+  // Phase 13.7.3 — optional worker encryption pubkey. P-256
+  // uncompressed point base64-encoded is ~88 chars (65 bytes
+  // → 88 base64). We accept up to 120 for safety with length
+  // prefixes; canonical base64 charset.
+  let workerEncryptionPubKeyBase64 = null;
+  if (input.workerEncryptionPubKeyBase64 != null) {
+    if (typeof input.workerEncryptionPubKeyBase64 !== 'string') {
+      throw new Error('workerEncryptionPubKeyBase64 must be a base64 string.');
+    }
+    if (input.workerEncryptionPubKeyBase64.length > 120) {
+      throw new Error('workerEncryptionPubKeyBase64 exceeds 120 characters.');
+    }
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.workerEncryptionPubKeyBase64)) {
+      throw new Error('workerEncryptionPubKeyBase64 must match canonical base64 [A-Za-z0-9+/=].');
+    }
+    workerEncryptionPubKeyBase64 = input.workerEncryptionPubKeyBase64;
+  }
   return {
     capacityId,
     workerId,
@@ -228,7 +251,8 @@ export function buildComputeServingCapacity(input) {
     expiresAt,
     revokedAt: null,
     revokeReason: null,
-    pausedAt: null
+    pausedAt: null,
+    workerEncryptionPubKeyBase64
   };
 }
 

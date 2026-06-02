@@ -32,8 +32,10 @@ import {
   useComputeServingCapacities,
   useCreateComputeServingDispatch,
   useComputeServingDispatchesSent,
+  usePostEncryptedPrompt,
   useIdentities
 } from '@/lib/hooks';
+import { encryptPromptForWorker } from '@/lib/compute-encryption';
 import {
   formatPricePerKTokens,
   sha256Pointer,
@@ -106,6 +108,7 @@ export function ComputeNetworkTestCard({ identityId }: ComputeNetworkTestCardPro
   const [selectedCapacityId, setSelectedCapacityId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const createMut = useCreateComputeServingDispatch();
+  const postEncMut = usePostEncryptedPrompt();
 
   // Auto-select the first capacity on first arrival.
   useEffect(() => {
@@ -121,14 +124,49 @@ export function ComputeNetworkTestCard({ identityId }: ComputeNetworkTestCardPro
       setFormError('Type something to send to the worker.');
       return;
     }
+    const capacity = activeCapacities.find((c) => c.capacityId === selectedCapacityId);
     try {
       const promptHash = await sha256Pointer(promptText);
-      await createMut.mutateAsync({
+      // Phase 13.7.3 — encrypt the prompt to the worker's pubkey
+      // FIRST (so it's ready to post immediately after the
+      // dispatch lands). If the worker hasn't published an
+      // encryption pubkey (older capacity), skip encryption and
+      // surface an honest message — the worker won't see the
+      // plaintext prompt.
+      let encEnvelope: Awaited<ReturnType<typeof encryptPromptForWorker>> | null = null;
+      if (capacity?.workerEncryptionPubKeyBase64) {
+        encEnvelope = await encryptPromptForWorker(
+          promptText,
+          capacity.workerEncryptionPubKeyBase64
+        );
+      }
+      const dispatchRes = await createMut.mutateAsync({
         requesterId: identityId,
         capacityId: selectedCapacityId,
         promptHash,
         estimatedTokens
       });
+      if (encEnvelope) {
+        try {
+          await postEncMut.mutateAsync({
+            dispatchId: dispatchRes.dispatch.dispatchId,
+            requesterId: identityId,
+            ciphertextBase64: encEnvelope.ciphertextBase64,
+            nonceBase64: encEnvelope.nonceBase64,
+            ephemeralPubKeyBase64: encEnvelope.ephemeralPubKeyBase64
+          });
+        } catch (err) {
+          // The dispatch landed; the envelope didn't. Surface the
+          // partial-success state honestly.
+          setFormError(
+            'Dispatch sent, but the encrypted prompt failed to post. The worker can still see your dispatch but not the prompt text.'
+          );
+        }
+      } else {
+        setFormError(
+          'Dispatch sent. Worker capacity is older than Phase 13.7.3 — they\'ll see the hash only, not the prompt text.'
+        );
+      }
       setPromptText('');
     } catch (err) {
       const apiErr = err as ApiError;
@@ -281,21 +319,22 @@ export function ComputeNetworkTestCard({ identityId }: ComputeNetworkTestCardPro
       <details className="mt-3 text-caption text-text-muted">
         <summary className="cursor-pointer font-semibold">How this works</summary>
         <p className="mt-2">
-          Your prompt is sha256-hashed locally — only the hash + estimated
-          tokens reach the BE. The worker receives a pending dispatch in
-          their /settings page, types in their response text + actual
-          tokens served, and the worker's response is sha256-hashed locally
-          before posting. The BE credits the worker's mesh balance based on
-          their claim (₹X per 1000 tokens, ceil-bucketed).
+          Phase 13.7.3 encryption substrate: when the worker has published
+          a P-256 ECDH pubkey on their capacity, your prompt is encrypted
+          locally (ECDH + HKDF + AES-256-GCM) before posting. Only the
+          ciphertext + nonce + your ephemeral pubkey reach the BE. The
+          worker fetches the envelope, decrypts client-side with their
+          stored private key, and sees your prompt — but only on their
+          device. Forward-secret: a fresh ephemeral keypair per dispatch
+          means past prompts stay unreadable even if a long-lived worker
+          key leaks later.
         </p>
-        <p className="mt-2 font-semibold">
-          v1 limitation: the prompt itself doesn't flow through the BE, so
-          the worker can't see what you typed. The serve flow is "manual"
-          — the worker enters response info honor-system. Phase 13.7.3
-          replaces this with the encryption substrate (citizen-encrypts
-          prompt to worker's pubkey; worker's WASM auto-decrypts + serves;
-          signed response forces the worker to actually run the
-          inference).
+        <p className="mt-2">
+          Workers running an older capacity (no published pubkey) still
+          receive the dispatch with the hash only — you'll see an honest
+          notice if that happens. The worker-side serve form remains
+          manual-entry for response text + token count (the response side
+          will get an analogous flow in a future sub-phase).
         </p>
       </details>
     </Card>

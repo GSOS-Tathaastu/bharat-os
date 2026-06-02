@@ -1337,8 +1337,14 @@ claim backed by an ADR or memory binding.
   sha256Pointer helper + 4 TanStack hooks (with 5s polling).
   Manual-serve honor-system in v1 (worker types response text
   + token count; both sha256-hashed client-side).
-  **Phase 13.7.3 next** — encryption substrate + Phase 9.0c
-  runtime serve-mode (closes the verifiable-serve loop).
+  **Phase 13.7.3 shipped 2026-06-03 (ADR 0167)** — encrypted-
+  prompt substrate (P-256 ECDH + HKDF-SHA256 + AES-256-GCM).
+  Worker now actually sees the citizen's prompt on-device; the
+  13.7.2 honor-system is now an honest verification path.
+  Forward-secret ephemeral keypair per dispatch; envelope
+  auto-wiped after serve. **Phase 13.7.4 next** — Phase 9.0c
+  wllama runtime serve-mode extension (automated decrypt +
+  serve + signed response without human interaction).
 - [ ] Storage network already substrate — no FE work for v1.
 
 #### Phase 14+ — Bharat ID / SSO
