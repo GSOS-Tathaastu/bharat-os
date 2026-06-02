@@ -280,6 +280,14 @@ import {
   COMPUTE_SERVING_CAPACITY_STATUSES
 } from '../phase1/compute-serving-capacity.mjs';
 import {
+  buildComputeServingDispatch,
+  applyServeToDispatch,
+  buildComputeServingDispatchedLedgerEvent,
+  buildComputeServingServedLedgerEvent,
+  COMPUTE_SERVING_DISPATCH_PROTOCOL_VERSION,
+  COMPUTE_SERVING_DISPATCH_STATUSES
+} from '../phase1/compute-serving-dispatch.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -6712,6 +6720,228 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           response,
           parts.length === 4 ? ['GET', 'POST'] : ['DELETE', 'POST']
         );
+      }
+
+      // Phase 13.7.1 — compute-serving dispatches. The mid-loop
+      // primitive between citizen request and worker serve.
+      //
+      //   POST /api/compute-serving-dispatches
+      //     body: {requesterId, capacityId, promptHash, estimatedTokens}
+      //     → 201 dispatch (pending). Emits compute_serving.dispatched.
+      //   POST /api/compute-serving-dispatches/:dispatchId/serve
+      //     body: {workerId, actualTokens, responseHash}
+      //     → 200 dispatch (served). Atomic: validates dispatch is
+      //       pending + capacity still active + worker matches +
+      //       within TTL → applies serve → persists → credits
+      //       worker via mesh contribution event → emits
+      //       compute_serving.served ledger event.
+      //   GET /api/identities/:id/compute-serving-dispatches/sent
+      //     → list dispatches the identity created (citizen view).
+      //   GET /api/identities/:id/compute-serving-dispatches/pending
+      //     → list pending dispatches assigned to the identity
+      //       (worker view).
+      if (
+        request.method === 'POST'
+        && parts[0] === 'api'
+        && parts[1] === 'compute-serving-dispatches'
+        && parts.length === 2
+      ) {
+        const body = await readRequestJson(request);
+        if (!body?.requesterId) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_dispatch', message: 'requesterId is required.' }
+          });
+          return;
+        }
+        const requesterIdentity = await store.readIdentity(body.requesterId).catch(() => null);
+        if (!requesterIdentity) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_requester', message: 'requesterId not found.' }
+          });
+          return;
+        }
+        const capacity = body.capacityId
+          ? await store.readComputeServingCapacity(body.capacityId).catch(() => null)
+          : null;
+        if (!capacity) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_capacity', message: 'capacity not found.' }
+          });
+          return;
+        }
+        if (capacity.status !== 'active') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'capacity_not_active',
+              message: `cannot dispatch to capacity in status ${capacity.status}.`
+            }
+          });
+          return;
+        }
+        if (Date.parse(capacity.expiresAt) < Date.now()) {
+          jsonResponse(response, 409, {
+            error: { code: 'capacity_expired', message: 'this capacity has expired.' }
+          });
+          return;
+        }
+        if (body.requesterId === capacity.workerId) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'self_dispatch',
+              message: 'cannot dispatch to your own compute-serving capacity.'
+            }
+          });
+          return;
+        }
+        let dispatch;
+        try {
+          dispatch = buildComputeServingDispatch({
+            requesterId: body.requesterId,
+            workerId: capacity.workerId,
+            capacityId: capacity.capacityId,
+            promptHash: body.promptHash,
+            estimatedTokens: body.estimatedTokens
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_dispatch', message: error.message }
+          });
+          return;
+        }
+        const existing = await store.readComputeServingDispatch(dispatch.dispatchId).catch(() => null);
+        if (existing) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'duplicate_dispatch',
+              message: 'an identical dispatch already exists.'
+            }
+          });
+          return;
+        }
+        await store.saveComputeServingDispatch(dispatch);
+        await store.appendLedger(
+          buildComputeServingDispatchedLedgerEvent({
+            dispatch,
+            at: new Date().toISOString()
+          })
+        );
+        jsonResponse(response, 201, { ok: true, dispatch });
+        return;
+      }
+
+      const dispatchServeMatch =
+        /^\/api\/compute-serving-dispatches\/([^/]+)\/serve$/.exec(url.pathname);
+      if (request.method === 'POST' && dispatchServeMatch) {
+        const dispatchId = decodeURIComponent(dispatchServeMatch[1]);
+        const body = await readRequestJson(request);
+        if (!body?.workerId) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_serve', message: 'workerId is required.' }
+          });
+          return;
+        }
+        const dispatch = await store.readComputeServingDispatch(dispatchId).catch(() => null);
+        if (!dispatch) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_dispatch', message: 'dispatch not found.' }
+          });
+          return;
+        }
+        if (dispatch.workerId !== body.workerId) {
+          jsonResponse(response, 403, {
+            error: {
+              code: 'not_assigned',
+              message: 'this dispatch is not assigned to your worker identity.'
+            }
+          });
+          return;
+        }
+        if (dispatch.status !== 'pending') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'dispatch_not_pending',
+              message: `cannot serve dispatch in status ${dispatch.status}.`
+            }
+          });
+          return;
+        }
+        if (Date.parse(dispatch.expiresAt) < Date.now()) {
+          jsonResponse(response, 409, {
+            error: { code: 'dispatch_expired', message: 'this dispatch has expired (15min TTL).' }
+          });
+          return;
+        }
+        const capacity = await store.readComputeServingCapacity(dispatch.capacityId).catch(() => null);
+        if (!capacity || capacity.workerId !== body.workerId) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_capacity', message: 'capacity not found for this dispatch.' }
+          });
+          return;
+        }
+        let served;
+        try {
+          served = applyServeToDispatch(dispatch, capacity, {
+            actualTokens: body.actualTokens,
+            responseHash: body.responseHash,
+            servedAt: new Date().toISOString()
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_serve', message: error.message }
+          });
+          return;
+        }
+        // Mesh-contribution event crediting the worker.
+        const meshEvent = createMeshContributionEvent({
+          operatorId: served.workerId,
+          workloadType: 'compute_serving',
+          tokens: served.actualTokens,
+          payoutPaise: served.payoutPaise,
+          computeServingCapacityId: served.capacityId,
+          computeServingDispatchId: served.dispatchId
+        });
+        served.meshContributionEventId = meshEvent.contributionEventId;
+        await store.saveComputeServingDispatch(served);
+        await store.saveMeshContributionEvent(meshEvent);
+        await store.appendLedger(
+          buildComputeServingServedLedgerEvent({
+            dispatch: served,
+            at: new Date().toISOString()
+          })
+        );
+        jsonResponse(response, 200, {
+          ok: true,
+          dispatch: served,
+          meshContributionEvent: {
+            contributionEventId: meshEvent.contributionEventId,
+            payoutPaise: meshEvent.payoutPaise
+          }
+        });
+        return;
+      }
+
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'identities'
+        && parts.length === 5
+        && parts[3] === 'compute-serving-dispatches'
+        && (parts[4] === 'sent' || parts[4] === 'pending')
+      ) {
+        if (request.method !== 'GET') return methodNotAllowed(response, ['GET']);
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+        const filterKind = parts[4];
+        const dispatches =
+          filterKind === 'sent'
+            ? await store.listComputeServingDispatches({ requesterId: identityId })
+            : await store.listComputeServingDispatches({ workerId: identityId, status: 'pending' });
+        jsonResponse(response, 200, {
+          dispatches,
+          protocolVersion: COMPUTE_SERVING_DISPATCH_PROTOCOL_VERSION,
+          supportedStatuses: COMPUTE_SERVING_DISPATCH_STATUSES
+        });
+        return;
       }
 
       if (parts[0] === 'api' && parts[1] === 'integrity' && parts[2] === 'verify') {

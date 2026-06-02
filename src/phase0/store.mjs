@@ -79,6 +79,11 @@ export class BosStore {
     // dispatch + serve flow (citizen prompt → worker WASM SLM)
     // lands as Phase 13.7.1.
     this.computeServingCapacitiesPath = path.join(rootPath, 'compute-serving-capacities');
+    // Phase 13.7.1 — compute-serving dispatches. One row per
+    // (requester, worker, capacity, prompt-hash, requested-at)
+    // bucket. Cascades by BOTH requesterId and workerId — if
+    // either side erases, the dispatch row goes.
+    this.computeServingDispatchesPath = path.join(rootPath, 'compute-serving-dispatches');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -135,6 +140,7 @@ export class BosStore {
     await fs.mkdir(this.citizenDataOffersPath, { recursive: true });
     await fs.mkdir(this.citizenDataOfferPurchasesPath, { recursive: true });
     await fs.mkdir(this.computeServingCapacitiesPath, { recursive: true });
+    await fs.mkdir(this.computeServingDispatchesPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -502,6 +508,23 @@ export class BosStore {
       }
     }
     sections.computeServingCapacities = computeServingCapacitiesRemoved;
+    // Phase 13.7.1 — compute-serving dispatches cascade by EITHER
+    // requesterId OR workerId. The serve event in the audit ledger
+    // still carries the at-serve-time proof (with the identity
+    // field redacted in the existing ledger-redaction pass); this
+    // only removes the per-dispatch row.
+    const computeServingDispatchesAll = await listJson(this.computeServingDispatchesPath).catch(() => []);
+    let computeServingDispatchesRemoved = 0;
+    for (const d of computeServingDispatchesAll) {
+      if (d.requesterId !== identityId && d.workerId !== identityId) continue;
+      try {
+        await fs.unlink(this.computeServingDispatchFile(d.dispatchId));
+        computeServingDispatchesRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.computeServingDispatches = computeServingDispatchesRemoved;
     // Phase 10.1 — labeling submissions are per-worker; cascade
     // on identity erase. Jobs and items are sponsor-owned and stay.
     const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
@@ -1540,6 +1563,36 @@ export class BosStore {
     const all = await listJson(this.computeServingCapacitiesPath);
     if (!workerId) return all;
     return all.filter((c) => c.workerId === workerId);
+  }
+
+  // Phase 13.7.1 — compute-serving dispatches. The mid-loop
+  // primitive between citizen request and worker serve. Per-
+  // dispatch ledger events live on the audit log; this method
+  // does NOT auto-emit — the API handler emits explicitly so
+  // it can chain the dispatched + served events at the right
+  // boundary.
+  computeServingDispatchFile(dispatchId) {
+    return path.join(this.computeServingDispatchesPath, `${safeName(dispatchId)}.json`);
+  }
+
+  async saveComputeServingDispatch(dispatch) {
+    await this.init();
+    await writeJson(this.computeServingDispatchFile(dispatch.dispatchId), dispatch);
+    return dispatch;
+  }
+
+  async readComputeServingDispatch(dispatchId) {
+    return readJson(this.computeServingDispatchFile(dispatchId));
+  }
+
+  async listComputeServingDispatches({ requesterId, workerId, status } = {}) {
+    const all = await listJson(this.computeServingDispatchesPath);
+    return all.filter((d) => {
+      if (requesterId && d.requesterId !== requesterId) return false;
+      if (workerId && d.workerId !== workerId) return false;
+      if (status && d.status !== status) return false;
+      return true;
+    });
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

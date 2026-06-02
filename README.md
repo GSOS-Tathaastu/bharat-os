@@ -152,6 +152,41 @@ Implemented pieces:
 
 ---
 
+## ⚡ 2026-06-02 — Phase 13.7.1 shipped: Compute-serving dispatch + serve substrate (BE)
+
+Wires the 13.7 compute network loop end-to-end at the BE layer.
+Citizen creates a dispatch against a worker's capacity →
+`compute_serving.dispatched` emitted → worker runs the prompt
+locally and POSTs back response hash + actual tokens → atomic
+serve: persists served + credits worker via mesh-contribution
+event + emits `compute_serving.served`.
+
+NEW `src/phase1/compute-serving-dispatch.mjs` — strict allowlist;
+content-derived dispatchId; 15-min TTL; pointer fields
+`promptHash` + `responseHash` (sha256:<hex64>) so the bytes
+themselves never reach the registry. Payout via ceil bucketing
+(`ceil(tokens/1000) × pricePerKTokensPaise`) so workers can't
+be cheated by under-1K rounding.
+
+4 new endpoints: POST `/api/compute-serving-dispatches`, POST
+`/:id/serve`, GET `/api/identities/:id/compute-serving-dispatches/sent`
+and `/pending`. 13 explicit error codes caught at boundary
+(invalid_dispatch / capacity_not_active / self_dispatch /
+duplicate_dispatch / not_assigned / dispatch_not_pending /
+dispatch_expired / ...).
+
+DPDP cascade wipes dispatches on EITHER requester or worker
+identity erase.
+
+Adversarial review: ship_with_known_limitations (no must-fix for
+v1). Documented: race on concurrent serves; maxConcurrent +
+maxDailyTokens not enforced at dispatch time; no verification
+worker actually ran the prompt (needs encryption substrate from
+13.7.3). FE worker-side serve UI lands as 13.7.2; encryption
+substrate as 13.7.3. ADR 0165.
+
+Tests: 500 vitest + 1405 Node + tsc clean. Zero new external API.
+
 ## 📱 2026-06-02 — Phase 13.7 shipped: Compute-serving capacity substrate (workers earn from idle compute)
 
 Opens the §13.x compute network revenue line per the

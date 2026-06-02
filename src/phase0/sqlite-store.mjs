@@ -432,6 +432,18 @@ const SCHEMAS = `
   );
   CREATE INDEX IF NOT EXISTS idx_compute_serving_capacities_worker ON compute_serving_capacities(worker_id);
 
+  CREATE TABLE IF NOT EXISTS compute_serving_dispatches (
+    dispatch_id TEXT PRIMARY KEY,
+    requester_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    capacity_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_dispatches_requester ON compute_serving_dispatches(requester_id);
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_dispatches_worker ON compute_serving_dispatches(worker_id);
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_dispatches_status ON compute_serving_dispatches(status);
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -2084,6 +2096,41 @@ export class SqliteStore {
     return all.filter((c) => c.workerId === workerId);
   }
 
+  // Phase 13.7.1 — compute-serving dispatches. The mid-loop
+  // primitive between citizen request and worker serve.
+  async saveComputeServingDispatch(dispatch) {
+    await this.init();
+    this._upsert(
+      'compute_serving_dispatches',
+      ['dispatch_id', 'requester_id', 'worker_id', 'capacity_id', 'status', 'json'],
+      [
+        dispatch.dispatchId,
+        dispatch.requesterId,
+        dispatch.workerId,
+        dispatch.capacityId,
+        dispatch.status,
+        JSON.stringify(dispatch)
+      ]
+    );
+    return dispatch;
+  }
+
+  async readComputeServingDispatch(dispatchId) {
+    await this.init();
+    return this._readOne('compute_serving_dispatches', 'dispatch_id', dispatchId);
+  }
+
+  async listComputeServingDispatches({ requesterId, workerId, status } = {}) {
+    await this.init();
+    const all = this._listAll('compute_serving_dispatches');
+    return all.filter((d) => {
+      if (requesterId && d.requesterId !== requesterId) return false;
+      if (workerId && d.workerId !== workerId) return false;
+      if (status && d.status !== status) return false;
+      return true;
+    });
+  }
+
   // Phase 9.0b — per-identity SLM install records. Pointer-not-
   // payload (model bytes are client-side OPFS). DPDP §12(3)
   // cascade entry below in deleteIdentityCascade.
@@ -2986,6 +3033,11 @@ export class SqliteStore {
       // worker_id. Outstanding capacities from a since-erased
       // worker stop being eligible for dispatch routing.
       sections.computeServingCapacities = sweep('compute_serving_capacities', ['worker_id']);
+      // Phase 13.7.1 — compute-serving dispatches cascade by
+      // EITHER requester_id OR worker_id. Either side erasing
+      // wipes the dispatch row; the serve ledger event keeps
+      // the at-serve-time proof with identity fields redacted.
+      sections.computeServingDispatches = sweep('compute_serving_dispatches', ['requester_id', 'worker_id']);
       // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
       // per-role docs, dispute evidence) cascade by
       // root_identity_id. The bytes column goes with the row so

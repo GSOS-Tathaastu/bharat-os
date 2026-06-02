@@ -2201,6 +2201,57 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.7.1 — SHIPPED 2026-06-02 (ADR 0165).** BE
+  dispatch + serve substrate — wires the 13.7 compute network
+  loop end-to-end at the BE layer. NEW
+  `src/phase1/compute-serving-dispatch.mjs` (~270 lines) —
+  strict-allowlist validator + state-transition helper + 2
+  ledger event builders. Protocol pinned
+  `bos.phase13.compute-serving-dispatch.v1`. 16-entry
+  PERMITTED_DISPATCH_KEYS + 13-entry
+  COMPUTE_SERVING_DISPATCH_FORBIDDEN_SUBSTRINGS probe (same
+  list as the capacity entity). Two pointer fields enforce the
+  §15 binding: `promptHash` + `responseHash` are sha256:<hex64>
+  pointers; the actual prompt/response bytes never reach the
+  dispatch record. Content-derived dispatchId; ms-stripped
+  timestamps; 15-minute TTL on pending dispatches.
+  `applyServeToDispatch` computes payout via ceil bucketing —
+  `payoutPaise = ceil(actualTokens / 1000) ×
+  capacity.pricePerKTokensPaise` — so workers can't be cheated
+  by under-1K rounding. EXTENDED store + sqlite-store with
+  dispatch persistence + new `compute_serving_dispatches`
+  table indexed on requester_id, worker_id, status. DPDP §12
+  cascade entry added to both backends — dispatches wipe by
+  EITHER requesterId OR workerId. EXTENDED `src/phase0/api.mjs`
+  — 4 new endpoints: POST
+  `/api/compute-serving-dispatches` (citizen creates pending
+  dispatch); POST
+  `/api/compute-serving-dispatches/:dispatchId/serve` (worker
+  submits served — atomic in-handler: validates dispatch +
+  capacity + worker + TTL → applyServeToDispatch → persists
+  served → creates mesh-contribution event crediting worker →
+  emits compute_serving.served ledger event); GET
+  `/api/identities/:id/compute-serving-dispatches/sent` /
+  `/pending` (history endpoints).  Errors at boundary with
+  explicit codes: 400 invalid_dispatch / invalid_serve; 404
+  unknown_requester / unknown_capacity / unknown_dispatch; 409
+  capacity_not_active / capacity_expired / self_dispatch /
+  duplicate_dispatch / dispatch_not_pending / dispatch_expired;
+  403 not_assigned. **Adversarial review** verdict:
+  **ship_with_known_limitations** (no must-fix for v1).
+  Documented for follow-up: race on concurrent serves (mirrors
+  13.5.1 limitation); maxConcurrent + maxDailyTokens not
+  enforced at dispatch time; no verification that the worker
+  actually ran the prompt (needs encryption substrate from
+  13.7.3). All other concerns caught at boundary with explicit
+  error codes. **§15 bindings**: POINTER-only ledger (hashes,
+  not bytes); strict-allowlist; ms-stripped timestamps;
+  worker-gated serve; self-dispatch rejected; DPDP cascade.
+  **API_INTEGRATIONS.md impact**: ZERO new external API.
+  **FE-BE parity**: BE delta = entity + store + 4 endpoints
+  + cascade; FE delta = NONE (13.7.2 wires the worker-side
+  serve UI). Tests: vitest 500 unchanged; Node 1379 → **1405**
+  (+26 compute-serving-dispatch.test). tsc clean.
 - **Phase 13.7 — SHIPPED 2026-06-02 (ADR 0164).**
   Compute-serving capacity substrate per
   [[compute-network-mesh-workload]] — opens the §13.x compute

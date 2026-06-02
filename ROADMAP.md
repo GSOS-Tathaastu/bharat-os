@@ -1322,10 +1322,17 @@ claim backed by an ADR or memory binding.
   opt-in substrate: capacity declaration entity + 4 endpoints +
   ComputeServingCapacityCard on /settings + `compute_serving`
   workload type in MESH_WORKLOAD_TYPES (now 7 entries) + DPDP
-  cascade. **Phase 13.7.1 next** — Phase 9.0c runtime serve-mode
-  extension + dispatch + serve flow (the actual encrypted-
-  prompt-to-worker routing + WASM-isolated serve + signed
-  response).
+  cascade.
+  **Phase 13.7.1 shipped 2026-06-02 (ADR 0165)** — BE dispatch
+  + serve substrate. Citizen creates dispatch against worker's
+  capacity; worker submits served result; atomic in-handler
+  credits worker via mesh-contribution event + emits both
+  `compute_serving.dispatched` and `compute_serving.served`
+  pointer ledger events. 4 endpoints + 13 explicit error codes.
+  Pointer-only payload (`promptHash` + `responseHash` are sha256
+  pointers, never bytes). **Phase 13.7.2 next** — FE worker-side
+  serve UI + citizen-side dispatch trigger. **Phase 13.7.3** —
+  encryption substrate + Phase 9.0c runtime serve-mode.
 - [ ] Storage network already substrate — no FE work for v1.
 
 #### Phase 14+ — Bharat ID / SSO
