@@ -38,7 +38,15 @@ export const MESH_WORKLOAD_TYPES = [
   // earner; the sponsor is the buyer. Per-sale payout is set by
   // the citizen's own offer (`pricePerSalePaise`). Carries the
   // offerId + purchaseId pointers explicitly.
-  'citizen_data_sale'
+  'citizen_data_sale',
+  // Phase 13.7 — compute serving. Worker's idle phone serves
+  // SLM inferences to OTHER citizens for fiat-credit. Per-event
+  // payout is computed from `tokens` + the capacity's
+  // `pricePerKTokensPaise`. Carries `capacityId` + `dispatchId`
+  // pointers explicitly (set by the dispatch flow in Phase
+  // 13.7.x). v1 ships the substrate + workload type; the actual
+  // dispatch + serve flow lands in 13.7.1.
+  'compute_serving'
 ];
 
 // §13B midpoint operator payouts. Stored in paise (1 INR = 100 paise) so
@@ -91,6 +99,14 @@ function computePayoutPaise({ workloadType, tokens, bytes, payoutPaise }) {
     // capped at MAX_PRICE_PAISE (₹100k) so we don't re-cap here.
     return Math.max(0, Math.round(Number(payoutPaise ?? 0)));
   }
+  if (workloadType === 'compute_serving') {
+    // Phase 13.7 — payout is computed by the caller from the
+    // capacity's pricePerKTokensPaise × tokens / 1000, capped at
+    // ₹50 per single dispatch as a defence-in-depth ceiling.
+    // Caller passes the resolved amount as `payoutPaise`.
+    const n = Math.max(0, Math.round(Number(payoutPaise ?? 0)));
+    return Math.min(n, 5000);
+  }
   return 0;
 }
 
@@ -116,6 +132,12 @@ export function createMeshContributionEvent({
   // matching workload type.
   citizenDataOfferId,
   citizenDataPurchaseId,
+  // Phase 13.7 — compute serving pointers. Only set for the
+  // matching workload type. capacityId pins the worker capacity
+  // declaration; dispatchId pins the specific dispatch+serve
+  // round (set by the Phase 13.7.x dispatch flow).
+  computeServingCapacityId,
+  computeServingDispatchId,
   at = nowIso()
 }) {
   if (!operatorId) throw new Error('operatorId is required.');
@@ -130,9 +152,13 @@ export function createMeshContributionEvent({
     workloadType !== 'federated_round' &&
     workloadType !== 'labeling' &&
     workloadType !== 'citizen_data_sale' &&
+    workloadType !== 'compute_serving' &&
     !Number.isFinite(Number(bytes))
   ) {
     throw new Error('storage events require a numeric bytes count.');
+  }
+  if (workloadType === 'compute_serving' && !Number.isFinite(Number(tokens))) {
+    throw new Error('compute_serving events require a numeric tokens count.');
   }
 
   const payoutPaise = computePayoutPaise({
@@ -148,12 +174,16 @@ export function createMeshContributionEvent({
     operatorId,
     nodeId: nodeId ?? null,
     workloadType,
-    tokens: workloadType === 'inference' ? Number(tokens) : null,
+    tokens:
+      workloadType === 'inference' || workloadType === 'compute_serving'
+        ? Number(tokens)
+        : null,
     bytes:
       workloadType === 'inference' ||
       workloadType === 'federated_round' ||
       workloadType === 'labeling' ||
-      workloadType === 'citizen_data_sale'
+      workloadType === 'citizen_data_sale' ||
+      workloadType === 'compute_serving'
         ? null
         : Number(bytes),
     peerId: peerId ?? null,
@@ -164,6 +194,10 @@ export function createMeshContributionEvent({
       workloadType === 'citizen_data_sale' ? (citizenDataOfferId ?? null) : null,
     citizenDataPurchaseId:
       workloadType === 'citizen_data_sale' ? (citizenDataPurchaseId ?? null) : null,
+    computeServingCapacityId:
+      workloadType === 'compute_serving' ? (computeServingCapacityId ?? null) : null,
+    computeServingDispatchId:
+      workloadType === 'compute_serving' ? (computeServingDispatchId ?? null) : null,
     deviceState: {
       charging: Boolean(charging),
       wifi: Boolean(wifi),

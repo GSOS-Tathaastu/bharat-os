@@ -15,17 +15,16 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.5.2 — signed
-citizen-data-offer audit-export bundle shipped. **Still zero
-new external-API dependencies.** The new endpoint
-`GET /api/sponsors/:id/data-offer-purchases/export.ndjson` is
-intra-BE only; it composes the existing audit signer at
-`/api/audit-signer/public-key` (Ed25519 public key) so sponsors
-can verify bundle signatures independently. Outstanding 13.x
-entries that will eventually touch this doc: pmkisan.gov.in
-beneficiary status JSON (future 13.4.x), §4.1 UPI rails (sponsor
-payouts + citizen mesh-balance fiat-instant withdrawals), §4.2
-IFSC lookup, per-data-point delivery substrate (future 13.5.x).)
+Last updated: 2026-06-02 (Phase 13.7 — compute-serving capacity
+substrate shipped, opening the §13.x compute network revenue
+line. **Still zero new external-API dependencies.** The 4 new
+endpoints under `/api/identities/:id/compute-serving-capacity`
+are intra-BE only; no partner credential, env var, or external
+service. Outstanding 13.x entries that will eventually touch
+this doc: pmkisan.gov.in beneficiary status JSON (future
+13.4.x), §4.1 UPI rails (sponsor payouts + citizen + worker
+mesh-balance fiat-instant withdrawals), §4.2 IFSC lookup,
+per-data-point delivery substrate (future 13.5.x).)
 
 ## Legend
 

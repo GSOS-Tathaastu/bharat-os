@@ -3,6 +3,7 @@ import { Action, Badge, Card, Evidence, Field, Sheet, useToast } from '@/compone
 import { useIdentityStore } from '@/lib/identity-store';
 import { useProfileStore } from '@/lib/profile-store';
 import { PersonalizationCard } from '@/components/PersonalizationCard';
+import { ComputeServingCapacityCard } from '@/components/ComputeServingCapacityCard';
 import { useNavigate } from 'react-router-dom';
 import {
   useActiveIdentity,
@@ -182,6 +183,11 @@ export function SettingsPage() {
 
       {/* Phase 13.3 SLM-G — on-device personalization profile. */}
       <PersonalizationCard identityId={identity?.id} />
+
+      {/* Phase 13.7 — worker opt-in to serve idle compute for
+          fiat-credit. Substrate-only: dispatch + serve flow
+          lands as Phase 13.7.1. */}
+      <ComputeServingCapacityCard identityId={identity?.id} />
 
       <Card title="Your data rights (DPDP §12)" tone="governance">
         <p className="text-body text-text-muted mb-3">

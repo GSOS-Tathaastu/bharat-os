@@ -731,6 +731,99 @@ export interface CitizenDataOfferExportResult {
   filename: string;
 }
 
+// --- Phase 13.7 Compute serving capacity ---------------------------
+
+import type {
+  ComputeServingCapacity,
+  ComputeServingCapacitiesResponse,
+  ComputeServingConstraints
+} from './compute-serving-capacity';
+
+export function useComputeServingCapacities(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['compute-serving-capacities', identityId],
+    queryFn: () =>
+      api<ComputeServingCapacitiesResponse>(
+        `/api/identities/${encodeURIComponent(identityId!)}/compute-serving-capacity`
+      ),
+    enabled: Boolean(identityId)
+  });
+}
+
+export interface CreateComputeServingCapacityInput {
+  identityId: string;
+  pricePerKTokensPaise: number;
+  maxConcurrent: number;
+  maxDailyTokens: number;
+  constraints: ComputeServingConstraints;
+  expiresAt: string;
+}
+
+export function useCreateComputeServingCapacity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateComputeServingCapacityInput) =>
+      api<{ ok: boolean; capacity: ComputeServingCapacity }>(
+        `/api/identities/${encodeURIComponent(input.identityId)}/compute-serving-capacity`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            pricePerKTokensPaise: input.pricePerKTokensPaise,
+            maxConcurrent: input.maxConcurrent,
+            maxDailyTokens: input.maxDailyTokens,
+            constraints: input.constraints,
+            expiresAt: input.expiresAt
+          })
+        }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['compute-serving-capacities', identityId] });
+    }
+  });
+}
+
+export function useRevokeComputeServingCapacity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      capacityId,
+      reason
+    }: {
+      identityId: string;
+      capacityId: string;
+      reason?: string;
+    }) =>
+      api<{ ok: boolean; capacity: ComputeServingCapacity }>(
+        `/api/identities/${encodeURIComponent(identityId)}/compute-serving-capacity/${encodeURIComponent(capacityId)}`,
+        { method: 'DELETE', body: JSON.stringify({ reason }) }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['compute-serving-capacities', identityId] });
+    }
+  });
+}
+
+export function usePauseComputeServingCapacity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      identityId,
+      capacityId
+    }: {
+      identityId: string;
+      capacityId: string;
+    }) =>
+      api<{ ok: boolean; capacity: ComputeServingCapacity }>(
+        `/api/identities/${encodeURIComponent(identityId)}/compute-serving-capacity/${encodeURIComponent(capacityId)}/pause`,
+        { method: 'POST' }
+      ),
+    onSuccess: (_data, { identityId }) => {
+      qc.invalidateQueries({ queryKey: ['compute-serving-capacities', identityId] });
+    }
+  });
+}
+
 export function useSponsorDataOfferExport() {
   const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
   return useMutation({

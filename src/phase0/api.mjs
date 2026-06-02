@@ -273,6 +273,13 @@ import {
   CITIZEN_DATA_OFFER_EXPORT_PROTOCOL_VERSION
 } from '../phase1/citizen-data-offer-export.mjs';
 import {
+  buildComputeServingCapacity,
+  revokeComputeServingCapacity,
+  pauseComputeServingCapacity,
+  COMPUTE_SERVING_CAPACITY_PROTOCOL_VERSION,
+  COMPUTE_SERVING_CAPACITY_STATUSES
+} from '../phase1/compute-serving-capacity.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -6575,6 +6582,129 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
           }
           await store.saveCitizenDataOffer(paused);
           jsonResponse(response, 200, { ok: true, offer: paused });
+          return;
+        }
+
+        return methodNotAllowed(
+          response,
+          parts.length === 4 ? ['GET', 'POST'] : ['DELETE', 'POST']
+        );
+      }
+
+      // Phase 13.7 — compute-serving capacity declarations.
+      // Per-worker opt-in for serving SLM inferences to OTHER
+      // citizens for fiat-credit. v1 ships the substrate +
+      // mesh workload type; the actual dispatch + serve flow
+      // lands as Phase 13.7.1.
+      //
+      //   GET    /api/identities/:id/compute-serving-capacity
+      //          — list worker's capacities
+      //   POST   /api/identities/:id/compute-serving-capacity
+      //          — publish a new capacity
+      //   DELETE /api/identities/:id/compute-serving-capacity/:capacityId
+      //          — revoke (worker-only)
+      //   POST   /api/identities/:id/compute-serving-capacity/:capacityId/pause
+      //          — pause (worker-only)
+      if (
+        parts[0] === 'api'
+        && parts[1] === 'identities'
+        && parts.length >= 4
+        && parts[3] === 'compute-serving-capacity'
+      ) {
+        const identityId = decodeURIComponent(parts[2]);
+        const identity = await store.readIdentity(identityId).catch(() => null);
+        if (!identity) return notFound(response);
+
+        if (parts.length === 4 && request.method === 'GET') {
+          const capacities = await store.listComputeServingCapacities({ workerId: identityId });
+          jsonResponse(response, 200, {
+            capacities,
+            protocolVersion: COMPUTE_SERVING_CAPACITY_PROTOCOL_VERSION,
+            supportedStatuses: COMPUTE_SERVING_CAPACITY_STATUSES
+          });
+          return;
+        }
+
+        if (parts.length === 4 && request.method === 'POST') {
+          const body = await readRequestJson(request);
+          let capacity;
+          try {
+            capacity = buildComputeServingCapacity({
+              workerId: identityId,
+              pricePerKTokensPaise: body.pricePerKTokensPaise,
+              maxConcurrent: body.maxConcurrent,
+              maxDailyTokens: body.maxDailyTokens,
+              constraints: body.constraints,
+              expiresAt: body.expiresAt
+            });
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_compute_serving_capacity', message: error.message }
+            });
+            return;
+          }
+          const existing = await store.readComputeServingCapacity(capacity.capacityId).catch(() => null);
+          if (existing && existing.status !== 'revoked') {
+            jsonResponse(response, 409, {
+              error: {
+                code: 'duplicate_capacity',
+                message: 'You already have an identical active capacity. Revoke it first or change the price / caps / constraints.'
+              }
+            });
+            return;
+          }
+          await store.saveComputeServingCapacity(capacity);
+          jsonResponse(response, 201, { ok: true, capacity });
+          return;
+        }
+
+        if (parts.length === 5 && request.method === 'DELETE') {
+          const capacityId = decodeURIComponent(parts[4]);
+          const existing = await store.readComputeServingCapacity(capacityId).catch(() => null);
+          if (!existing || existing.workerId !== identityId) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_capacity', message: 'Compute-serving capacity not found.' }
+            });
+            return;
+          }
+          const body = await readRequestJson(request).catch(() => ({}));
+          let revoked;
+          try {
+            revoked = revokeComputeServingCapacity(existing, {
+              revokedBy: identityId,
+              reason: body?.reason ?? null
+            });
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_revoke', message: error.message }
+            });
+            return;
+          }
+          await store.saveComputeServingCapacity(revoked);
+          jsonResponse(response, 200, { ok: true, capacity: revoked });
+          return;
+        }
+
+        if (parts.length === 6 && request.method === 'POST' && parts[5] === 'pause') {
+          const capacityId = decodeURIComponent(parts[4]);
+          const existing = await store.readComputeServingCapacity(capacityId).catch(() => null);
+          if (!existing || existing.workerId !== identityId) {
+            jsonResponse(response, 404, {
+              error: { code: 'unknown_capacity', message: 'Compute-serving capacity not found.' }
+            });
+            return;
+          }
+          let paused;
+          try {
+            paused = pauseComputeServingCapacity(existing);
+          } catch (error) {
+            jsonResponse(response, 400, {
+              error: { code: 'invalid_pause', message: error.message }
+            });
+            return;
+          }
+          await store.saveComputeServingCapacity(paused);
+          jsonResponse(response, 200, { ok: true, capacity: paused });
           return;
         }
 

@@ -425,6 +425,13 @@ const SCHEMAS = `
   CREATE INDEX IF NOT EXISTS idx_citizen_data_offer_purchases_publisher ON citizen_data_offer_purchases(publisher_id);
   CREATE INDEX IF NOT EXISTS idx_citizen_data_offer_purchases_offer ON citizen_data_offer_purchases(offer_id);
 
+  CREATE TABLE IF NOT EXISTS compute_serving_capacities (
+    capacity_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_compute_serving_capacities_worker ON compute_serving_capacities(worker_id);
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -2035,6 +2042,48 @@ export class SqliteStore {
     });
   }
 
+  // Phase 13.7 — compute-serving capacity declarations. Per-worker
+  // opt-in. DPDP §12(3) cascade entry below.
+  async saveComputeServingCapacity(capacity, { skipLedger = false } = {}) {
+    await this.init();
+    this._upsert(
+      'compute_serving_capacities',
+      ['capacity_id', 'worker_id', 'json'],
+      [capacity.capacityId, capacity.workerId, JSON.stringify(capacity)]
+    );
+    if (skipLedger) return capacity;
+    const eventType =
+      capacity.status === 'revoked'
+        ? 'compute_serving_capacity.revoked'
+        : capacity.status === 'paused'
+          ? 'compute_serving_capacity.paused'
+          : 'compute_serving_capacity.published';
+    await this.appendLedger({
+      type: eventType,
+      capacityId: capacity.capacityId,
+      workerId: capacity.workerId,
+      pricePerKTokensPaise: capacity.pricePerKTokensPaise,
+      maxConcurrent: capacity.maxConcurrent,
+      maxDailyTokens: capacity.maxDailyTokens,
+      batteryMinPercent: capacity.constraints?.batteryMinPercent,
+      requireWifi: Boolean(capacity.constraints?.requireWifi),
+      requireCharging: Boolean(capacity.constraints?.requireCharging)
+    });
+    return capacity;
+  }
+
+  async readComputeServingCapacity(capacityId) {
+    await this.init();
+    return this._readOne('compute_serving_capacities', 'capacity_id', capacityId);
+  }
+
+  async listComputeServingCapacities({ workerId } = {}) {
+    await this.init();
+    const all = this._listAll('compute_serving_capacities');
+    if (!workerId) return all;
+    return all.filter((c) => c.workerId === workerId);
+  }
+
   // Phase 9.0b — per-identity SLM install records. Pointer-not-
   // payload (model bytes are client-side OPFS). DPDP §12(3)
   // cascade entry below in deleteIdentityCascade.
@@ -2933,6 +2982,10 @@ export class SqliteStore {
       // records). The sponsor-side ledger event still carries the
       // at-sale-time proof; this only removes the per-purchase row.
       sections.citizenDataOfferPurchases = sweep('citizen_data_offer_purchases', ['publisher_id']);
+      // Phase 13.7 — compute-serving capacities cascade by
+      // worker_id. Outstanding capacities from a since-erased
+      // worker stop being eligible for dispatch routing.
+      sections.computeServingCapacities = sweep('compute_serving_capacities', ['worker_id']);
       // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
       // per-role docs, dispute evidence) cascade by
       // root_identity_id. The bytes column goes with the row so

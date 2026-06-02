@@ -152,6 +152,34 @@ Implemented pieces:
 
 ---
 
+## 📱 2026-06-02 — Phase 13.7 shipped: Compute-serving capacity substrate (workers earn from idle compute)
+
+Opens the §13.x compute network revenue line per the
+[compute-network-mesh-workload binding](../.claude/projects/d--bharat-os/memory/compute-network-mesh-workload.md).
+Workers can now opt their phones into serving on-device SLM
+inferences to OTHER citizens for fiat-credit — the worker names a
+per-1000-tokens price + concurrency cap + daily token cap +
+device-state constraints (battery / WiFi / charging) on `/settings`.
+
+v1 ships the **opt-in substrate** end-to-end:
+- BE strict-allowlist validator + worker-gated revoke/pause
+- New `compute_serving` workload type in `MESH_WORKLOAD_TYPES` (6 → 7)
+- DPDP §12 cascade entry; ms-stripped timestamps
+- Audit-ledger emits `compute_serving_capacity.{published|paused|revoked}`
+  POINTER + count-only events
+- ComputeServingCapacityCard on `/settings`
+
+The dispatch + serve flow (citizen prompt → worker's WASM SLM →
+signed response → mesh balance credit) lands as Phase 13.7.1 with
+a Phase 9.0c runtime serve-mode extension. The "How this works"
+details panel on the card frames this honestly.
+
+Adversarial review: ship_with_no_fixes. Privacy posture sound by
+construction (strict allowlist + 13-entry FORBIDDEN_SUBSTRINGS
+probe + DPDP cascade + content-derived capacityId). ADR 0164.
+
+Tests: 500 vitest + 1379 Node + tsc clean. Zero new external API.
+
 ## ✍️ 2026-06-02 — Phase 13.5.2 shipped: Signed audit-export bundle for citizen-data-offer purchases
 
 Closes the 13.5 revenue loop with a tamper-evident provenance trail.

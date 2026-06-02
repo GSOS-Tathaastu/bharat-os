@@ -74,6 +74,11 @@ export class BosStore {
     // bytes themselves never live here — those flow via the
     // per-data-point delivery signature (Phase 13.5.2).
     this.citizenDataOfferPurchasesPath = path.join(rootPath, 'citizen-data-offer-purchases');
+    // Phase 13.7 — compute-serving capacity declarations. Per-
+    // worker; DPDP §12(3) cascade entry below. The actual
+    // dispatch + serve flow (citizen prompt → worker WASM SLM)
+    // lands as Phase 13.7.1.
+    this.computeServingCapacitiesPath = path.join(rootPath, 'compute-serving-capacities');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -129,6 +134,7 @@ export class BosStore {
     await fs.mkdir(this.skillAgentsPath, { recursive: true });
     await fs.mkdir(this.citizenDataOffersPath, { recursive: true });
     await fs.mkdir(this.citizenDataOfferPurchasesPath, { recursive: true });
+    await fs.mkdir(this.computeServingCapacitiesPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -481,6 +487,21 @@ export class BosStore {
       }
     }
     sections.citizenDataOfferPurchases = citizenDataOfferPurchasesRemoved;
+    // Phase 13.7 — compute-serving capacities cascade by workerId.
+    // Outstanding capacities from a since-erased worker stop being
+    // eligible for dispatch routing per §15 — the worker's
+    // declared price + caps are gone with their identity.
+    const computeServingCapacities = await this.listComputeServingCapacities({ workerId: identityId }).catch(() => []);
+    let computeServingCapacitiesRemoved = 0;
+    for (const cap of computeServingCapacities) {
+      try {
+        await fs.unlink(this.computeServingCapacityFile(cap.capacityId));
+        computeServingCapacitiesRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.computeServingCapacities = computeServingCapacitiesRemoved;
     // Phase 10.1 — labeling submissions are per-worker; cascade
     // on identity erase. Jobs and items are sponsor-owned and stay.
     const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
@@ -1477,6 +1498,48 @@ export class BosStore {
       if (offerId && p.offerId !== offerId) return false;
       return true;
     });
+  }
+
+  // Phase 13.7 — compute-serving capacity declarations. Per-worker.
+  // Ledger emits compute_serving_capacity.{published|paused|revoked}
+  // POINTER + count-only meta events.
+  computeServingCapacityFile(capacityId) {
+    return path.join(this.computeServingCapacitiesPath, `${safeName(capacityId)}.json`);
+  }
+
+  async saveComputeServingCapacity(capacity, { skipLedger = false } = {}) {
+    await this.init();
+    await writeJson(this.computeServingCapacityFile(capacity.capacityId), capacity);
+    if (skipLedger) return capacity;
+    const eventType =
+      capacity.status === 'revoked'
+        ? 'compute_serving_capacity.revoked'
+        : capacity.status === 'paused'
+          ? 'compute_serving_capacity.paused'
+          : 'compute_serving_capacity.published';
+    await this.appendLedger({
+      type: eventType,
+      capacityId: capacity.capacityId,
+      workerId: capacity.workerId,
+      pricePerKTokensPaise: capacity.pricePerKTokensPaise,
+      maxConcurrent: capacity.maxConcurrent,
+      maxDailyTokens: capacity.maxDailyTokens,
+      batteryMinPercent: capacity.constraints?.batteryMinPercent,
+      requireWifi: Boolean(capacity.constraints?.requireWifi),
+      requireCharging: Boolean(capacity.constraints?.requireCharging),
+      at: new Date().toISOString()
+    });
+    return capacity;
+  }
+
+  async readComputeServingCapacity(capacityId) {
+    return readJson(this.computeServingCapacityFile(capacityId));
+  }
+
+  async listComputeServingCapacities({ workerId } = {}) {
+    const all = await listJson(this.computeServingCapacitiesPath);
+    if (!workerId) return all;
+    return all.filter((c) => c.workerId === workerId);
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

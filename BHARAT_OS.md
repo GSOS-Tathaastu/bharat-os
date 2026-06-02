@@ -2201,6 +2201,64 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.7 — SHIPPED 2026-06-02 (ADR 0164).**
+  Compute-serving capacity substrate per
+  [[compute-network-mesh-workload]] — opens the §13.x compute
+  network revenue line. v1 ships the worker-side opt-in
+  substrate; the dispatch + serve flow lands as 13.7.1 with a
+  Phase 9.0c runtime serve-mode extension. NEW
+  `src/phase1/compute-serving-capacity.mjs` (~250 lines) —
+  strict-allowlist validator + revoke (worker-gated) + pause +
+  ledger-event builder. Protocol pinned
+  `bos.phase13.compute-serving-capacity.v1`. 13-entry
+  PERMITTED_CAPACITY_KEYS + 3-entry PERMITTED_CONSTRAINT_KEYS +
+  13-entry COMPUTE_SERVING_CAPACITY_FORBIDDEN_SUBSTRINGS probe
+  (prompt / completion / response / content / plaintext /
+  rawBody / snippet / preview / unmasked / phoneNumber /
+  deviceId / imei / imsi). Caps: `pricePerKTokensPaise` ∈ [50,
+  50_000], `maxConcurrent` ∈ [1, 4], `maxDailyTokens` ∈ [10K,
+  10M], `batteryMinPercent` ∈ [20, 100], TTL ∈ [24h, 90d].
+  Content-derived capacityId → re-publishing identical envelope
+  returns 409. ms-stripped timestamps mirror Phase 13.2/13.5
+  typing-speed defence. EXTENDED `mesh-contribution.mjs` —
+  MESH_WORKLOAD_TYPES grows 6 → **7** with `compute_serving`;
+  payload requires `tokens`; payout capped at ₹50 per dispatch
+  as defence-in-depth; two new pointer fields
+  `computeServingCapacityId` + `computeServingDispatchId` (the
+  latter set by future 13.7.1 dispatch flow). EXTENDED store +
+  sqlite-store with saveComputeServingCapacity (with
+  `{skipLedger}` opt for future dispatch-driven writes) / read
+  / list; new `compute_serving_capacities` table indexed on
+  worker_id. DPDP §12(3) cascade entry added to both backends —
+  capacities wipe on identity erase. EXTENDED `src/phase0/api.mjs`
+  — 4 endpoints under
+  `/api/identities/:id/compute-serving-capacity`:
+  GET (list + supported statuses); POST (publish; 400
+  invalid_compute_serving_capacity; 409 duplicate_capacity);
+  DELETE (worker-gated revoke); POST :id/pause. NEW
+  `frontend/src/lib/compute-serving-capacity.ts` — mirrors BE
+  enums + 5 default helpers + formatPricePerKTokens. EXTENDED
+  hooks.ts with 4 TanStack Query hooks. NEW
+  `frontend/src/components/ComputeServingCapacityCard.tsx`
+  (~340 lines) — worker-facing form (price + maxConcurrent +
+  maxDailyTokens + batteryMinPercent + requireWifi +
+  requireCharging) + per-capacity Pause/Revoke. Honest
+  empty state + inline error surface. "How this works" details
+  panel surfaces the substrate-only framing. EXTENDED
+  /settings page — card mounted below PersonalizationCard.
+  **Adversarial review** verdict: **ship_with_no_fixes**.
+  Privacy posture sound by construction; UX honest with v1
+  substrate framing; all edge cases caught at boundary.
+  **§15 bindings**: POINTER-only ledger;
+  strict-allowlist; ms-stripped timestamps; worker-gated
+  mutations; DPDP cascade; device-state constraints are
+  thresholds not fingerprints; never any prompt/response bytes
+  on the BE. **API_INTEGRATIONS.md impact**: ZERO new external
+  API. **FE-BE parity**: BE delta = validator + mesh workload
+  type + store + 4 endpoints + cascade; FE delta = lib hooks +
+  card + Settings mount + test files. Tests: vitest 500
+  unchanged (FE composes existing patterns); Node 1347 →
+  **1379** (+32 compute-serving-capacity.test). tsc clean.
 - **Phase 13.5.2 — SHIPPED 2026-06-02 (ADR 0163).** Signed
   citizen-data-offer audit-export bundle. Mirrors the Phase
   10.5 labeling-export pattern (ADR 0124). NEW

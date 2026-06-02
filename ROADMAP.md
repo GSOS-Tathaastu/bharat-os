@@ -1314,10 +1314,18 @@ claim backed by an ADR or memory binding.
   `memory/citizen-data-as-product-revenue.md` clears.
 - [ ] /team + /contact once team is hired.
 - [ ] SEO meta tags + landing video.
-- [ ] **Compute network mesh workload.** Add `compute_serving`
+- [~] **Compute network mesh workload.** Add `compute_serving`
   to `MESH_WORKLOAD_TYPES`. Worker phones serve Phi-3-mini
   inferences to OTHER citizens for fiat-credit. See
   `memory/compute-network-mesh-workload.md`.
+  **Phase 13.7 shipped 2026-06-02 (ADR 0164)** — worker-side
+  opt-in substrate: capacity declaration entity + 4 endpoints +
+  ComputeServingCapacityCard on /settings + `compute_serving`
+  workload type in MESH_WORKLOAD_TYPES (now 7 entries) + DPDP
+  cascade. **Phase 13.7.1 next** — Phase 9.0c runtime serve-mode
+  extension + dispatch + serve flow (the actual encrypted-
+  prompt-to-worker routing + WASM-isolated serve + signed
+  response).
 - [ ] Storage network already substrate — no FE work for v1.
 
 #### Phase 14+ — Bharat ID / SSO
