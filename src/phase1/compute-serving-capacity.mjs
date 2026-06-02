@@ -63,7 +63,16 @@ export const PERMITTED_CAPACITY_KEYS = Object.freeze([
   // envelope so existing capacities published before 13.7.3
   // keep working. When present, citizens use this key to
   // encrypt prompts before dispatch.
-  'workerEncryptionPubKeyBase64'
+  'workerEncryptionPubKeyBase64',
+  // Phase 13.7.4 — worker opts into auto-serve. When TRUE and
+  // the worker has an installed SLM on-device, the FE
+  // automatically fetches the encrypted envelope, decrypts,
+  // runs the SLM, and submits the serve — no manual click.
+  // OPTIONAL; defaults to false on publish so older capacities
+  // and workers without an installed SLM stay in manual-serve.
+  // The BE never inspects the SLM output; this flag is purely
+  // an FE-side instruction.
+  'autoServe'
 ]);
 
 // Strict allowlist on the nested constraints envelope.
@@ -238,6 +247,11 @@ export function buildComputeServingCapacity(input) {
     }
     workerEncryptionPubKeyBase64 = input.workerEncryptionPubKeyBase64;
   }
+  // Phase 13.7.4 — auto-serve opt-in flag.
+  let autoServe = false;
+  if (input.autoServe != null) {
+    autoServe = assertBoolean(input.autoServe, 'autoServe');
+  }
   return {
     capacityId,
     workerId,
@@ -252,7 +266,8 @@ export function buildComputeServingCapacity(input) {
     revokedAt: null,
     revokeReason: null,
     pausedAt: null,
-    workerEncryptionPubKeyBase64
+    workerEncryptionPubKeyBase64,
+    autoServe
   };
 }
 
@@ -311,6 +326,7 @@ export function buildComputeServingCapacityLedgerEvent({ capacity, eventType, at
     batteryMinPercent: capacity.constraints?.batteryMinPercent,
     requireWifi: Boolean(capacity.constraints?.requireWifi),
     requireCharging: Boolean(capacity.constraints?.requireCharging),
+    autoServe: Boolean(capacity.autoServe),
     at: atNormalised
   };
 }

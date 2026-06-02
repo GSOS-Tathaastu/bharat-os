@@ -72,6 +72,36 @@ test('buildComputeServingCapacity — happy path', () => {
   });
   assert.equal(cap.status, 'active');
   assert.equal(cap.protocolVersion, COMPUTE_SERVING_CAPACITY_PROTOCOL_VERSION);
+  // Phase 13.7.4 — autoServe defaults to false when not provided.
+  assert.equal(cap.autoServe, false);
+});
+
+test('Phase 13.7.4 — autoServe=true is accepted and round-trips', () => {
+  const cap = buildComputeServingCapacity(validInput({ autoServe: true }));
+  assert.equal(cap.autoServe, true);
+});
+
+test('Phase 13.7.4 — autoServe rejects non-boolean', () => {
+  assert.throws(
+    () => buildComputeServingCapacity(validInput({ autoServe: 'yes' })),
+    /autoServe must be a boolean/
+  );
+  assert.throws(
+    () => buildComputeServingCapacity(validInput({ autoServe: 1 })),
+    /autoServe must be a boolean/
+  );
+});
+
+test('Phase 13.7.4 — ledger event includes autoServe flag', () => {
+  const cap = buildComputeServingCapacity(validInput({ autoServe: true }));
+  const ev = buildComputeServingCapacityLedgerEvent({
+    capacity: cap,
+    eventType: 'compute_serving_capacity.published',
+    at: cap.publishedAt
+  });
+  assert.equal(ev.autoServe, true);
+  // POINTER + count meta only — never the worker pubkey.
+  assert.equal(ev.workerEncryptionPubKeyBase64, undefined);
 });
 
 test('content-derived capacityId is stable', () => {
@@ -99,7 +129,10 @@ test('PERMITTED_CAPACITY_KEYS contains exactly the documented set', () => {
   // Sort comparison ignores ordering — assert set equality.
   // Phase 13.7.3 added workerEncryptionPubKeyBase64 (optional
   // P-256 ECDH pubkey for encrypted-prompt dispatch).
+  // Phase 13.7.4 added autoServe (optional boolean opt-in to
+  // automated decrypt + generate + post chain).
   assert.deepEqual([...PERMITTED_CAPACITY_KEYS].sort(), [
+    'autoServe',
     'capacityId',
     'constraints',
     'expiresAt',

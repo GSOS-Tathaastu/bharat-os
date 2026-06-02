@@ -44,6 +44,11 @@ export interface ComputeServingCapacity {
   // 13.7.3 don't have this; FE detects and renders honest "not
   // encryption-enabled" UI.
   workerEncryptionPubKeyBase64?: string | null;
+  // Phase 13.7.4 — opt-in auto-serve. When true and the worker
+  // has an installed SLM, the FE auto-decrypts + auto-generates
+  // + auto-submits each incoming dispatch. Older capacities
+  // omit this field; FE treats omitted as false.
+  autoServe?: boolean;
 }
 
 export interface ComputeServingCapacitiesResponse {

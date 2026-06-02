@@ -761,6 +761,10 @@ export interface CreateComputeServingCapacityInput {
   // encrypted-prompt envelope substrate. When present, citizens
   // can encrypt prompts to this key before dispatch.
   workerEncryptionPubKeyBase64?: string;
+  // Phase 13.7.4 — opt-in auto-serve. When true and an SLM is
+  // installed on this device, the FE auto-decrypts + auto-
+  // generates + auto-submits each incoming dispatch.
+  autoServe?: boolean;
 }
 
 export function useCreateComputeServingCapacity() {
@@ -779,6 +783,9 @@ export function useCreateComputeServingCapacity() {
             expiresAt: input.expiresAt,
             ...(input.workerEncryptionPubKeyBase64
               ? { workerEncryptionPubKeyBase64: input.workerEncryptionPubKeyBase64 }
+              : {}),
+            ...(typeof input.autoServe === 'boolean'
+              ? { autoServe: input.autoServe }
               : {})
           })
         }

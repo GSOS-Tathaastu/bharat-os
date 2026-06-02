@@ -2201,6 +2201,48 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.7.4 — SHIPPED 2026-06-03 (ADR 0169).** wllama
+  runtime auto-serve mode — closes the compute network's last
+  manual-click step. EXTENDED
+  `src/phase1/compute-serving-capacity.mjs` with optional
+  `autoServe: boolean` field (defaults false; non-boolean
+  rejected). Capacity ledger event includes the autoServe flag
+  (POINTER + count meta only). No store migration — capacities
+  persist as JSON blobs. NEW
+  `frontend/src/lib/compute-auto-serve.ts` (~70 lines) —
+  pure-function `generateAutoServedResponse({plaintextPrompt,
+  runtime, onToken?, maxTokens?, temperature?})` that wraps the
+  existing `SlmRuntime.generate` contract (no new runtime API).
+  approxTokenCount via ~4-chars-per-token heuristic (same as
+  13.7.1 citizen-side estimate). EXTENDED
+  `ComputeServingCapacityCard` — publish form gains "Auto-serve
+  (needs an installed SLM — no manual click)" checkbox; capacity
+  status line shows "auto-serve on" suffix.
+  PendingDispatchesSection now joins worker's own active
+  capacities with the dispatch list to determine per-row
+  autoServeMode; passes installedModelPackId from
+  useInstalledSlms. PendingDispatchRow useEffect fires the full
+  chain when autoServeMode + installed SLM: decrypting →
+  generating → posting → served, with cancelled-guard on
+  unmount and autoServeAttemptedRef single-shot guard. Dynamic
+  imports of `slm-runtime` + `opfs` keep wllama out of the main
+  bundle until an auto-serve actually fires. Honest error
+  fallback to manual on every failure path (envelope_not_found,
+  dispatch_not_pending, dispatch_expired, no_keypair,
+  unexpected). "How this works" copy distinguishes manual vs
+  auto-serve modes explicitly. Adversarial review:
+  ship_with_no_must_fix. Privacy posture sound — plaintext +
+  response live in component state only; SLM WASM-isolated;
+  only sha256 hash + token count cross the wire; autoServe flag
+  is FE-side instruction only (BE never inspects SLM output).
+  Notes: SF-1 no auto-retry on envelope race; SF-2 TEE
+  attestation is the fundamental v2; SF-3 real token count
+  from wllama API; SF-4 no update-autoServe endpoint
+  post-publish (workers revoke+republish). vitest 522 → 526
+  (+4). Node 1438 → 1441 (+3). Zero new external API.
+  **§13.x compute network revenue line is substrate-complete
+  end-to-end with automation; the whole 13.7.x sub-arc closes
+  here.**
 - **Phase 13.6.1 — SHIPPED 2026-06-03 (ADR 0168).** Marketing
   pages polish + open-source backing. NEW `LICENSE` (Apache
   License 2.0) + NEW `NOTICE` at repo root — backs the

@@ -19,7 +19,7 @@
 //   • Revocable + pausable. DPDP §12 cascade wipes capacities on
 //     identity erase.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Action, Badge, Card } from '@/components/ui';
 import {
   useComputeServingCapacities,
@@ -28,10 +28,12 @@ import {
   usePauseComputeServingCapacity,
   useComputeServingDispatchesPending,
   useServeComputeServingDispatch,
-  useFetchEncryptedPrompt
+  useFetchEncryptedPrompt,
+  useInstalledSlms
 } from '@/lib/hooks';
 import { useWorkerKeypairStore } from '@/lib/worker-encryption-keypair-store';
 import { decryptPromptFromCitizen } from '@/lib/compute-encryption';
+import { generateAutoServedResponse } from '@/lib/compute-auto-serve';
 import {
   COMPUTE_SERVING_STATUS_LABEL,
   DEFAULT_PRICE_PER_K_PAISE,
@@ -76,6 +78,7 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
   const [formBatteryMin, setFormBatteryMin] = useState<number>(DEFAULT_BATTERY_MIN_PERCENT);
   const [formRequireWifi, setFormRequireWifi] = useState<boolean>(true);
   const [formRequireCharging, setFormRequireCharging] = useState<boolean>(true);
+  const [formAutoServe, setFormAutoServe] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const capacities = useMemo(() => {
@@ -104,7 +107,8 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
           requireCharging: formRequireCharging
         },
         expiresAt: defaultExpiresAt(DEFAULT_TTL_DAYS),
-        workerEncryptionPubKeyBase64: keypair.publicKeyBase64
+        workerEncryptionPubKeyBase64: keypair.publicKeyBase64,
+        autoServe: formAutoServe
       });
       setShowForm(false);
     } catch (err) {
@@ -241,6 +245,14 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
               />
               Require charging (don't drain my battery)
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formAutoServe}
+                onChange={(e) => setFormAutoServe(e.target.checked)}
+              />
+              Auto-serve (needs an installed SLM — no manual click)
+            </label>
           </div>
 
           <p className="mb-3 text-caption text-text-muted">
@@ -295,6 +307,7 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
                   Battery ≥ {cap.constraints.batteryMinPercent}%
                   {cap.constraints.requireWifi ? ' · WiFi required' : ''}
                   {cap.constraints.requireCharging ? ' · charging required' : ''}
+                  {cap.autoServe ? ' · auto-serve on' : ''}
                 </p>
                 {cap.status === 'active' && (
                   <div className="mt-2 flex gap-2">
@@ -341,11 +354,14 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
       )}
 
       {/* Phase 13.7.2 — pending dispatches assigned to this
-          worker. Polls every 5s. Manual serve in v1 (worker
-          types in responseHash + actualTokens); 13.7.3 will
-          automate via the encryption substrate + Phase 9.0c
-          runtime serve-mode. */}
-      <PendingDispatchesSection workerId={identityId} />
+          worker. Polls every 5s. Phase 13.7.4: when an
+          auto-serve capacity is matched + SLM is installed,
+          the row auto-decrypts + auto-generates + auto-submits
+          without a manual click. */}
+      <PendingDispatchesSection
+        workerId={identityId}
+        capacities={capacities}
+      />
 
       <details className="mt-3 text-caption text-text-muted">
         <summary className="cursor-pointer font-semibold">How this works</summary>
@@ -358,11 +374,21 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
           keypair per dispatch).
         </p>
         <p className="mt-2">
-          When a dispatch lands, hit "Fetch &amp; decrypt prompt" — the
-          envelope downloads, your local private key decrypts, and the
-          plaintext shows above. Run it on your installed SLM (Phase
-          9.0c), paste the response text + actual tokens below, and your
-          mesh balance ticks up.
+          <strong>Manual serve (default):</strong> when a dispatch lands,
+          hit "Fetch &amp; decrypt prompt" — the envelope downloads, your
+          local private key decrypts, and the plaintext shows above. Run
+          it on your installed SLM (Phase 9.0c), paste the response text
+          + actual tokens below, and your mesh balance ticks up.
+        </p>
+        <p className="mt-2">
+          <strong>Auto-serve (Phase 13.7.4):</strong> tick "Auto-serve" on
+          publish. When you have an installed SLM on this device, the
+          decrypt + generate + post chain runs without a manual click —
+          you see live status (Decrypting · Running on installed SLM ·
+          Posting served response · Served) and the mesh balance ticks
+          up. The plaintext + response stay in component state only —
+          neither one persists to OPFS, localStorage, or the BE. You
+          can revoke any time.
         </p>
       </details>
     </Card>
@@ -370,10 +396,36 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
 }
 
 // Phase 13.7.2 — pending dispatches section, mounted at the
-// bottom of the capacity card. Honest manual-serve UI for v1.
-function PendingDispatchesSection({ workerId }: { workerId: string }) {
+// bottom of the capacity card. Phase 13.7.4 extends with
+// auto-serve mode when (a) the matching capacity has
+// `autoServe: true` and (b) the worker has an installed SLM
+// on this device.
+function PendingDispatchesSection({
+  workerId,
+  capacities
+}: {
+  workerId: string;
+  capacities: ComputeServingCapacity[];
+}) {
   const pending = useComputeServingDispatchesPending(workerId);
+  const installs = useInstalledSlms(workerId);
+  const installed = (installs.data ?? []).find((i) => i.status === 'installed');
+  const installedModelPackId = installed?.modelPackId ?? null;
   const dispatches = pending.data?.dispatches ?? [];
+
+  // Build a capacityId → autoServe lookup from the worker's
+  // ACTIVE capacities only. Revoked / paused capacities should
+  // not auto-serve even if a stale dispatch references them.
+  const autoServeByCapacityId = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const cap of capacities) {
+      if (cap.status === 'active' && cap.autoServe) {
+        map.set(cap.capacityId, true);
+      }
+    }
+    return map;
+  }, [capacities]);
+
   if (pending.isPending) return null;
   if (dispatches.length === 0) {
     return (
@@ -389,9 +441,20 @@ function PendingDispatchesSection({ workerId }: { workerId: string }) {
         Pending dispatches ({dispatches.length})
       </p>
       <ul className="space-y-2">
-        {dispatches.map((d) => (
-          <PendingDispatchRow key={d.dispatchId} dispatch={d} workerId={workerId} />
-        ))}
+        {dispatches.map((d) => {
+          const autoServeMode =
+            autoServeByCapacityId.get(d.capacityId) === true &&
+            installedModelPackId !== null;
+          return (
+            <PendingDispatchRow
+              key={d.dispatchId}
+              dispatch={d}
+              workerId={workerId}
+              autoServeMode={autoServeMode}
+              installedModelPackId={installedModelPackId}
+            />
+          );
+        })}
       </ul>
     </div>
   );
@@ -399,10 +462,14 @@ function PendingDispatchesSection({ workerId }: { workerId: string }) {
 
 function PendingDispatchRow({
   dispatch,
-  workerId
+  workerId,
+  autoServeMode = false,
+  installedModelPackId = null
 }: {
   dispatch: ComputeServingDispatch;
   workerId: string;
+  autoServeMode?: boolean;
+  installedModelPackId?: string | null;
 }) {
   const serve = useServeComputeServingDispatch();
   const fetchEnc = useFetchEncryptedPrompt();
@@ -415,6 +482,15 @@ function PendingDispatchRow({
   const [decryptedPrompt, setDecryptedPrompt] = useState<string | null>(null);
   const [decryptError, setDecryptError] = useState<string | null>(null);
   const [decrypting, setDecrypting] = useState<boolean>(false);
+  // Phase 13.7.4 — auto-serve telemetry. We mark this row as
+  // "auto-serving" while the runtime is generating + posting.
+  // The ref prevents the effect from re-firing if the dispatch
+  // list re-renders mid-flight.
+  const [autoServeStatus, setAutoServeStatus] = useState<
+    'idle' | 'decrypting' | 'generating' | 'posting' | 'served' | 'error'
+  >('idle');
+  const [autoServeError, setAutoServeError] = useState<string | null>(null);
+  const autoServeAttemptedRef = useRef<boolean>(false);
 
   async function handleFetchAndDecrypt() {
     setDecryptError(null);
@@ -454,6 +530,100 @@ function PendingDispatchRow({
       setDecrypting(false);
     }
   }
+
+  // Phase 13.7.4 — auto-serve loop. When autoServeMode is true
+  // AND an SLM is installed AND we haven't attempted yet,
+  // fire the full chain: fetch envelope → decrypt → load shared
+  // runtime → generate → sha256 → submit serve. Single-shot
+  // per dispatch (guarded by autoServeAttemptedRef).
+  useEffect(() => {
+    if (!autoServeMode) return;
+    if (!installedModelPackId) return;
+    if (autoServeAttemptedRef.current) return;
+    autoServeAttemptedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setAutoServeStatus('decrypting');
+        const { envelope } = await fetchEnc.mutateAsync({
+          dispatchId: dispatch.dispatchId,
+          workerId
+        });
+        if (cancelled) return;
+        const keypair = useWorkerKeypairStore.getState().getKeypair(workerId);
+        if (!keypair) {
+          throw new Error('no_keypair');
+        }
+        const plaintext = await decryptPromptFromCitizen(
+          {
+            ciphertextBase64: envelope.ciphertextBase64,
+            nonceBase64: envelope.nonceBase64,
+            ephemeralPubKeyBase64: envelope.ephemeralPubKeyBase64
+          },
+          keypair.privateKeyPkcs8Base64
+        );
+        if (cancelled) return;
+        setDecryptedPrompt(plaintext);
+
+        setAutoServeStatus('generating');
+        // Dynamic imports keep wllama out of the main bundle —
+        // the runtime only loads when an auto-serve actually fires.
+        const [{ getSharedSlmRuntime }, { readSlmBlob }] = await Promise.all([
+          import('@/lib/slm-runtime'),
+          import('@/lib/opfs')
+        ]);
+        const runtime = await getSharedSlmRuntime(
+          installedModelPackId,
+          () => readSlmBlob(installedModelPackId)
+        );
+        if (cancelled) return;
+        const { responseText: generated, approxTokenCount } =
+          await generateAutoServedResponse({
+            plaintextPrompt: plaintext,
+            runtime
+          });
+        if (cancelled) return;
+
+        setAutoServeStatus('posting');
+        const responseHash = await sha256Pointer(generated);
+        await serve.mutateAsync({
+          dispatchId: dispatch.dispatchId,
+          workerId,
+          actualTokens: approxTokenCount,
+          responseHash
+        });
+        if (cancelled) return;
+        // Persist the response text + tokens into the manual-
+        // form fields so a user inspecting the row sees what
+        // their device served.
+        setResponseText(generated);
+        setActualTokens(approxTokenCount);
+        setAutoServeStatus('served');
+      } catch (err) {
+        if (cancelled) return;
+        const apiErr = err as { code?: string; message?: string };
+        const reason =
+          apiErr.code === 'envelope_not_found'
+            ? 'envelope not yet posted'
+            : apiErr.code === 'dispatch_not_pending'
+              ? 'someone already served this'
+              : apiErr.code === 'dispatch_expired'
+                ? 'dispatch expired before auto-serve completed'
+                : (err as Error).message === 'no_keypair'
+                  ? 'no encryption keypair on this device for this persona'
+                  : 'unexpected error — falling back to manual';
+        setAutoServeStatus('error');
+        setAutoServeError(`Auto-serve failed: ${reason}. You can still serve manually below.`);
+        autoServeAttemptedRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoServeMode, installedModelPackId, dispatch.dispatchId, workerId]);
 
   async function handleServe() {
     setError(null);
@@ -502,6 +672,22 @@ function PendingDispatchRow({
       <p className="text-caption text-text-muted">
         Prompt hash: <span className="font-mono">{dispatch.promptHash.slice(0, 24)}…</span>
       </p>
+      {autoServeMode && autoServeStatus !== 'idle' && autoServeStatus !== 'error' && (
+        <div className="mt-2 rounded-sm border border-trust-100 bg-trust-50 p-2 text-caption text-trust-700">
+          <Badge variant="pending">Auto-serving</Badge>{' '}
+          <span className="ml-1">
+            {autoServeStatus === 'decrypting' && 'Decrypting envelope…'}
+            {autoServeStatus === 'generating' && 'Running on installed SLM…'}
+            {autoServeStatus === 'posting' && 'Posting served response…'}
+            {autoServeStatus === 'served' && 'Served · mesh balance credited'}
+          </span>
+        </div>
+      )}
+      {autoServeError && (
+        <p className="mt-2 rounded-sm border border-orange-100 bg-orange-50 p-2 text-caption text-orange-700">
+          {autoServeError}
+        </p>
+      )}
       {decryptedPrompt && (
         <div className="mt-2 rounded-sm border border-trust-100 bg-trust-50 p-2">
           <p className="text-caption font-semibold uppercase tracking-wide text-trust-700">

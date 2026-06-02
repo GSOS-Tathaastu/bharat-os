@@ -152,6 +152,58 @@ Implemented pieces:
 
 ---
 
+## 🤖 2026-06-03 — Phase 13.7.4 shipped: wllama auto-serve mode (compute network closes end-to-end with automation)
+
+Closes the compute network's last manual-click step. When a worker
+publishes a capacity with "Auto-serve" ticked AND has an installed
+SLM on-device, every incoming dispatch decrypts + generates + posts
+automatically — no human interaction. The §13.x compute network
+revenue line is substrate-complete with end-to-end automation.
+
+Flow:
+1. Worker ticks "Auto-serve" on publish (default off, opt-in).
+2. Citizen dispatches → encrypted envelope arrives on the BE.
+3. Worker's PendingDispatchRow detects the auto-serve flag + the
+   installed SLM modelPackId; useEffect fires the chain:
+   `Decrypting envelope…` → `Running on installed SLM…` →
+   `Posting served response…` → `Served · mesh balance credited`.
+4. Plaintext + response live in component state only — never
+   persisted to OPFS, localStorage, or the BE. Only sha256 hash
+   + approxTokenCount cross the wire.
+
+§15 bindings preserved: plaintext NEVER reaches BE; SLM runtime
+is WASM-isolated; ledger emits POINTER + count meta only; the
+autoServe flag is a FE-side instruction (BE never inspects SLM
+output). Worker can revoke any time; DPDP §12 cascade unchanged.
+
+BE: optional `autoServe: boolean` field on capacity (defaults
+false; non-boolean rejected). Capacity ledger event carries the
+flag. No store migration (capacities persist as JSON blobs).
+
+FE: NEW `frontend/src/lib/compute-auto-serve.ts` (~70 lines) —
+pure-function `generateAutoServedResponse` that wraps the existing
+`SlmRuntime.generate` contract. No new runtime API; composes the
+same shared `getSharedSlmRuntime` substrate the doc-summariser and
+skill-agent use. Dynamic imports keep wllama out of the main
+bundle until auto-serve fires.
+
+Honest error fallback to manual on every failure path. SLM not
+installed → effect bails (manual stays available). The "How this
+works" copy now distinguishes manual vs auto-serve.
+
+Adversarial review: ship_with_no_must_fix. Notes: SF-1 no
+auto-retry on envelope race; SF-2 TEE attestation is the
+fundamental v2 (without it a malicious worker COULD stub the SLM
+and still earn); SF-3 real token count from wllama API; SF-4 no
+update-autoServe endpoint (workers revoke+republish).
+
+Tests: 526 vitest (+4 compute-auto-serve helper roundtrip) +
+1441 Node (+3 autoServe default+roundtrip+ledger). tsc clean.
+Zero new external API. ADR 0169.
+
+**§13.x is now fully closed.** Next sequential is Phase 2a (PWA +
+Android TWA distribution) or Phase 14.0 (Sahayak provider role).
+
 ## 📜 2026-06-03 — Phase 13.6.1 shipped: LICENSE + landing animation + SEO meta tags (marketing polish closes 13.6 arc)
 
 Pitch-visible polish that closes the §13.6 marketing arc:

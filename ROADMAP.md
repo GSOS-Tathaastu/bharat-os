@@ -1351,9 +1351,12 @@ claim backed by an ADR or memory binding.
   Worker now actually sees the citizen's prompt on-device; the
   13.7.2 honor-system is now an honest verification path.
   Forward-secret ephemeral keypair per dispatch; envelope
-  auto-wiped after serve. **Phase 13.7.4 next** — Phase 9.0c
-  wllama runtime serve-mode extension (automated decrypt +
-  serve + signed response without human interaction).
+  auto-wiped after serve.
+  **Phase 13.7.4 shipped 2026-06-03 (ADR 0169)** — wllama
+  auto-serve mode. Capacity gains optional `autoServe` flag;
+  PendingDispatchRow fires decrypt → generate → post chain
+  automatically when worker has an installed SLM. §13.x compute
+  network is substrate-complete with end-to-end automation.
 - [ ] Storage network already substrate — no FE work for v1.
 
 #### Phase 14+ — Bharat ID / SSO
