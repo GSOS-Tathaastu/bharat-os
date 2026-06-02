@@ -2201,6 +2201,52 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.3 — SHIPPED 2026-06-02 (ADR 0153).** SLM-G
+  on-device personalization. Third SLM USP feature. NEW
+  `profile-store.ts` — Zustand+persist+localStorage with
+  `PROFILE_STORE_PROTOCOL_VERSION = 'bos.phase13.profile.v2'`,
+  `getActiveProfile(identityId)` cross-citizen guard, and a
+  PII-impossible-by-construction schema (enum × enum × bool ×
+  allowlist-domains). NEW `profile-prompt-fragment.ts` — pure
+  builder returning `''` at defaults so existing prompts stay
+  byte-equal for un-personalised citizens; `FRAGMENT_MAX_CHARS
+  = 400`; defence-in-depth `scanWithRegex` on emitted bytes.
+  NEW `PersonalizationCard.tsx` — inline Settings card with
+  language select / tone radio / accessibility checkboxes /
+  topic chips, mounted between Identity and DPDP cards. Both
+  `buildIntentParsePrompt` and `buildDocSummaryPrompt` gain
+  an optional `profileFragment` parameter; both SLM consumer
+  hooks subscribe only to `updatedAt` as a tripwire and read
+  the profile lazily via `getActiveProfile` inside the
+  callback (MF-1 stale-closure fix). `ProtectedSurface` in
+  App.tsx now `key={activeId}` so every protected route
+  auto-remounts on identity flip (MF-2; symmetric to Labs).
+  `clearProfile()` wired into both Forget-persona and
+  `eraseIdentity` success — DPDP cascade complete; Erase
+  modal cascade list and Identity card body copy both
+  disclose the personalization wipe. **§15 bindings**: pure
+  FE, zero fetch/XHR/sendBeacon/WebSocket (vitest SF-1
+  enforces); PII-impossible by construction; honest empty
+  state via `''` at defaults; cross-citizen isolation via
+  snapshot guard + parent-route remount; protocol version
+  pinned with v1→v2 migrate that strips the deprecated
+  `highContrast` field. **Adversarial review** (3 lenses):
+  **5 MUST_FIX + 10 SHOULD_FIX + 6 defer**; all 5 must + 6
+  key should fixed in-phase. MF-1 stale-closure (drop
+  whole-store subscription, lazy read), MF-2 ProtectedSurface
+  remount, MF-3 drop highContrast no-op + v2 + migrate, MF-4
+  DPDP copy upgrade, MF-5 no-identity banner. SF-2 intent-
+  parser citizen-safe error (mirrors Phase 13.0 MF-2), SF-4
+  coerce-on-rehydrate, SF-6 cross-identity warning banner,
+  SF-7 Evidence copy tightened, SF-8 saturated chip caption,
+  SF-9 drop sprint metadata from subtitle. **FE-BE parity
+  binding INVERTED**: BE delta = none by design (privacy
+  invariant). A `/api/profile/*` endpoint would falsify the
+  pitch beat; future cross-device sync must round-trip
+  through vault-key + memory-records, never a plain endpoint.
+  **API_INTEGRATIONS.md impact**: ZERO new external API.
+  Last-updated header bumped. Tests: vitest 313 → **356**
+  (+43); Node 1233 unchanged (FE-only). tsc clean.
 - **Phase 13.2 — SHIPPED 2026-06-01 (ADR 0152).** Closes the
   SLM-F arc with the first BE delta. NEW `piiRedaction`
   sub-envelope on `intentAnnotation` (`src/phase0/intent-

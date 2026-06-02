@@ -324,3 +324,30 @@ describe('Phase 13.0 adversarial fix SF-6 — unknown docKind warning', () => {
     }
   });
 });
+
+// Phase 13.3 — backward-compat regression pin. profileFragment is
+// optional; omitting it OR passing empty string must produce bytes
+// identical to the pre-13.3 baseline.
+describe('Phase 13.3 — profileFragment backward-compat pin', () => {
+  it('omitted profileFragment === empty profileFragment === undefined', () => {
+    const text = 'sample electricity bill body';
+    const a = buildDocSummaryPrompt('electricity_bill', text);
+    const b = buildDocSummaryPrompt('electricity_bill', text, '');
+    const c = buildDocSummaryPrompt('electricity_bill', text, undefined);
+    expect(a).toBe(b);
+    expect(a).toBe(c);
+  });
+
+  it('non-empty profileFragment is placed ABOVE the role line, exactly once', () => {
+    const fragment =
+      'Citizen preferences (stay on-device; respect when relevant):\n- Respond in Hindi.';
+    const out = buildDocSummaryPrompt('electricity_bill', 'sample body', fragment);
+    const fragIdx = out.indexOf(fragment);
+    const roleIdx = out.indexOf('You are an on-device document summariser');
+    expect(fragIdx).toBeGreaterThanOrEqual(0);
+    expect(fragIdx).toBeLessThan(roleIdx);
+    expect(out.split(fragment).length - 1).toBe(1);
+    const docIdx = out.indexOf('DOCUMENT:');
+    expect(fragIdx).toBeLessThan(docIdx);
+  });
+});

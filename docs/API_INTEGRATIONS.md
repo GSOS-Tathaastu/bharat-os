@@ -15,16 +15,16 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-01 (Phase 13.2 — piiRedaction count-
-only annotation envelope + opt-in transparent Send pre-flight
-shipped. **Still zero new external-API dependencies**: the
-`piiRedaction` sub-envelope rides through the existing
-`/api/orchestrations` POST as part of `intentAnnotation`; no
-new endpoint, no new partner credentials. The whole 13.x SLM
-USP arc continues to add capability without external services.
-The parallel revenue-lines Phase 13.x items at §4.1 UPI rails
-and §4.2 IFSC lookup are still the only remaining 13.x
-entries that will touch this doc.)
+Last updated: 2026-06-02 (Phase 13.3 — SLM-G on-device
+personalization shipped. **Still zero new external-API
+dependencies** — and emphatically so: the entire pitch beat of
+SLM-G is that preferences never leave the device, so a
+`/api/profile/*` endpoint would falsify the demo claim. Profile
+substrate is pure FE localStorage + Zustand persist. The whole
+13.x SLM USP arc continues to add capability without external
+services. The parallel revenue-lines Phase 13.x items at §4.1
+UPI rails and §4.2 IFSC lookup are still the only remaining
+13.x entries that will touch this doc.)
 
 ## Legend
 

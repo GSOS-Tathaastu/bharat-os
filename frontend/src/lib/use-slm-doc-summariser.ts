@@ -31,6 +31,8 @@ import {
   type DocKind,
   type ParsedDocSummary
 } from './doc-summariser';
+import { useProfileStore, getActiveProfile } from './profile-store';
+import { buildProfileFragment } from './profile-prompt-fragment';
 
 // Summariser-specific caps. Heavier generate budget so the cooling-
 // down window must reflect that — 2 per minute per document hash,
@@ -64,6 +66,11 @@ interface UseOptions {
 
 export function useSlmDocSummariser({ identityId }: UseOptions) {
   const installs = useInstalledSlms(identityId);
+  // Phase 13.3 MF-1 — subscribe to ONLY the profile-store
+  // `updatedAt` tripwire so summarise() re-memoises when the
+  // citizen toggles a preference. Profile read uses getState()
+  // lazily inside summarise() to avoid stale-closure capture.
+  const profileUpdatedAt = useProfileStore((s) => s.updatedAt);
   const installed = (installs.data ?? []).find((i) => i.status === 'installed');
   const runtimeRef = useRef<SlmRuntime | null>(null);
   const mountedRef = useRef(true);
@@ -237,7 +244,11 @@ export function useSlmDocSummariser({ identityId }: UseOptions) {
           streamedTextRef.current = '';
           safeSetPartial('');
           safeSetStatus({ kind: 'summarising', streamedChars: 0 });
-          const prompt = buildDocSummaryPrompt(docKind, trimmed);
+          // Phase 13.3 — personalization preamble (fresh-read via
+          // getState; MF-1 stale-closure fix).
+          const profile = getActiveProfile(identityId);
+          const profileFragment = buildProfileFragment(profile);
+          const prompt = buildDocSummaryPrompt(docKind, trimmed, profileFragment);
           const startedAt = performance.now();
           const completion = await runtimeRef.current!.generate({
             prompt,
@@ -288,7 +299,10 @@ export function useSlmDocSummariser({ identityId }: UseOptions) {
         inflightRef.current = null;
       }
     },
-    [installed, checkRateLimit, safeSetStatus, safeSetPartial]
+    // Phase 13.3 MF-1 — identityId + profileUpdatedAt in deps so
+    // the callback re-memoises on identity flip + on every profile
+    // toggle.
+    [installed, identityId, profileUpdatedAt, checkRateLimit, safeSetStatus, safeSetPartial]
   );
 
   const reset = useCallback(() => {

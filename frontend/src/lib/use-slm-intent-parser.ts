@@ -16,6 +16,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSlmBlob } from './opfs';
 import { getSharedSlmRuntime, type SlmRuntime } from './slm-runtime';
 import { buildIntentParsePrompt, parseIntentCompletion, type ParsedIntent } from './intent-parser';
+import { useProfileStore, getActiveProfile } from './profile-store';
+import { buildProfileFragment } from './profile-prompt-fragment';
 import { useInstalledSlms } from './hooks';
 
 export type SlmParserStatus =
@@ -51,6 +53,13 @@ function pickActiveInstall(
 export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
   const installs = useInstalledSlms(identityId);
   const active = pickActiveInstall(installs.data ?? undefined);
+  // Phase 13.3 + MF-1 — subscribe to ONLY the profile-store
+  // `updatedAt` tripwire so the parse() callback re-memoises when
+  // the citizen toggles a preference. Reading the actual profile
+  // happens lazily inside parse() via getActiveProfile(identityId)
+  // which calls useProfileStore.getState() synchronously, avoiding
+  // stale-closure capture of the whole profile across toggles.
+  const profileUpdatedAt = useProfileStore((s) => s.updatedAt);
   const runtimeRef = useRef<SlmRuntime | null>(null);
   // SF-1 (adversarial fix) — guards setStatus from firing after
   // unmount when a long WASM load resolves late.
@@ -127,7 +136,14 @@ export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
             }
           }
           safeSetStatus({ kind: 'parsing' });
-          const prompt = buildIntentParsePrompt(intentText);
+          // Phase 13.3 — inject the personalization preamble.
+          // getActiveProfile() with no second arg reads
+          // useProfileStore.getState() FRESH, so toggles between
+          // renders are picked up on the next parse() without
+          // requiring a hook remount.
+          const profile = getActiveProfile(identityId);
+          const profileFragment = buildProfileFragment(profile);
+          const prompt = buildIntentParsePrompt(intentText, profileFragment);
           const startedAt = performance.now();
           const completion = await runtimeRef.current!.generate({
             prompt,
@@ -138,8 +154,17 @@ export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
           const parsed = parseIntentCompletion(completion);
           safeSetStatus({ kind: 'ready' });
           return { parsed, rawCompletion: completion, generationMs };
-        } catch (err) {
-          safeSetStatus({ kind: 'error', message: (err as Error).message || 'Intent parsing failed.' });
+        } catch (_err) {
+          // Phase 13.3 adversarial fix SF-2 — citizen-safe generic
+          // message. Raw wllama exceptions can echo prompt bytes;
+          // the prompt now includes the personalization preamble,
+          // widening the leak surface (allowlist-derived so PII
+          // risk is structural-zero, but the binding still applies).
+          // Mirrors Phase 13.0 MF-2 fix on doc-summariser.
+          safeSetStatus({
+            kind: 'error',
+            message: "The model couldn't finish on this device. Tap Check to retry."
+          });
           return null;
         }
       })();
@@ -150,7 +175,11 @@ export function useSlmIntentParser({ identityId }: UseSlmIntentParserOptions) {
         inflightRef.current = null;
       }
     },
-    [active, safeSetStatus]
+    // Phase 13.3 MF-1 — identityId + profileUpdatedAt in deps so the
+    // callback re-memoises on identity flip + on every profile
+    // toggle. The actual profile read uses getState() inside the
+    // callback so the closure can never go stale across toggles.
+    [active, identityId, profileUpdatedAt, safeSetStatus]
   );
 
   const reset = useCallback(() => safeSetStatus(active ? { kind: 'ready' } : { kind: 'unavailable', reason: 'no_install' }), [active, safeSetStatus]);

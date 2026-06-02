@@ -131,7 +131,16 @@ function normaliseInput(text: string): string {
   return normalised.slice(0, DOC_INPUT_CHAR_CAP);
 }
 
-export function buildDocSummaryPrompt(docKind: DocKind, text: string): string {
+/**
+ * @param docKind The document class hint.
+ * @param text The pasted document text.
+ * @param profileFragment Phase 13.3 — optional preamble from the
+ *   on-device personalization profile. Empty string or undefined
+ *   keeps the prompt BYTE-EQUAL to the pre-13.3 baseline (vitest
+ *   regression-pinned). When non-empty, injected ABOVE the role
+ *   line as a citizen-preferences preamble.
+ */
+export function buildDocSummaryPrompt(docKind: DocKind, text: string, profileFragment?: string): string {
   // Phase 13.0 adversarial fix SF-6 — DEV-only warn when an
   // integrator (eg future SLM-F/G/H) passes a docKind not in the
   // allowlist. Silent prod degradation to 'generic' was masking
@@ -148,7 +157,13 @@ export function buildDocSummaryPrompt(docKind: DocKind, text: string): string {
   const label = DOC_KIND_LABEL[safeKind];
   const hint = DOC_KIND_BIAS_HINTS[safeKind];
   const body = normaliseInput(text);
+  const preamble: string[] = [];
+  if (profileFragment && profileFragment.length > 0) {
+    preamble.push(profileFragment);
+    preamble.push('');
+  }
   return [
+    ...preamble,
     'You are an on-device document summariser for Bharat OS. The citizen has pasted an Indian-paperwork document and needs a brief, plain-language summary they can act on. Be brief and factual. Never invent details that are not in the document.',
     '',
     `Document kind: ${label}`,

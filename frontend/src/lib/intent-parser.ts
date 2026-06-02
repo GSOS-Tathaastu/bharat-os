@@ -68,9 +68,21 @@ const ACTION_GLOSS: Record<IntentActionType, string> = {
 
 // ─── Prompt builder ─────────────────────────────────────────────
 
-export function buildIntentParsePrompt(intentText: string): string {
+/**
+ * @param intentText The citizen's raw intent text.
+ * @param profileFragment Phase 13.3 — optional preamble from the
+ *   on-device personalization profile. Empty string or undefined
+ *   keeps the prompt BYTE-EQUAL to the pre-13.3 baseline (vitest
+ *   regression-pinned). When non-empty, the fragment is injected
+ *   ABOVE the role line as a citizen-preferences preamble.
+ */
+export function buildIntentParsePrompt(intentText: string, profileFragment?: string): string {
   const trimmed = (intentText || '').replace(/\r\n/g, '\n').trim().slice(0, 600);
   const lines: string[] = [];
+  if (profileFragment && profileFragment.length > 0) {
+    lines.push(profileFragment);
+    lines.push('');
+  }
   lines.push('You are an intent classifier for Bharat OS, an India-first on-device assistant.');
   lines.push('The user speaks Hindi, Marathi, Bhojpuri, Tamil, Bengali, or English (often code-mixed).');
   lines.push('');

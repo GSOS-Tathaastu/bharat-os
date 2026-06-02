@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Action, Badge, Card, Evidence, Field, Sheet, useToast } from '@/components/ui';
 import { useIdentityStore } from '@/lib/identity-store';
+import { useProfileStore } from '@/lib/profile-store';
+import { PersonalizationCard } from '@/components/PersonalizationCard';
 import { useNavigate } from 'react-router-dom';
 import {
   useActiveIdentity,
@@ -23,6 +25,9 @@ import {
 
 export function SettingsPage() {
   const clear = useIdentityStore((s) => s.clear);
+  // Phase 13.3 — DPDP cascade: the personalization profile is
+  // wiped at the same tick as the persona forget / account erase.
+  const clearProfile = useProfileStore((s) => s.clearProfile);
   const navigate = useNavigate();
   const identity = useActiveIdentity();
   const downloadMyData = useDownloadMyData();
@@ -75,6 +80,7 @@ export function SettingsPage() {
         onSuccess: () => {
           show('Account erased. Goodbye.', 'success');
           clear();
+          clearProfile();
           setTimeout(() => navigate('/'), 600);
         },
         onError: (err: Error) => show(err.message, 'error')
@@ -159,18 +165,23 @@ export function SettingsPage() {
       <Card title="Identity">
         <p className="text-body text-text-muted mb-3">
           Persona is stored locally on this device only. Switching personas
-          does not affect any server state.
+          does not affect any server state. Forgetting also clears your
+          on-device personalization preferences for this persona.
         </p>
         <Action
           variant="secondary"
           onClick={() => {
             clear();
+            clearProfile();
             navigate('/');
           }}
         >
           Forget persona on this device
         </Action>
       </Card>
+
+      {/* Phase 13.3 SLM-G — on-device personalization profile. */}
+      <PersonalizationCard identityId={identity?.id} />
 
       <Card title="Your data rights (DPDP §12)" tone="governance">
         <p className="text-body text-text-muted mb-3">
@@ -373,9 +384,10 @@ export function SettingsPage() {
           <p className="text-body font-semibold text-error">This cannot be undone.</p>
           <p className="mt-1 text-caption text-text-muted">
             All your earnings logs, mesh events, consent grants, attestations,
-            and audit-ledger entries that mention you are removed. Bundle
-            exports already shared with verifiers are not affected (they
-            already left). DPDP §12(3) cascade — verified end-to-end.
+            audit-ledger entries that mention you, and on-device
+            personalization preferences are removed. Bundle exports already
+            shared with verifiers are not affected (they already left).
+            DPDP §12(3) cascade — verified end-to-end.
           </p>
         </Card>
         <div className="mt-3">

@@ -152,6 +152,58 @@ Implemented pieces:
 
 ---
 
+## 🎛 2026-06-02 — Phase 13.3 shipped: SLM-G on-device personalization (preferences never leave the device)
+
+Third of four SLM USP features. Citizens flip a few enum knobs
+on /settings (preferred language, response tone, accessibility,
+topic interests) and every on-device SLM verb picks those
+preferences up on the next generation. **DevTools → Application
+→ Local Storage shows the JSON; Network tab stays empty.** That
+is the entire pitch beat — three on-screen proofs in 60 seconds.
+
+- **ADR 0153** — pure-FE substrate (`profile-store.ts` +
+  `profile-prompt-fragment.ts`) named generically so SLM-H +
+  Phase 12.3+ marketplace personalization compose the same
+  exports. Profile schema is **PII-impossible by construction**:
+  `enum × enum × bool × allowlist-domains`. No free-text input
+  anywhere in the UI.
+- **Two demo-visible SLM integrations**: intent-parser chip
+  flips language / tone on the same input after a toggle; doc-
+  summariser TLDR flips language / tone on the same Form-16
+  paste. Both consumer hooks subscribe ONLY to `updatedAt` as a
+  tripwire and read the profile lazily via `getActiveProfile`
+  inside the parse/summarise callback — MF-1 stale-closure fix.
+- **Cross-citizen isolation** has two moats now: (1)
+  `getActiveProfile` returns defaults when the snapshotted
+  identityId mismatches the active one; (2) `ProtectedSurface`
+  in App.tsx is now `key={activeId}` so every protected route
+  auto-remounts on identity flip (MF-2 — symmetric to Labs).
+- **DPDP cascade complete**: `clearProfile()` wired into both
+  Forget-persona and `eraseIdentity` success. Identity card body
+  AND Erase modal cascade list both disclose the personalization
+  wipe (MF-4).
+- **Adversarial review** (3 lenses): **5 MUST_FIX + 10
+  SHOULD_FIX + 6 defer**; all 5 must + 6 key should fixed
+  in-phase. Verdict ship_with_fixes. MF-3 drops the
+  `highContrast` no-op (wire-only — never read anywhere); v1→v2
+  protocol bump with strict coerce-on-rehydrate. SF-1
+  network-spy test pins the §15 bytes-never-leave-device
+  binding so a future phase that accidentally subscribes a
+  fetch breaks the test. SF-2 migrates `use-slm-intent-parser`
+  to the citizen-safe generic error message (mirrors Phase 13.0
+  MF-2; widened surface now that the prompt includes a profile
+  preamble).
+- **Pure FE, zero BE changes** — by design AND as the pitch
+  beat. A `/api/profile/*` endpoint would falsify the
+  "preferences never leave device" claim. FE-BE parity binding
+  honoured by explicitly answering "BE: none, by design (privacy
+  invariant)" in ADR 0153.
+- **API_INTEGRATIONS.md impact**: zero new external API.
+- **Tests**: vitest 313 → **356** (+43); Node 1233 unchanged.
+  tsc clean.
+
+---
+
 ## 🔒 2026-06-01 — Phase 13.2 shipped: piiRedaction annotation envelope + opt-in transparent Send pre-flight
 
 Closes the Phase 13.1 SLM-F arc with the first BE delta in the
@@ -506,9 +558,11 @@ smartphones is captured as a binding.
   integration + 7 adversarial-fix cases). Vitest 138
   unchanged. tsc clean. Build green. Bundle unchanged.
 
-**Next: Phase 13.3** (standalone piiRedaction-only annotation
-path + per-identity persisted opt-in + offline-queue replay
-redaction + SLM-G on-device personalization) OR **Phase 13.0.1**
+**Next: Phase 13.4 SLM-H** (skill agents for Indian tasks —
+electricity bill / consumer complaint / PM-KISAN scheme) OR
+**Phase 13.3.x** (SLM-F substrate cleanups: standalone
+piiRedaction-only annotation path + per-identity persisted
+opt-in + offline-queue replay redaction) OR **Phase 13.0.1**
 (PDF.js upload — needs npm-dep approval) OR **Phase 14
 Sahayak**. Direction flexible.
 

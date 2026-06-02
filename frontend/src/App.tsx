@@ -36,8 +36,14 @@ function ProtectedSurface({ children }: { children: React.ReactNode }) {
   const identity = useActiveIdentity();
   // No identity selected → redirect to onboarding.
   if (!activeId || !identity) return <Navigate to="/" replace />;
+  // Phase 13.3 MF-2 — key the wrapper on activeId so every
+  // protected surface auto-remounts on identity flip. Prevents
+  // citizen-A state (SLM hook refs, profile-store view, queued
+  // intents) bleeding into citizen-B's session. Was previously
+  // present only on Labs.tsx for DocSummariserPanel; now uniform
+  // across all routes.
   return (
-    <div className="min-h-dvh pb-20 sm:pb-0">
+    <div key={activeId} className="min-h-dvh pb-20 sm:pb-0">
       <TopBar identity={identity} />
       {children}
     </div>

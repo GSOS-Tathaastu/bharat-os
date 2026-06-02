@@ -1239,8 +1239,14 @@ picked "minimum onboarding load, maximum coverage"):
   hardening. Deferred to 13.3: standalone piiRedaction-only
   annotation path + per-identity persisted opt-in +
   offline-queue replay redaction.
-- [ ] **G.** On-device personalization (preferences never leave
-  device).
+- [x] **G.** On-device personalization (preferences never leave
+  device). **Phase 13.3 shipped 2026-06-02 (ADR 0153)** —
+  pure-FE substrate (profile-store.ts + profile-prompt-
+  fragment.ts) named generically for SLM-H composition;
+  PII-impossible schema (enum × enum × bool × allowlist-
+  domains); localStorage via Zustand persist; PersonalizationCard
+  on /settings; profile fragment injected into SLM-A intent
+  parser + SLM-E doc summariser; DPDP cascade complete.
 - [ ] **H.** On-device skill agents for Indian tasks
   (electricity bill / consumer complaint / PM-KISAN scheme).
 

@@ -113,3 +113,33 @@ describe('actionTypeFriendlyLabel', () => {
     }
   });
 });
+
+// Phase 13.3 — backward-compat regression pin. The optional
+// profileFragment parameter MUST NOT change the prompt bytes when
+// callers omit it OR pass empty string. Existing intent-parser
+// behaviour is protected.
+describe('Phase 13.3 — profileFragment backward-compat pin', () => {
+  const intent = 'mujhe kal subah ek cook chahiye';
+  it('omitted profileFragment === empty profileFragment === undefined', () => {
+    const a = buildIntentParsePrompt(intent);
+    const b = buildIntentParsePrompt(intent, '');
+    const c = buildIntentParsePrompt(intent, undefined);
+    expect(a).toBe(b);
+    expect(a).toBe(c);
+  });
+
+  it('non-empty profileFragment is placed ABOVE the role line, exactly once', () => {
+    const fragment =
+      'Citizen preferences (stay on-device; respect when relevant):\n- Respond in Hindi.\n- Use a terse and brief tone.';
+    const out = buildIntentParsePrompt(intent, fragment);
+    const fragIdx = out.indexOf(fragment);
+    const roleIdx = out.indexOf('You are an intent classifier');
+    expect(fragIdx).toBeGreaterThanOrEqual(0);
+    expect(fragIdx).toBeLessThan(roleIdx);
+    // Substring count = 1.
+    expect(out.split(fragment).length - 1).toBe(1);
+    // The USER INTENT body must come AFTER the preamble.
+    const userIdx = out.indexOf('USER INTENT:');
+    expect(fragIdx).toBeLessThan(userIdx);
+  });
+});
