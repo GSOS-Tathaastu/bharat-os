@@ -1330,9 +1330,15 @@ claim backed by an ADR or memory binding.
   `compute_serving.dispatched` and `compute_serving.served`
   pointer ledger events. 4 endpoints + 13 explicit error codes.
   Pointer-only payload (`promptHash` + `responseHash` are sha256
-  pointers, never bytes). **Phase 13.7.2 next** — FE worker-side
-  serve UI + citizen-side dispatch trigger. **Phase 13.7.3** —
-  encryption substrate + Phase 9.0c runtime serve-mode.
+  pointers, never bytes).
+  **Phase 13.7.2 shipped 2026-06-03 (ADR 0166)** — FE wiring
+  closes the v1 demo loop: ComputeNetworkTestCard on /labs +
+  PendingDispatchesSection on ComputeServingCapacityCard +
+  sha256Pointer helper + 4 TanStack hooks (with 5s polling).
+  Manual-serve honor-system in v1 (worker types response text
+  + token count; both sha256-hashed client-side).
+  **Phase 13.7.3 next** — encryption substrate + Phase 9.0c
+  runtime serve-mode (closes the verifiable-serve loop).
 - [ ] Storage network already substrate — no FE work for v1.
 
 #### Phase 14+ — Bharat ID / SSO

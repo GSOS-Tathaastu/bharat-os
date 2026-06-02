@@ -63,3 +63,65 @@ export function defaultExpiresAt(days = DEFAULT_TTL_DAYS): string {
 export function formatPricePerKTokens(paise: number): string {
   return `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })} / 1000 tokens`;
 }
+
+// Phase 13.7.1 — dispatch entity (BE-defined). FE↔BE convergence
+// test asserts the status set matches src/phase1/compute-serving-dispatch.mjs.
+
+export const COMPUTE_SERVING_DISPATCH_PROTOCOL_VERSION = 'bos.phase13.compute-serving-dispatch.v1';
+
+export const COMPUTE_SERVING_DISPATCH_STATUSES = Object.freeze([
+  'pending',
+  'served',
+  'expired',
+  'failed'
+] as const);
+export type ComputeServingDispatchStatus = (typeof COMPUTE_SERVING_DISPATCH_STATUSES)[number];
+
+export const COMPUTE_SERVING_DISPATCH_STATUS_LABEL: Record<ComputeServingDispatchStatus, string> = {
+  pending: 'Pending',
+  served: 'Served',
+  expired: 'Expired',
+  failed: 'Failed'
+};
+
+export interface ComputeServingDispatch {
+  dispatchId: string;
+  requesterId: string;
+  workerId: string;
+  capacityId: string;
+  promptHash: string;
+  estimatedTokens: number;
+  actualTokens: number | null;
+  responseHash: string | null;
+  payoutPaise: number | null;
+  protocolVersion: typeof COMPUTE_SERVING_DISPATCH_PROTOCOL_VERSION;
+  status: ComputeServingDispatchStatus;
+  requestedAt: string;
+  servedAt: string | null;
+  expiresAt: string;
+  meshContributionEventId: string | null;
+  failureReason: string | null;
+}
+
+export interface ComputeServingDispatchesResponse {
+  dispatches: ComputeServingDispatch[];
+  protocolVersion: string;
+  supportedStatuses: readonly string[];
+}
+
+/**
+ * Compute the sha256:<hex64> pointer for an arbitrary text payload
+ * via the Web Crypto API. Used by the citizen-side test-dispatch
+ * card to derive `promptHash` from a typed prompt + by the
+ * worker-side serve UI to derive `responseHash` from a typed
+ * response. v1 demo only — encryption substrate from 13.7.3 will
+ * replace this with a proper key-exchange flow.
+ */
+export async function sha256Pointer(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `sha256:${hex}`;
+}

@@ -804,6 +804,89 @@ export function useRevokeComputeServingCapacity() {
   });
 }
 
+// Phase 13.7.1/2 — compute-serving dispatch hooks. v1 manual-serve
+// (worker types in response hash + token count); 13.7.3 will
+// replace with the encryption substrate + automated WASM serving.
+
+import type {
+  ComputeServingDispatch,
+  ComputeServingDispatchesResponse
+} from './compute-serving-capacity';
+
+export function useComputeServingDispatchesPending(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['compute-serving-dispatches-pending', identityId],
+    queryFn: () =>
+      api<ComputeServingDispatchesResponse>(
+        `/api/identities/${encodeURIComponent(identityId!)}/compute-serving-dispatches/pending`
+      ),
+    enabled: Boolean(identityId),
+    refetchInterval: 5000  // poll every 5s — workers want fresh queue
+  });
+}
+
+export function useComputeServingDispatchesSent(identityId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['compute-serving-dispatches-sent', identityId],
+    queryFn: () =>
+      api<ComputeServingDispatchesResponse>(
+        `/api/identities/${encodeURIComponent(identityId!)}/compute-serving-dispatches/sent`
+      ),
+    enabled: Boolean(identityId),
+    refetchInterval: 5000  // poll every 5s while waiting for served
+  });
+}
+
+export interface CreateComputeServingDispatchInput {
+  requesterId: string;
+  capacityId: string;
+  promptHash: string;
+  estimatedTokens: number;
+}
+
+export function useCreateComputeServingDispatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateComputeServingDispatchInput) =>
+      api<{ ok: boolean; dispatch: ComputeServingDispatch }>(
+        '/api/compute-serving-dispatches',
+        { method: 'POST', body: JSON.stringify(input) }
+      ),
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ['compute-serving-dispatches-sent', input.requesterId] });
+    }
+  });
+}
+
+export interface ServeComputeServingDispatchInput {
+  dispatchId: string;
+  workerId: string;
+  actualTokens: number;
+  responseHash: string;
+}
+
+export function useServeComputeServingDispatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dispatchId, workerId, actualTokens, responseHash }: ServeComputeServingDispatchInput) =>
+      api<{
+        ok: boolean;
+        dispatch: ComputeServingDispatch;
+        meshContributionEvent: { contributionEventId: string; payoutPaise: number };
+      }>(
+        `/api/compute-serving-dispatches/${encodeURIComponent(dispatchId)}/serve`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ workerId, actualTokens, responseHash })
+        }
+      ),
+    onSuccess: (_data, { workerId }) => {
+      qc.invalidateQueries({ queryKey: ['compute-serving-dispatches-pending', workerId] });
+      qc.invalidateQueries({ queryKey: ['mesh-balance', workerId] });
+    }
+  });
+}
+
 export function usePauseComputeServingCapacity() {
   const qc = useQueryClient();
   return useMutation({

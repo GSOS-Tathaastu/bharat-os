@@ -259,6 +259,21 @@ test('rejects calendar-invalid requestedAt', () => {
   );
 });
 
+// Phase 13.7.2 — FE↔BE convergence for the dispatch status list.
+test('Phase 13.7.2 — FE COMPUTE_SERVING_DISPATCH_STATUSES matches BE', async () => {
+  const fePath = path.join(repoRoot, 'frontend', 'src', 'lib', 'compute-serving-capacity.ts');
+  const source = await fs.readFile(fePath, 'utf8');
+  const re = /export const COMPUTE_SERVING_DISPATCH_STATUSES = Object\.freeze\(\[([\s\S]+?)\] as const\);/;
+  const match = re.exec(source);
+  assert.ok(match);
+  const feMembers = match[1]
+    .split(',')
+    .map((s) => s.trim().replace(/^['"`]/, '').replace(/['"`]$/, ''))
+    .filter((s) => s.length > 0)
+    .sort();
+  assert.deepEqual([...COMPUTE_SERVING_DISPATCH_STATUSES].sort(), feMembers);
+});
+
 // ─── HTTP integration ────────────────────────────────────────────
 
 async function withApiServer(handler) {

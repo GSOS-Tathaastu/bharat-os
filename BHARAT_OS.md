@@ -2201,6 +2201,46 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.7.2 — SHIPPED 2026-06-03 (ADR 0166).** FE wiring
+  for the compute network — closes the v1 demo loop on top of
+  the 13.7.1 BE substrate. EXTENDED
+  `frontend/src/lib/compute-serving-capacity.ts` with
+  COMPUTE_SERVING_DISPATCH_STATUSES + ComputeServingDispatch
+  type + `sha256Pointer(text)` Web Crypto helper (pinned
+  against RFC 6234 test vector). EXTENDED `hooks.ts` with 4
+  hooks: useComputeServingDispatchesPending /
+  useComputeServingDispatchesSent (both poll every 5s) /
+  useCreateComputeServingDispatch /
+  useServeComputeServingDispatch (invalidates mesh-balance on
+  success). EXTENDED ComputeServingCapacityCard — new
+  PendingDispatchesSection at the bottom showing pending count
+  + per-dispatch row with prompt-hash prefix + "Mark as
+  served" → inline form for response text + actual tokens →
+  sha256-hashes response client-side. NEW
+  `frontend/src/components/ComputeNetworkTestCard.tsx` (~290
+  lines) — citizen-side card mounted on /labs that walks
+  active worker capacities (filtering self), lets citizen pick
+  a worker + type a prompt + sets estimated tokens, sends
+  dispatch with prompt-hash-only over the wire, polls own
+  sent list every 5s. Honest framing in both cards' "How this
+  works" details: v1 limitation is the worker can't see the
+  citizen's prompt text (only the hash); manual-serve honor-
+  system; 13.7.3 replaces with encryption + automated WASM
+  serving. **Adversarial review** verdict:
+  **ship_with_no_new_fixes**. The §15 binding holds — both
+  citizen's prompt + worker's response stay on-device; only
+  sha256 hashes cross the wire. Known limitations are
+  inherited from 13.7.1 (race; cap not enforced at dispatch;
+  no verifiable serve). v1 also walks all identities O(N) for
+  capacity discovery — production needs a proper browse
+  endpoint, noted in ADR. **§15 bindings**: prompt + response
+  bytes never on BE; pointer-only payload; identity-keyed
+  remount. **API_INTEGRATIONS.md impact**: ZERO new external
+  API. **FE-BE parity**: BE delta = NONE; FE delta = lib
+  types + 4 hooks + worker card extension + new citizen card
+  + Labs mount + test files. Tests: vitest 500 → **506** (+6
+  ComputeNetworkTestCard render + sha256Pointer pin). Node
+  1405 → **1406** (+1 dispatch-status convergence). tsc clean.
 - **Phase 13.7.1 — SHIPPED 2026-06-02 (ADR 0165).** BE
   dispatch + serve substrate — wires the 13.7 compute network
   loop end-to-end at the BE layer. NEW

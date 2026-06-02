@@ -25,7 +25,9 @@ import {
   useComputeServingCapacities,
   useCreateComputeServingCapacity,
   useRevokeComputeServingCapacity,
-  usePauseComputeServingCapacity
+  usePauseComputeServingCapacity,
+  useComputeServingDispatchesPending,
+  useServeComputeServingDispatch
 } from '@/lib/hooks';
 import {
   COMPUTE_SERVING_STATUS_LABEL,
@@ -36,7 +38,9 @@ import {
   DEFAULT_TTL_DAYS,
   defaultExpiresAt,
   formatPricePerKTokens,
-  type ComputeServingCapacity
+  sha256Pointer,
+  type ComputeServingCapacity,
+  type ComputeServingDispatch
 } from '@/lib/compute-serving-capacity';
 import type { ApiError } from '@/lib/api';
 
@@ -328,20 +332,184 @@ export function ComputeServingCapacityCard({ identityId }: ComputeServingCapacit
         </p>
       )}
 
+      {/* Phase 13.7.2 — pending dispatches assigned to this
+          worker. Polls every 5s. Manual serve in v1 (worker
+          types in responseHash + actualTokens); 13.7.3 will
+          automate via the encryption substrate + Phase 9.0c
+          runtime serve-mode. */}
+      <PendingDispatchesSection workerId={identityId} />
+
       <details className="mt-3 text-caption text-text-muted">
         <summary className="cursor-pointer font-semibold">How this works</summary>
         <p className="mt-2">
           When another Bharat OS citizen submits an intent that needs an SLM
           inference, the server can route the work to YOUR phone if your
-          capacity is active and the device-state constraints are met
-          (battery ≥ X% + WiFi + charging). Your phone serves the inference
-          via the same Phase 9.0c wllama runtime, signs the response, and
-          your mesh balance ticks up. v1 ships the SUBSTRATE (opt-in card,
-          mesh workload type, audit ledger events). The actual dispatch +
-          serve flow needs a Phase 9.0c serve-mode runtime extension that
-          lands as Phase 13.7.1.
+          capacity is active. Your phone serves the inference via the same
+          Phase 9.0c wllama runtime, signs the response hash, and your mesh
+          balance ticks up. The Phase 13.7.1 BE substrate is live — your
+          pending queue polls every 5 seconds. v1 manual-serve flow has you
+          enter the actual tokens served + sha256 of your response text
+          below. Phase 13.7.3 replaces this with the encryption substrate
+          (citizen-encrypted prompt → your WASM runtime auto-decrypts and
+          serves).
         </p>
       </details>
     </Card>
+  );
+}
+
+// Phase 13.7.2 — pending dispatches section, mounted at the
+// bottom of the capacity card. Honest manual-serve UI for v1.
+function PendingDispatchesSection({ workerId }: { workerId: string }) {
+  const pending = useComputeServingDispatchesPending(workerId);
+  const dispatches = pending.data?.dispatches ?? [];
+  if (pending.isPending) return null;
+  if (dispatches.length === 0) {
+    return (
+      <p className="mt-4 text-caption text-text-muted">
+        No pending compute dispatches. When a citizen sends one to your
+        active capacity, it'll show up here within ~5 seconds.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-4">
+      <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
+        Pending dispatches ({dispatches.length})
+      </p>
+      <ul className="space-y-2">
+        {dispatches.map((d) => (
+          <PendingDispatchRow key={d.dispatchId} dispatch={d} workerId={workerId} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PendingDispatchRow({
+  dispatch,
+  workerId
+}: {
+  dispatch: ComputeServingDispatch;
+  workerId: string;
+}) {
+  const serve = useServeComputeServingDispatch();
+  const [showForm, setShowForm] = useState<boolean>(false);
+  const [responseText, setResponseText] = useState<string>('');
+  const [actualTokens, setActualTokens] = useState<number>(dispatch.estimatedTokens);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleServe() {
+    setError(null);
+    if (responseText.trim().length === 0) {
+      setError('Enter the response text you served (used to derive sha256 hash).');
+      return;
+    }
+    if (actualTokens < 1) {
+      setError('Actual tokens must be at least 1.');
+      return;
+    }
+    try {
+      const responseHash = await sha256Pointer(responseText);
+      await serve.mutateAsync({
+        dispatchId: dispatch.dispatchId,
+        workerId,
+        actualTokens,
+        responseHash
+      });
+      setShowForm(false);
+      setResponseText('');
+    } catch (err) {
+      const apiErr = err as { code?: string; message?: string };
+      const code = apiErr.code;
+      if (code === 'not_assigned') {
+        setError("This dispatch isn't assigned to you.");
+      } else if (code === 'dispatch_not_pending') {
+        setError('Someone already served this dispatch.');
+      } else if (code === 'dispatch_expired') {
+        setError('This dispatch expired (15-minute TTL).');
+      } else {
+        setError("Couldn't serve — try again in a moment.");
+      }
+    }
+  }
+
+  return (
+    <li className="rounded-sm border border-border bg-white p-3">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <Badge variant="pending">Pending</Badge>
+        <span className="text-caption text-text-muted">
+          ~{dispatch.estimatedTokens.toLocaleString('en-IN')} tokens estimated · expires{' '}
+          {dispatch.expiresAt.slice(11, 19)} UTC
+        </span>
+      </div>
+      <p className="text-caption text-text-muted">
+        Prompt hash: <span className="font-mono">{dispatch.promptHash.slice(0, 24)}…</span>
+      </p>
+      {!showForm && (
+        <Action
+          variant="trust"
+          size="sm"
+          onClick={() => setShowForm(true)}
+          className="mt-2"
+        >
+          Mark as served
+        </Action>
+      )}
+      {showForm && (
+        <div className="mt-2 rounded-sm border border-border bg-surface p-2">
+          <p className="mb-2 text-caption text-text-muted">
+            v1 manual serve: paste the response text your SLM produced + the actual
+            token count served. We'll sha256 the text client-side and post it as
+            the responseHash.
+          </p>
+          <label className="mb-2 block">
+            <span className="block text-caption font-semibold uppercase tracking-wide text-text-muted">
+              Response text (any length — hashed client-side)
+            </span>
+            <textarea
+              value={responseText}
+              onChange={(e) => setResponseText(e.target.value)}
+              rows={3}
+              placeholder="Paste what your SLM produced for the citizen's prompt."
+              className="mt-1 block w-full rounded-sm border border-border bg-white p-2 text-body focus:border-primary focus:outline-none"
+            />
+          </label>
+          <label className="mb-2 block">
+            <span className="block text-caption font-semibold uppercase tracking-wide text-text-muted">
+              Actual tokens served
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={100_000}
+              value={actualTokens}
+              onChange={(e) =>
+                setActualTokens(Math.max(1, Math.floor(Number(e.target.value) || 1)))
+              }
+              className="mt-1 block w-full rounded-sm border border-border bg-white p-2 text-body focus:border-primary focus:outline-none"
+            />
+          </label>
+          {error && (
+            <p className="mb-2 rounded-sm border border-orange-100 bg-orange-50 p-2 text-caption text-orange-700">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Action
+              variant="trust"
+              size="sm"
+              onClick={handleServe}
+              disabled={serve.isPending}
+            >
+              {serve.isPending ? 'Serving…' : 'Confirm served'}
+            </Action>
+            <Action variant="ghost" size="sm" onClick={() => { setShowForm(false); setError(null); }}>
+              Cancel
+            </Action>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }

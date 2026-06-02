@@ -152,6 +152,37 @@ Implemented pieces:
 
 ---
 
+## 🔁 2026-06-03 — Phase 13.7.2 shipped: Compute network FE wiring (v1 demo loop closes)
+
+Closes the v1 compute network demo loop on top of the 13.7.1 BE
+substrate. The whole flow is now clickable end-to-end:
+
+1. Worker opts in to serve idle compute (`/settings` capacity card)
+2. Citizen on `/labs` picks an active worker capacity, types a prompt,
+   sends a dispatch (sha256-hashed client-side; pointer-only over wire)
+3. Worker's `/settings` polls every 5s; pending dispatch appears
+4. Worker hits "Mark as served", enters response text + actual tokens
+   (sha256-hashed client-side); BE atomically debits, credits mesh,
+   emits `compute_serving.served`
+5. Citizen sees served status + worker's payout within ~5 seconds
+
+4 new TanStack hooks. New `ComputeNetworkTestCard` on `/labs` walks
+all identities for active capacities (v1 demo discovery). Extended
+`ComputeServingCapacityCard` with `PendingDispatchesSection` for
+manual-serve. New `sha256Pointer` Web Crypto helper pinned against
+RFC 6234 test vector.
+
+v1 limitation: prompt text doesn't flow through the BE so the worker
+can't see what the citizen typed. The "Mark as served" form is
+honor-system. Phase 13.7.3 closes the verifiable-serve loop with
+the encryption substrate (citizen-encrypted prompt → worker's WASM
+auto-decrypts and serves → signed response).
+
+Adversarial review: ship_with_no_new_fixes. §15 binding holds (prompt
++ response stay on-device; only hashes cross the wire). ADR 0166.
+
+Tests: 506 vitest + 1406 Node + tsc clean. Zero new external API.
+
 ## ⚡ 2026-06-02 — Phase 13.7.1 shipped: Compute-serving dispatch + serve substrate (BE)
 
 Wires the 13.7 compute network loop end-to-end at the BE layer.

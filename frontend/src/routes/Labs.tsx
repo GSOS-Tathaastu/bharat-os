@@ -20,6 +20,7 @@ import { SkillAgentPanel } from '@/components/SkillAgentPanel';
 import { ConsumerComplaintPanel } from '@/components/ConsumerComplaintPanel';
 import { PmKisanStatusPanel } from '@/components/PmKisanStatusPanel';
 import { CitizenDataOffersPanel } from '@/components/CitizenDataOffersPanel';
+import { ComputeNetworkTestCard } from '@/components/ComputeNetworkTestCard';
 import { loadSlmRuntime, releaseSharedSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
@@ -362,6 +363,14 @@ export function LabsPage() {
           Keyed on identity for the same remount-on-flip protection. */}
       <CitizenDataOffersPanel
         key={`data-offers-${identity?.id ?? 'anon'}`}
+        identityId={identity?.id}
+      />
+
+      {/* Phase 13.7.2 — Compute network test card. Citizen-side
+          dispatch trigger. Polls own sent dispatches; the matching
+          worker-side serve UI lives in /settings. */}
+      <ComputeNetworkTestCard
+        key={`compute-test-${identity?.id ?? 'anon'}`}
         identityId={identity?.id}
       />
 
