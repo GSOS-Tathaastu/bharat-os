@@ -152,6 +152,26 @@ Implemented pieces:
 
 ---
 
+## ⚖️ 2026-06-02 — Phase 13.4.1 shipped: SLM-H second skill — Consumer complaint drafter
+
+Composes the substrate landed in Phase 13.4. Standalone panel on /labs:
+the citizen types a free-form grievance description; the on-device SLM
+drafts a structured complaint outline under the Consumer Protection Act
+2019 — DRAFT_SUBJECT + FORUM_LEVEL (district / state / national per the
+CPA 2019 jurisdictional tiers) + RELIEF_KIND + estimated processing days
++ key facts the complaint must include + 1-5 next-step actions
+(file at district commission / escalate to consumerhelpline.gov.in
+1915 / send legal notice / etc.).
+
+Shared `SKILL_ACTION_VERBS` allowlist grew from 8 to 13 verbs with
+matching citizen-readable labels.
+
+Adversarial review caught and fixed 1 must-fix: the initial prompt
+builder's `.filter(Boolean)` was collapsing intentional blank-line
+spacers between sections. Regression pinned in vitest. ADR 0157.
+
+Tests: 442 vitest + Node sweep clean + tsc clean. Zero new external API.
+
 ## 🛠️ 2026-06-02 — Phase 13.4 shipped: SLM-H skill-agent substrate + electricity bill explainer
 
 Closes the SLM USP arc per the

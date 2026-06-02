@@ -55,7 +55,7 @@ const RISK_FLAGS = new Set<RiskFlag>(['none', 'attention', 'urgent']);
 // Adding a verb is a cross-cutting change — bump it AND the parser
 // AND every skill that emits it. The grep guard on the rendered
 // chip rejects any verb not in this list.
-export const SKILL_ACTION_VERBS = [
+export const SKILL_ACTION_VERBS = Object.freeze([
   'file_dispute_consumer_forum',
   'request_meter_recheck',
   'switch_tariff_plan',
@@ -63,8 +63,19 @@ export const SKILL_ACTION_VERBS = [
   'check_subsidy_eligibility',
   'compare_with_neighbours',
   'archive_for_records',
-  'flag_for_review'
-] as const;
+  'flag_for_review',
+  // Phase 13.4.1 — consumer-complaint-specific verbs. The
+  // forum-level verbs map to the Consumer Protection Act 2019
+  // jurisdictional tiers (district ≤ ₹50L; state ₹50L–₹2cr;
+  // national > ₹2cr). The helpline verb routes to the National
+  // Consumer Helpline at 1915 / consumerhelpline.gov.in
+  // (Department of Consumer Affairs, GoI).
+  'file_complaint_district_commission',
+  'file_complaint_state_commission',
+  'file_complaint_national_commission',
+  'escalate_to_consumer_helpline',
+  'send_legal_notice'
+] as const);
 export type SkillActionVerb = (typeof SKILL_ACTION_VERBS)[number];
 const SKILL_ACTION_VERBS_SET = new Set<SkillActionVerb>(SKILL_ACTION_VERBS);
 
@@ -78,7 +89,17 @@ export const ACTION_LABEL: Record<SkillActionVerb, string> = {
   compare_with_neighbours:
     'Compare consumption with your neighbours / last year',
   archive_for_records: 'Archive for records (no action needed now)',
-  flag_for_review: 'Flag for review by a Sahayak agent'
+  flag_for_review: 'Flag for review by a Sahayak agent',
+  file_complaint_district_commission:
+    'File the complaint at the District Consumer Disputes Redressal Commission (for relief up to ₹50 lakh)',
+  file_complaint_state_commission:
+    'File the complaint at the State Commission (for relief ₹50 lakh – ₹2 crore)',
+  file_complaint_national_commission:
+    'File the complaint at the National Commission (for relief above ₹2 crore)',
+  escalate_to_consumer_helpline:
+    'Call the National Consumer Helpline at 1915 (or visit consumerhelpline.gov.in)',
+  send_legal_notice:
+    'Send a formal legal notice to the opposite party before filing'
 };
 
 // Bounded caps on every count-only chip field. Mirrors the BE

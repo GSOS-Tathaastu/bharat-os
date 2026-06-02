@@ -15,17 +15,18 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.4 — SLM-H on-device skill-agent
-substrate + first concrete skill (electricity bill explainer)
-shipped. **Still zero new external-API dependencies.** The skill
-agent runs on the existing Phase 9.0c wllama runtime; no new
-service / env var / partner credential. The new BE registry at
-`/api/skill-agents` serves SAME-ORIGIN catalog metadata (admin-
-curated pointers; the FE prompt body never crosses into a BE row).
-The SLM USP arc (SLM-E/F/G/H) is now arc-complete with zero
-cumulative external-API dependencies. The parallel revenue-lines
+Last updated: 2026-06-02 (Phase 13.4.1 — SLM-H second concrete
+skill: consumer complaint drafter shipped. **Still zero new
+external-API dependencies.** The new skill runs on the existing
+Phase 9.0c wllama runtime via the Phase 13.4 substrate; no new
+service / env var / partner credential. The action-verb extension
+references consumerhelpline.gov.in and the Consumer Protection
+Act 2019 jurisdictional tiers as informational copy only — no
+adapter yet. The PM-KISAN status checker (Phase 13.4.2) WILL
+need an external adapter when it ships (CPC beneficiary lookup —
+will land here as a new §5.x entry). The parallel revenue-lines
 Phase 13.x items at §4.1 UPI rails and §4.2 IFSC lookup remain
-the only outstanding 13.x entries that will touch this doc.)
+the other outstanding 13.x entries that will touch this doc.)
 
 ## Legend
 

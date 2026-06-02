@@ -40,5 +40,24 @@ export const SKILL_AGENT_SEED_LIST = Object.freeze([
     maxInputChars: 4000,
     maxOutputChars: 1200,
     registeredBy: SKILL_AGENT_SEED_REGISTERED_BY
+  }),
+  // Phase 13.4.1 — second concrete skill: consumer-complaint drafter.
+  // Accepts the citizen's free-form complaint description (no doc
+  // input required) and emits a Consumer Protection Act 2019-shaped
+  // complaint envelope (DRAFT_SUBJECT / FORUM_LEVEL / RELIEF_KIND /
+  // KEY_FACTS + next-step verbs). `supportedDocKinds: ['generic']`
+  // means "doesn't need a specific doc kind".
+  Object.freeze({
+    category: 'consumer_complaint_drafter',
+    displayName: 'Consumer complaint drafter',
+    shortDescription:
+      'Helps you draft a Consumer Protection Act 2019 complaint from your free-text description. Routes to district / state / national commission by relief amount; surfaces key facts your complaint must include.',
+    supportedDocKinds: ['generic'],
+    requiredCapabilities: ['inference'],
+    compatibleModelPackFamilies: [],
+    license: 'apache-2.0',
+    maxInputChars: 6000,
+    maxOutputChars: 1600,
+    registeredBy: SKILL_AGENT_SEED_REGISTERED_BY
   })
 ]);

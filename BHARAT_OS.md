@@ -2201,6 +2201,58 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.4.1 — SHIPPED 2026-06-02 (ADR 0157).** Second
+  concrete SLM-H skill: consumer complaint drafter. Composes
+  the 13.4 substrate; thin sub-phase (one new skill file + one
+  seed entry + standalone panel + 5-verb extension to the
+  shared `SKILL_ACTION_VERBS` allowlist). NEW
+  `frontend/src/lib/skills/consumer-complaint-drafter.ts` (~210
+  lines) — `SkillDefinition<ConsumerComplaintInput,
+  ConsumerComplaintFields>`. Input: free-form complaint text +
+  optional related-doc title / TLDR. Output layered on
+  SkillBaseFields: DRAFT_SUBJECT + FORUM_LEVEL (district / state
+  / national per Consumer Protection Act 2019 jurisdictional
+  tiers) + RELIEF_KIND (refund / replacement / service_redo /
+  compensation / apology / mixed) + ESTIMATED_PROCESSING_DAYS
+  (clamped [30, 720]) + KEY_FACTS (1-5, deduped + 5-capped at
+  parser). Drift coerces to safest defaults
+  (FORUM_LEVEL→district, RELIEF_KIND→mixed). EXTENDED
+  `frontend/src/lib/skill-agent.ts` — 5 new action verbs:
+  `file_complaint_district_commission`,
+  `file_complaint_state_commission`,
+  `file_complaint_national_commission`,
+  `escalate_to_consumer_helpline`, `send_legal_notice`. Each
+  with citizen-readable ACTION_LABEL referencing CPA 2019
+  jurisdictional rules verbatim. SKILL_ACTION_VERBS coerced to
+  `Object.freeze` for runtime defence-in-depth (matches
+  Phase 13.4 SKILL_AGENT_CATEGORIES posture). EXTENDED
+  `src/phase1/skill-agent-seed.mjs` — second seed entry
+  (category=consumer_complaint_drafter, supportedDocKinds=
+  ['generic'], maxInputChars 6000, maxOutputChars 1600). NEW
+  `frontend/src/components/ConsumerComplaintPanel.tsx` —
+  standalone panel mounted on /labs below SkillAgentPanel,
+  keyed on `complaint-<identityId>`. Honest empty state on no
+  SLM; 40-char minimum gate on Draft button with inline hint;
+  synchronous `runningRef` guard; 2400-char input cap with
+  overcap warning. EXTENDED Labs.tsx wiring.
+  **Adversarial review** (3 lenses): **1 MUST_FIX**. MF-1 the
+  initial prompt builder used
+  `[...].filter(Boolean).join('\n')` to optionally drop the
+  related-doc-context block — this also silently collapsed the
+  intentional blank-line spacers between profile fragment +
+  role line and between complaint + YOUR ANSWER, degrading the
+  prompt structure (byte-equal test passed but the SLM would
+  see a different shape). Fixed by building the prompt with
+  explicit `parts.push(...)` + conditional sections; regression
+  pin in vitest. **§15 bindings**: pointer-only registry row
+  (prompt body in FE bundle); strict allowlist; no fetch();
+  honest hide; no PII to ledger. **API_INTEGRATIONS.md impact**:
+  ZERO new external API. Last-updated header bumped.
+  **FE-BE parity**: BE delta = +1 seed entry; FE delta = new
+  skill file + new panel + ACTION verbs extension + Labs
+  wiring + test files. Tests: vitest 419 → **442** (+23
+  consumer-complaint-drafter.test); Node 1282 → **1284** (+2
+  seed coverage + extended catalog HTTP test). tsc clean.
 - **Phase 13.4 — SHIPPED 2026-06-02 (ADR 0156).** SLM-H
   on-device skill-agent substrate + first concrete skill
   (electricity bill explainer). Closes the SLM USP arc per

@@ -17,6 +17,7 @@ import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
 import { DocSummariserPanel } from '@/components/DocSummariserPanel';
 import { SkillAgentPanel } from '@/components/SkillAgentPanel';
+import { ConsumerComplaintPanel } from '@/components/ConsumerComplaintPanel';
 import { loadSlmRuntime, releaseSharedSlmRuntime } from '@/lib/slm-runtime';
 
 function formatGb(bytes: number): string {
@@ -332,6 +333,16 @@ export function LabsPage() {
           remount-on-flip protection. */}
       <SkillAgentPanel
         key={`skill-${identity?.id ?? 'anon'}`}
+        identityId={identity?.id}
+      />
+
+      {/* Phase 13.4.1 — SLM-H ConsumerComplaintPanel. Standalone
+          panel (no bridge dependency); the citizen types a
+          free-form description and gets a Consumer Protection Act
+          2019-shaped complaint draft. Keyed on identity for the
+          same remount-on-flip protection. */}
+      <ConsumerComplaintPanel
+        key={`complaint-${identity?.id ?? 'anon'}`}
         identityId={identity?.id}
       />
 

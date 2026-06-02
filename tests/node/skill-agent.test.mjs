@@ -257,6 +257,17 @@ test('SKILL_AGENT_SEED_LIST contains at least one well-formed entry', () => {
   }
 });
 
+// Phase 13.4.1 — the seed list now ships TWO skills covering two
+// distinct categories. A future regression that drops one entry
+// (e.g. an over-eager dedupe) fails loudly here.
+test('Phase 13.4.1 — seed list covers both utility_bill_explainer + consumer_complaint_drafter', () => {
+  const categories = SKILL_AGENT_SEED_LIST.map((s) => s.category).sort();
+  assert.deepEqual(categories, ['consumer_complaint_drafter', 'utility_bill_explainer']);
+  // The two seeds must produce distinct content-derived skillIds.
+  const skillIds = new Set(SKILL_AGENT_SEED_LIST.map((s) => buildSkillAgent(s).skillId));
+  assert.equal(skillIds.size, SKILL_AGENT_SEED_LIST.length);
+});
+
 // ─── Store + HTTP integration ───────────────────────────────────────
 
 async function withApiServer(handler) {
@@ -280,13 +291,20 @@ test('GET /api/skill-agents — seed-populated catalog (first hit triggers seedi
     assert.equal(body.protocolVersion, SKILL_AGENT_PROTOCOL_VERSION);
     assert.deepEqual(body.supportedCategories, SKILL_AGENT_CATEGORIES);
     assert.deepEqual(body.supportedDocKinds, SKILL_AGENT_SUPPORTED_DOC_KINDS);
-    assert.ok(body.skillAgents.length >= 1, 'catalog should be seeded after first GET');
+    assert.ok(body.skillAgents.length >= 2, 'catalog should be seeded with both v1 skills');
     const billExplainer = body.skillAgents.find(
       (s) => s.category === 'utility_bill_explainer'
     );
     assert.ok(billExplainer, 'electricity bill explainer should be seeded');
     assert.equal(billExplainer.status, 'registered');
     assert.deepEqual(billExplainer.supportedDocKinds, ['electricity_bill']);
+    // Phase 13.4.1 — consumer complaint drafter is the second seed.
+    const complaintDrafter = body.skillAgents.find(
+      (s) => s.category === 'consumer_complaint_drafter'
+    );
+    assert.ok(complaintDrafter, 'consumer complaint drafter should be seeded');
+    assert.equal(complaintDrafter.status, 'registered');
+    assert.deepEqual(complaintDrafter.supportedDocKinds, ['generic']);
   });
 });
 
