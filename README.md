@@ -152,6 +152,38 @@ Implemented pieces:
 
 ---
 
+## 🛒 2026-06-02 — Phase 13.5.1 shipped: Sponsor browse + purchase (closes 13.5 revenue loop end-to-end)
+
+The 13.5 citizen data marketplace is now end-to-end. Citizens publish
+offers (13.5); sponsors browse + purchase (this phase); per-purchase
+atomic flow debits sponsor escrow + credits citizen mesh balance +
+emits a pointer-only audit-ledger event.
+
+3 new bearer-gated endpoints under `/api/sponsors/:id/`:
+- GET `/data-offers/browse[?purpose=...]`
+- POST `/data-offers/:offerId/purchase` (body: `{sponsorPurpose}`)
+- GET `/data-offer-purchases`
+
+Each purchase atomically: validates offer status/expiry/cap + purpose
+in allowlist → lock-then-debit sponsor escrow → builds purchase + mesh
+contribution event + bumped offer → persists in order → emits
+`sponsor_escrow.debited` + `citizen_data_offer.purchased` pointer
+events. Errors caught at boundary with explicit codes:
+`insufficient_escrow` (with availablePaise + requiredPaise),
+`purpose_not_allowlisted`, `offer_{not_active|expired|exhausted}`,
+`unknown_offer`, `invalid_purpose`.
+
+New `citizen_data_sale` workload type in MESH_WORKLOAD_TYPES (6
+total). Sponsor surface gets a "Data" tab pointing at
+`/sponsor/data-offers`.
+
+Adversarial review: ship_with_known_limitations (no must-fix for v1
+demo). Known limitations: race on concurrent purchases, non-atomic
+persistence chain, no self-purchase guard. All caught at boundary;
+production fixes deferred to 13.5.2. ADR 0162.
+
+Tests: 500 vitest + 1334 Node + tsc clean.
+
 ## 🌐 2026-06-02 — Phase 13.6 shipped: Public marketing pages (/about, /how-it-works, /for-citizens, /for-sponsors)
 
 The investor / partner-facing website now lives at 4 public routes

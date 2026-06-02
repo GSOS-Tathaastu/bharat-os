@@ -5,6 +5,8 @@ const TABS = [
   { to: '/sponsor/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/sponsor/jobs', label: 'Jobs', icon: '🏷' },
   { to: '/sponsor/rounds', label: 'Rounds', icon: '🔁' },
+  // Phase 13.5.1 — citizen data marketplace
+  { to: '/sponsor/data-offers', label: 'Data', icon: '🛒' },
   { to: '/sponsor/escrow', label: 'Escrow', icon: '💰' },
   { to: '/sponsor/settings', label: 'Settings', icon: '⚙' }
 ];

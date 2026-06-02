@@ -1283,10 +1283,17 @@ picked "minimum onboarding load, maximum coverage"):
   sale offers (5 DATA_POINT_KINDS × 6 SPONSOR_PURPOSES); BE
   registry with content-derived offerId + DPDP cascade; ledger
   emits citizen_data_offer.{published|paused|revoked} pointer
-  events with count-only meta. **Phase 13.5.1 next** — sponsor
-  browse + purchase flow (debit sponsor escrow, credit citizen
-  mesh balance, emit citizen_data_offer.purchased; per-data-
-  point delivery signature).
+  events with count-only meta.
+  **Phase 13.5.1 shipped 2026-06-02 (ADR 0162)** — sponsor
+  browse + purchase flow. 3 new bearer-gated endpoints; atomic
+  in-handler sequence (validate → lock-then-debit sponsor
+  escrow → build purchase + mesh event + bumped offer →
+  persist → emit pointer ledger events). New
+  `citizen_data_sale` workload type in MESH_WORKLOAD_TYPES.
+  Sponsor surface gets a "Data" tab. Closes the 13.5 revenue
+  loop end-to-end. **Phase 13.5.2 next** — signed audit-export
+  NDJSON bundle for sponsors + per-data-point delivery
+  signature.
 
 #### Phase 13.6 — Public marketing pages ✅ SHIPPED 2026-06-02 (ADR 0161)
 

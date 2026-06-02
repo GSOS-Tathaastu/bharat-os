@@ -414,6 +414,17 @@ const SCHEMAS = `
   );
   CREATE INDEX IF NOT EXISTS idx_citizen_data_offers_publisher ON citizen_data_offers(publisher_id);
 
+  CREATE TABLE IF NOT EXISTS citizen_data_offer_purchases (
+    purchase_id TEXT PRIMARY KEY,
+    sponsor_id TEXT NOT NULL,
+    publisher_id TEXT NOT NULL,
+    offer_id TEXT NOT NULL,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_citizen_data_offer_purchases_sponsor ON citizen_data_offer_purchases(sponsor_id);
+  CREATE INDEX IF NOT EXISTS idx_citizen_data_offer_purchases_publisher ON citizen_data_offer_purchases(publisher_id);
+  CREATE INDEX IF NOT EXISTS idx_citizen_data_offer_purchases_offer ON citizen_data_offer_purchases(offer_id);
+
   CREATE TABLE IF NOT EXISTS sponsors (
     sponsor_id TEXT PRIMARY KEY,
     json TEXT NOT NULL
@@ -1945,13 +1956,17 @@ export class SqliteStore {
 
   // Phase 13.5 — citizen data offers. Per-identity (publisher_id);
   // DPDP §12(3) cascade entry in deleteIdentityCascade below.
-  async saveCitizenDataOffer(offer) {
+  async saveCitizenDataOffer(offer, { skipLedger = false } = {}) {
     await this.init();
     this._upsert(
       'citizen_data_offers',
       ['offer_id', 'publisher_id', 'json'],
       [offer.offerId, offer.publisherId, JSON.stringify(offer)]
     );
+    // Phase 13.5.1 — purchase-driven saves pass skipLedger so the
+    // auto-emit doesn't double-fire alongside the explicit
+    // citizen_data_offer.purchased event the API handler emits.
+    if (skipLedger) return offer;
     const eventType =
       offer.status === 'revoked'
         ? 'citizen_data_offer.revoked'
@@ -1981,6 +1996,43 @@ export class SqliteStore {
     const all = this._listAll('citizen_data_offers');
     if (!publisherId) return all;
     return all.filter((o) => o.publisherId === publisherId);
+  }
+
+  // Phase 13.5.1 — citizen data offer purchases. Sponsor side of
+  // the citizen-data-offer flow. The ledger event is emitted by
+  // the API handler (single atomic block); no per-save ledger
+  // here because save can fail and the API has already debited
+  // escrow + credited mesh in the same handler.
+  async saveCitizenDataOfferPurchase(purchase) {
+    await this.init();
+    this._upsert(
+      'citizen_data_offer_purchases',
+      ['purchase_id', 'sponsor_id', 'publisher_id', 'offer_id', 'json'],
+      [
+        purchase.purchaseId,
+        purchase.sponsorId,
+        purchase.publisherId,
+        purchase.offerId,
+        JSON.stringify(purchase)
+      ]
+    );
+    return purchase;
+  }
+
+  async readCitizenDataOfferPurchase(purchaseId) {
+    await this.init();
+    return this._readOne('citizen_data_offer_purchases', 'purchase_id', purchaseId);
+  }
+
+  async listCitizenDataOfferPurchases({ sponsorId, publisherId, offerId } = {}) {
+    await this.init();
+    const all = this._listAll('citizen_data_offer_purchases');
+    return all.filter((p) => {
+      if (sponsorId && p.sponsorId !== sponsorId) return false;
+      if (publisherId && p.publisherId !== publisherId) return false;
+      if (offerId && p.offerId !== offerId) return false;
+      return true;
+    });
   }
 
   // Phase 9.0b — per-identity SLM install records. Pointer-not-
@@ -2876,6 +2928,11 @@ export class SqliteStore {
       // Outstanding offers from a since-erased citizen become
       // unhonourable per §15.
       sections.citizenDataOffers = sweep('citizen_data_offers', ['publisher_id']);
+      // Phase 13.5.1 — citizen data offer purchases cascade by
+      // publisher_id (citizen-side erase wipes their purchase
+      // records). The sponsor-side ledger event still carries the
+      // at-sale-time proof; this only removes the per-purchase row.
+      sections.citizenDataOfferPurchases = sweep('citizen_data_offer_purchases', ['publisher_id']);
       // Phase 12.2.3 — attachment blobs (KYC selfies, ID proofs,
       // per-role docs, dispute evidence) cascade by
       // root_identity_id. The bytes column goes with the row so

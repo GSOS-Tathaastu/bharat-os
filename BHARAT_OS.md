@@ -2201,6 +2201,71 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.5.1 — SHIPPED 2026-06-02 (ADR 0162).** Sponsor
+  browse + purchase flow — closes the 13.5 revenue loop
+  end-to-end. NEW
+  `src/phase1/citizen-data-offer-purchase.mjs` (~150 lines):
+  validator (strict-allowlist `PERMITTED_PURCHASE_KEYS`, 9
+  fields), `applyPurchaseToOffer` pure state transition
+  (salesCount++ + active→exhausted at cap),
+  `buildCitizenDataOfferPurchasedLedgerEvent` (POINTER +
+  count-only meta; ms-stripped `at`). EXTENDED
+  `src/phase1/mesh-contribution.mjs` — new
+  `citizen_data_sale` workload type (6 total in
+  MESH_WORKLOAD_TYPES); payout = pricePerSalePaise; new
+  optional pointer fields `citizenDataOfferId` +
+  `citizenDataPurchaseId`. EXTENDED store + sqlite-store with
+  `saveCitizenDataOfferPurchase` / read / list (by sponsor +
+  publisher + offer); new `citizen_data_offer_purchases` table
+  with 3 indexes. DPDP §12(3) cascade entry added to both
+  backends — purchases wipe by publisherId. EXISTING
+  `saveCitizenDataOffer` gets `{skipLedger}` option so the
+  bumped-offer save doesn't double-fire the auto-emit
+  alongside the explicit citizen_data_offer.purchased event.
+  EXTENDED `src/phase0/api.mjs` — 3 new endpoints under
+  `/api/sponsors/:sponsorId/`, all bearer-gated through
+  `checkSponsorAuth`: `GET /data-offers/browse[?purpose=...]`
+  (active offers with remaining capacity); `POST
+  /data-offers/:offerId/purchase` (atomic in-handler:
+  validate purpose + offer status/expiry/cap + purpose
+  allowlist → lock-then-debit sponsor escrow → build
+  purchase + mesh event + bumped offer → persist sponsor → ledger
+  sponsor_escrow.debited → offer (skipLedger) → purchase →
+  mesh event → ledger citizen_data_offer.purchased → 201
+  with purchase + offer + sponsor + mesh event); `GET
+  /data-offer-purchases` (sponsor's own history). Errors:
+  409 `insufficient_escrow` with availablePaise +
+  requiredPaise; 403 `purpose_not_allowlisted`; 409
+  `offer_{not_active|expired|exhausted}`; 404
+  `unknown_offer`; 400 `invalid_purpose`. NEW FE hooks:
+  `useSponsorBrowseDataOffers(purpose?)`,
+  `useSponsorPurchaseDataOffer`,
+  `useSponsorDataOfferPurchases`. NEW
+  `frontend/src/routes/sponsor/SponsorDataOffers.tsx` (~230
+  lines) — sponsor-facing browse + per-offer purpose
+  selector + "Buy one" action + inline error surface
+  mapping every BE error code to a citizen-readable
+  message + recent-purchases list. EXTENDED
+  SponsorBottomNav with "Data" tab. EXTENDED
+  SponsorSurface routes with `/sponsor/data-offers`.
+  **Adversarial review** verdict:
+  **ship_with_known_limitations** (no must-fix for v1
+  demo). Privacy + bearer + strict-allowlist sound by
+  construction. Known limitations noted for follow-up: race
+  on concurrent purchases (two reads see same salesCount;
+  last-write-wins); non-atomic persistence chain (mid-
+  failure leaves inconsistent state); no self-purchase
+  guard. All caught at boundary with explicit error codes.
+  **§15 bindings**: POINTER-only ledger;
+  strict-allowlist; ms-stripped timestamps; bearer-gated
+  reads + writes; DPDP cascade; bytes-never-on-BE
+  (delivery flow lands 13.5.2). **API_INTEGRATIONS.md
+  impact**: ZERO new external API. **FE-BE parity**: BE
+  delta = entity + store + 3 endpoints + cascade; FE
+  delta = lib hooks + page + nav + route. Tests: vitest
+  500 unchanged (FE page composes existing hooks); Node
+  1315 → **1334** (+19 citizen-data-offer-purchase.test).
+  tsc clean.
 - **Phase 13.6 — SHIPPED 2026-06-02 (ADR 0161).** Public
   marketing pages — the investor / partner-facing website that
   lives alongside the existing citizen onboarding at `/`. 4

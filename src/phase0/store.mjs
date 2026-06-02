@@ -68,6 +68,12 @@ export class BosStore {
     // Phase 13.5 — citizen data offers. Per-identity (citizen
     // publishes); DPDP §12(3) cascade entry below in eraseUserData.
     this.citizenDataOffersPath = path.join(rootPath, 'citizen-data-offers');
+    // Phase 13.5.1 — citizen data offer purchases. One record per
+    // sponsor purchase; cascades by either publisherId (citizen
+    // erase) or sponsorId (sponsor admin-revoke). The data point
+    // bytes themselves never live here — those flow via the
+    // per-data-point delivery signature (Phase 13.5.2).
+    this.citizenDataOfferPurchasesPath = path.join(rootPath, 'citizen-data-offer-purchases');
     this.sponsorsPath = path.join(rootPath, 'sponsors');
     this.providerIdentitiesPath = path.join(rootPath, 'provider-identities');
     this.labelingJobsPath = path.join(rootPath, 'labeling-jobs');
@@ -122,6 +128,7 @@ export class BosStore {
     await fs.mkdir(this.installedSlmsPath, { recursive: true });
     await fs.mkdir(this.skillAgentsPath, { recursive: true });
     await fs.mkdir(this.citizenDataOffersPath, { recursive: true });
+    await fs.mkdir(this.citizenDataOfferPurchasesPath, { recursive: true });
     await fs.mkdir(this.sponsorsPath, { recursive: true });
     await fs.mkdir(this.providerIdentitiesPath, { recursive: true });
     await fs.mkdir(this.bookingsPath, { recursive: true });
@@ -458,6 +465,22 @@ export class BosStore {
       }
     }
     sections.citizenDataOffers = citizenDataOffersRemoved;
+    // Phase 13.5.1 — citizen data offer purchases cascade by
+    // publisherId. The sponsor's at-sale-time signature remains in
+    // the audit ledger (redacted only for the identity field) so
+    // sponsor audit-export bundles can still prove the at-sale-time
+    // event happened; the per-purchase record itself goes.
+    const citizenDataOfferPurchases = await this.listCitizenDataOfferPurchases({ publisherId: identityId }).catch(() => []);
+    let citizenDataOfferPurchasesRemoved = 0;
+    for (const purchase of citizenDataOfferPurchases) {
+      try {
+        await fs.unlink(this.citizenDataOfferPurchaseFile(purchase.purchaseId));
+        citizenDataOfferPurchasesRemoved += 1;
+      } catch (_error) {
+        // best-effort
+      }
+    }
+    sections.citizenDataOfferPurchases = citizenDataOfferPurchasesRemoved;
     // Phase 10.1 — labeling submissions are per-worker; cascade
     // on identity erase. Jobs and items are sponsor-owned and stay.
     const labelingSubmissions = await this.listLabelingSubmissions({ workerId: identityId }).catch(() => []);
@@ -1392,11 +1415,13 @@ export class BosStore {
     return path.join(this.citizenDataOffersPath, `${safeName(offerId)}.json`);
   }
 
-  async saveCitizenDataOffer(offer) {
+  async saveCitizenDataOffer(offer, { skipLedger = false } = {}) {
     await this.init();
     await writeJson(this.citizenDataOfferFile(offer.offerId), offer);
-    // Audit ledger event — kind depends on status transition. The
-    // caller chooses the event type via the offer.status value.
+    // Phase 13.5.1 — callers driving a purchase pass skipLedger so
+    // the auto-emit doesn't double-fire alongside the explicit
+    // citizen_data_offer.purchased event they emit.
+    if (skipLedger) return offer;
     const eventType =
       offer.status === 'revoked'
         ? 'citizen_data_offer.revoked'
@@ -1425,6 +1450,33 @@ export class BosStore {
     const all = await listJson(this.citizenDataOffersPath);
     if (!publisherId) return all;
     return all.filter((o) => o.publisherId === publisherId);
+  }
+
+  // Phase 13.5.1 — citizen data offer purchases. Per-sponsor +
+  // per-citizen pointer record; emits citizen_data_offer.purchased
+  // ledger event with POINTER + count-only meta.
+  citizenDataOfferPurchaseFile(purchaseId) {
+    return path.join(this.citizenDataOfferPurchasesPath, `${safeName(purchaseId)}.json`);
+  }
+
+  async saveCitizenDataOfferPurchase(purchase) {
+    await this.init();
+    await writeJson(this.citizenDataOfferPurchaseFile(purchase.purchaseId), purchase);
+    return purchase;
+  }
+
+  async readCitizenDataOfferPurchase(purchaseId) {
+    return readJson(this.citizenDataOfferPurchaseFile(purchaseId));
+  }
+
+  async listCitizenDataOfferPurchases({ sponsorId, publisherId, offerId } = {}) {
+    const all = await listJson(this.citizenDataOfferPurchasesPath);
+    return all.filter((p) => {
+      if (sponsorId && p.sponsorId !== sponsorId) return false;
+      if (publisherId && p.publisherId !== publisherId) return false;
+      if (offerId && p.offerId !== offerId) return false;
+      return true;
+    });
   }
 
   // Phase 9.1 — sponsor records. Admin-curated (Phase 5.7 token

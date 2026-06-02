@@ -18,6 +18,7 @@ import { SponsorRoundDetail } from '@/routes/sponsor/SponsorRoundDetail';
 import { SponsorRoundExport } from '@/routes/sponsor/SponsorRoundExport';
 import { SponsorEscrow } from '@/routes/sponsor/SponsorEscrow';
 import { SponsorSettings } from '@/routes/sponsor/SponsorSettings';
+import { SponsorDataOffers } from '@/routes/sponsor/SponsorDataOffers';
 
 // Phase 12.0.5 — top-level /app/sponsor/* surface.
 //
@@ -103,6 +104,8 @@ export function SponsorSurface() {
         <Route path="rounds/new" element={<SponsorRoundCreate />} />
         <Route path="rounds/:roundId" element={<SponsorRoundDetail />} />
         <Route path="rounds/:roundId/export" element={<SponsorRoundExport />} />
+        {/* Phase 13.5.1 — citizen data marketplace */}
+        <Route path="data-offers" element={<SponsorDataOffers />} />
         <Route path="escrow" element={<SponsorEscrow />} />
         <Route path="settings" element={<SponsorSettings />} />
         <Route path="*" element={<Navigate to="dashboard" replace />} />

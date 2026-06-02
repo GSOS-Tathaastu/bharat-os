@@ -23,13 +23,16 @@ async function freshStore(name) {
   return { store };
 }
 
-test('MESH_WORKLOAD_TYPES covers §13B Product 1 + Product 2 plus §7f federated rounds + Phase 10 labeling', () => {
+test('MESH_WORKLOAD_TYPES covers §13B Product 1 + Product 2 plus §7f federated rounds + Phase 10 labeling + Phase 13.5.1 citizen data sale', () => {
   // Phase 3.0 (ADR 0071) added 'federated_round' for §7f mesh
   // participation in federated learning rounds. Phase 10.1 (ADR
   // 0121) added 'labeling' for the labeling marketplace.
+  // Phase 13.5.1 (ADR 0162) added 'citizen_data_sale' for
+  // citizens earning into mesh balance from sponsor purchases of
+  // their published data offers.
   assert.deepEqual(
     [...MESH_WORKLOAD_TYPES].sort(),
-    ['federated_round', 'inference', 'labeling', 'storage_serve', 'storage_store'].sort()
+    ['citizen_data_sale', 'federated_round', 'inference', 'labeling', 'storage_serve', 'storage_store'].sort()
   );
 });
 

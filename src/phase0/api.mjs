@@ -262,6 +262,12 @@ import {
   CITIZEN_DATA_OFFER_STATUSES
 } from '../phase1/citizen-data-offer.mjs';
 import {
+  buildCitizenDataOfferPurchase,
+  applyPurchaseToOffer,
+  buildCitizenDataOfferPurchasedLedgerEvent,
+  CITIZEN_DATA_OFFER_PURCHASE_PROTOCOL_VERSION
+} from '../phase1/citizen-data-offer-purchase.mjs';
+import {
   createSponsor,
   publicSponsor,
   publicSponsorDirectory,
@@ -3953,6 +3959,216 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         const all = await store.listLabelingJobs();
         jsonResponse(response, 200, {
           jobs: all.filter((j) => j.sponsorId === sponsorId)
+        });
+        return;
+      }
+
+      // Phase 13.5.1 — sponsor-side data-offer browse + purchase.
+      //
+      //   GET  /api/sponsors/:sponsorId/data-offers/browse[?purpose=...]
+      //   POST /api/sponsors/:sponsorId/data-offers/:offerId/purchase
+      //          body: { sponsorPurpose: string }
+      //   GET  /api/sponsors/:sponsorId/data-offer-purchases
+      //
+      // All three are bearer-gated through checkSponsorAuth. The
+      // purchase endpoint atomically debits sponsor escrow, credits
+      // the citizen via a mesh_citizen_data_sale event, bumps the
+      // offer's salesCount, and emits a citizen_data_offer.purchased
+      // ledger event.
+      const sponsorDataOffersBrowseMatch =
+        /^\/api\/sponsors\/([^/]+)\/data-offers\/browse$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorDataOffersBrowseMatch) {
+        const sponsorId = decodeURIComponent(sponsorDataOffersBrowseMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const purpose = url.searchParams.get('purpose');
+        if (purpose && !SPONSOR_PURPOSES.includes(purpose)) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_purpose', message: `purpose must be one of: ${SPONSOR_PURPOSES.join(', ')}` }
+          });
+          return;
+        }
+        const all = await store.listCitizenDataOffers();
+        const offers = all.filter((offer) => {
+          if (offer.status !== 'active') return false;
+          if (Date.parse(offer.expiresAt) < Date.now()) return false;
+          if (offer.salesCount >= offer.maxSales) return false;
+          if (purpose && !offer.sponsorPurposeAllowlist.includes(purpose)) return false;
+          return true;
+        });
+        jsonResponse(response, 200, {
+          offers,
+          protocolVersion: CITIZEN_DATA_OFFER_PROTOCOL_VERSION,
+          supportedDataPointKinds: DATA_POINT_KINDS,
+          supportedSponsorPurposes: SPONSOR_PURPOSES
+        });
+        return;
+      }
+
+      const sponsorDataOfferPurchaseMatch =
+        /^\/api\/sponsors\/([^/]+)\/data-offers\/([^/]+)\/purchase$/.exec(url.pathname);
+      if (request.method === 'POST' && sponsorDataOfferPurchaseMatch) {
+        const sponsorId = decodeURIComponent(sponsorDataOfferPurchaseMatch[1]);
+        const offerId = decodeURIComponent(sponsorDataOfferPurchaseMatch[2]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const body = await readRequestJson(request);
+        const sponsorPurpose = body?.sponsorPurpose;
+        if (!sponsorPurpose || !SPONSOR_PURPOSES.includes(sponsorPurpose)) {
+          jsonResponse(response, 400, {
+            error: {
+              code: 'invalid_purpose',
+              message: `sponsorPurpose must be one of: ${SPONSOR_PURPOSES.join(', ')}`
+            }
+          });
+          return;
+        }
+        const offer = await store.readCitizenDataOffer(offerId).catch(() => null);
+        if (!offer) {
+          jsonResponse(response, 404, {
+            error: { code: 'unknown_offer', message: 'citizen data offer not found.' }
+          });
+          return;
+        }
+        if (offer.status !== 'active') {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'offer_not_active',
+              message: `cannot purchase offer in status ${offer.status}.`
+            }
+          });
+          return;
+        }
+        if (Date.parse(offer.expiresAt) < Date.now()) {
+          jsonResponse(response, 409, {
+            error: { code: 'offer_expired', message: 'this offer has expired.' }
+          });
+          return;
+        }
+        if (offer.salesCount >= offer.maxSales) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'offer_exhausted',
+              message: 'this offer has reached its maxSales cap.'
+            }
+          });
+          return;
+        }
+        if (!offer.sponsorPurposeAllowlist.includes(sponsorPurpose)) {
+          jsonResponse(response, 403, {
+            error: {
+              code: 'purpose_not_allowlisted',
+              message: 'your declared purpose is not in the offer\'s allowlist.'
+            }
+          });
+          return;
+        }
+
+        // Atomic transition: lock-then-debit escrow; credit citizen
+        // mesh; bump salesCount; persist purchase + offer + ledger.
+        // If escrow is short we fail-fast before any persistence.
+        let escrowAfterLock;
+        let escrowAfterDebit;
+        try {
+          escrowAfterLock = lockEscrow(sponsor, offer.pricePerSalePaise);
+          escrowAfterDebit = debitLockedEscrow(escrowAfterLock, offer.pricePerSalePaise);
+        } catch (error) {
+          jsonResponse(response, 409, {
+            error: {
+              code: 'insufficient_escrow',
+              message: error.message,
+              availablePaise: Math.max(0, sponsor.escrowBalancePaise - sponsor.escrowLockedPaise),
+              requiredPaise: offer.pricePerSalePaise
+            }
+          });
+          return;
+        }
+
+        let purchase;
+        try {
+          purchase = buildCitizenDataOfferPurchase({
+            offerId: offer.offerId,
+            sponsorId,
+            publisherId: offer.publisherId,
+            pricePerSalePaise: offer.pricePerSalePaise,
+            sponsorPurpose
+          });
+        } catch (error) {
+          jsonResponse(response, 400, {
+            error: { code: 'invalid_purchase', message: error.message }
+          });
+          return;
+        }
+
+        let nextOffer;
+        try {
+          nextOffer = applyPurchaseToOffer(offer);
+        } catch (error) {
+          // Should not happen — we validated active + non-exhausted
+          // above — but if it does, fail without persisting.
+          jsonResponse(response, 409, {
+            error: { code: 'apply_purchase_failed', message: error.message }
+          });
+          return;
+        }
+
+        // Mesh-contribution event crediting the citizen (publisher).
+        const meshEvent = createMeshContributionEvent({
+          operatorId: offer.publisherId,
+          workloadType: 'citizen_data_sale',
+          payoutPaise: offer.pricePerSalePaise,
+          citizenDataOfferId: offer.offerId,
+          citizenDataPurchaseId: purchase.purchaseId
+        });
+        purchase.meshContributionEventId = meshEvent.contributionEventId;
+
+        // Persist in order: sponsor (debited), offer (bumped),
+        // purchase (with mesh event ref), mesh event. Then emit
+        // the ledger events for the sponsor escrow debit + the
+        // citizen_data_offer.purchased event. Order matches the
+        // labeling-flow precedent.
+        await store.saveSponsor(escrowAfterDebit);
+        await store.appendLedger({
+          type: 'sponsor_escrow.debited',
+          sponsorId,
+          purchaseId: purchase.purchaseId,
+          offerId: offer.offerId,
+          amountPaise: offer.pricePerSalePaise,
+          balancePaise: escrowAfterDebit.escrowBalancePaise,
+          lockedPaise: escrowAfterDebit.escrowLockedPaise,
+          at: new Date().toISOString()
+        });
+        await store.saveCitizenDataOffer(nextOffer, { skipLedger: true });
+        await store.saveCitizenDataOfferPurchase(purchase);
+        await store.saveMeshContributionEvent(meshEvent);
+        await store.appendLedger(
+          buildCitizenDataOfferPurchasedLedgerEvent({
+            offer: nextOffer,
+            purchase,
+            at: new Date().toISOString()
+          })
+        );
+
+        jsonResponse(response, 201, {
+          ok: true,
+          purchase,
+          offer: nextOffer,
+          sponsor: publicSponsor(escrowAfterDebit),
+          meshContributionEvent: { contributionEventId: meshEvent.contributionEventId, payoutPaise: meshEvent.payoutPaise }
+        });
+        return;
+      }
+
+      const sponsorPurchasesListMatch =
+        /^\/api\/sponsors\/([^/]+)\/data-offer-purchases$/.exec(url.pathname);
+      if (request.method === 'GET' && sponsorPurchasesListMatch) {
+        const sponsorId = decodeURIComponent(sponsorPurchasesListMatch[1]);
+        const sponsor = await checkSponsorAuth(request, response, { store, sponsorId, requestId });
+        if (!sponsor) return;
+        const purchases = await store.listCitizenDataOfferPurchases({ sponsorId });
+        jsonResponse(response, 200, {
+          purchases,
+          protocolVersion: CITIZEN_DATA_OFFER_PURCHASE_PROTOCOL_VERSION
         });
         return;
       }

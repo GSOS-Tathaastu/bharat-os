@@ -641,6 +641,81 @@ export function usePauseCitizenDataOffer() {
   });
 }
 
+// --- Phase 13.5.1 Sponsor-side citizen data offer browse + purchase --
+
+export interface SponsorBrowseDataOffersResponse {
+  offers: CitizenDataOffer[];
+  protocolVersion: string;
+  supportedDataPointKinds: readonly string[];
+  supportedSponsorPurposes: readonly string[];
+}
+
+export interface CitizenDataOfferPurchase {
+  purchaseId: string;
+  offerId: string;
+  sponsorId: string;
+  publisherId: string;
+  pricePerSalePaise: number;
+  sponsorPurpose: string;
+  protocolVersion: string;
+  purchasedAt: string;
+  meshContributionEventId: string | null;
+}
+
+export function useSponsorBrowseDataOffers(purpose?: SponsorPurpose) {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-browse-data-offers', sponsorId, purpose ?? null],
+    queryFn: () =>
+      apiWithBearer<SponsorBrowseDataOffersResponse>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/data-offers/browse${purpose ? `?purpose=${encodeURIComponent(purpose)}` : ''}`
+      ),
+    enabled: Boolean(sponsorId),
+    refetchInterval: 30 * 1000
+  });
+}
+
+export function useSponsorPurchaseDataOffer() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      offerId,
+      sponsorPurpose
+    }: {
+      offerId: string;
+      sponsorPurpose: SponsorPurpose;
+    }) =>
+      apiWithBearer<{
+        ok: boolean;
+        purchase: CitizenDataOfferPurchase;
+        offer: CitizenDataOffer;
+        sponsor: PublicSponsor;
+        meshContributionEvent: { contributionEventId: string; payoutPaise: number };
+      }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/data-offers/${encodeURIComponent(offerId)}/purchase`,
+        { method: 'POST', body: JSON.stringify({ sponsorPurpose }) }
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sponsor-browse-data-offers', sponsorId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-data-offer-purchases', sponsorId] });
+      qc.invalidateQueries({ queryKey: ['sponsor-self', sponsorId] });
+    }
+  });
+}
+
+export function useSponsorDataOfferPurchases() {
+  const sponsorId = useSponsorAuthStore((s) => s.sponsorId);
+  return useQuery({
+    queryKey: ['sponsor-data-offer-purchases', sponsorId],
+    queryFn: () =>
+      apiWithBearer<{ purchases: CitizenDataOfferPurchase[]; protocolVersion: string }>(
+        `/api/sponsors/${encodeURIComponent(sponsorId!)}/data-offer-purchases`
+      ).then((r) => r.purchases),
+    enabled: Boolean(sponsorId)
+  });
+}
+
 export interface InstalledSlm {
   installId: string;
   identityId: string;

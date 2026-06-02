@@ -33,7 +33,12 @@ export const MESH_WORKLOAD_TYPES = [
   // carries `payoutPaise` explicitly + a `jobId` (reusing `roundId`
   // slot would have been wrong because the event is for a labeling
   // job not a round; we add `jobId` below).
-  'labeling'
+  'labeling',
+  // Phase 13.5.1 — citizen data sale. The citizen IS the seller +
+  // earner; the sponsor is the buyer. Per-sale payout is set by
+  // the citizen's own offer (`pricePerSalePaise`). Carries the
+  // offerId + purchaseId pointers explicitly.
+  'citizen_data_sale'
 ];
 
 // §13B midpoint operator payouts. Stored in paise (1 INR = 100 paise) so
@@ -80,6 +85,12 @@ function computePayoutPaise({ workloadType, tokens, bytes, payoutPaise }) {
     // same submission.
     return Math.round(Number(payoutPaise ?? 0));
   }
+  if (workloadType === 'citizen_data_sale') {
+    // Phase 13.5.1 — payout is the citizen's own offer
+    // `pricePerSalePaise`. Never negative; the offer already
+    // capped at MAX_PRICE_PAISE (₹100k) so we don't re-cap here.
+    return Math.max(0, Math.round(Number(payoutPaise ?? 0)));
+  }
   return 0;
 }
 
@@ -101,6 +112,10 @@ export function createMeshContributionEvent({
   // set for the matching workload type.
   jobId,
   itemId,
+  // Phase 13.5.1 — citizen data sale pointers. Only set for the
+  // matching workload type.
+  citizenDataOfferId,
+  citizenDataPurchaseId,
   at = nowIso()
 }) {
   if (!operatorId) throw new Error('operatorId is required.');
@@ -114,6 +129,7 @@ export function createMeshContributionEvent({
     workloadType !== 'inference' &&
     workloadType !== 'federated_round' &&
     workloadType !== 'labeling' &&
+    workloadType !== 'citizen_data_sale' &&
     !Number.isFinite(Number(bytes))
   ) {
     throw new Error('storage events require a numeric bytes count.');
@@ -136,13 +152,18 @@ export function createMeshContributionEvent({
     bytes:
       workloadType === 'inference' ||
       workloadType === 'federated_round' ||
-      workloadType === 'labeling'
+      workloadType === 'labeling' ||
+      workloadType === 'citizen_data_sale'
         ? null
         : Number(bytes),
     peerId: peerId ?? null,
     roundId: workloadType === 'federated_round' ? (roundId ?? null) : null,
     jobId: workloadType === 'labeling' ? (jobId ?? null) : null,
     itemId: workloadType === 'labeling' ? (itemId ?? null) : null,
+    citizenDataOfferId:
+      workloadType === 'citizen_data_sale' ? (citizenDataOfferId ?? null) : null,
+    citizenDataPurchaseId:
+      workloadType === 'citizen_data_sale' ? (citizenDataPurchaseId ?? null) : null,
     deviceState: {
       charging: Boolean(charging),
       wifi: Boolean(wifi),
