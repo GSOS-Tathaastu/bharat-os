@@ -152,6 +152,32 @@ Implemented pieces:
 
 ---
 
+## 🌾 2026-06-02 — Phase 13.4.2 shipped: SLM-H third skill — PM-KISAN status checker
+
+Third and final v1 SLM-H skill. PM-KISAN (Pradhan Mantri Kisan Samman
+Nidhi) disburses ₹6,000/year in three installments to small + marginal
+Indian farmers; ~85% of failed payouts come down to four canonical
+causes (eKYC pending / bank-Aadhaar unseeded / land record mismatch /
+ineligible landholding). This skill reads the citizen's free-form
+description and surfaces the most likely blocker + concrete next steps,
+all on-device. v1 is informational; the pmkisan.gov.in adapter lands
+in a future 13.4.x.
+
+Shared `SKILL_ACTION_VERBS` allowlist grew from 13 to 18 with 5 new
+verbs covering eKYC completion, Aadhaar-bank seeding, land record
+verification, the PM-KISAN helpline (155261), and offline correction
+at the nearest Common Service Center (CSC).
+
+Adversarial review: ship_with_no_fixes (the MF-1 spacer-preservation
+pattern from 13.4.1 was applied from the start; date validation
+rejects bad shapes at boundary; drift coerces to safe defaults).
+ADR 0158.
+
+Tests: 467 vitest + Node sweep clean + tsc clean. Zero new external API.
+
+**SLM USP arc + first-skill rollout is now complete** (E/F/G/H all
+shipped; all three v1 skills under H landed).
+
 ## ⚖️ 2026-06-02 — Phase 13.4.1 shipped: SLM-H second skill — Consumer complaint drafter
 
 Composes the substrate landed in Phase 13.4. Standalone panel on /labs:

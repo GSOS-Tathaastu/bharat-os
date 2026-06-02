@@ -74,7 +74,18 @@ export const SKILL_ACTION_VERBS = Object.freeze([
   'file_complaint_state_commission',
   'file_complaint_national_commission',
   'escalate_to_consumer_helpline',
-  'send_legal_notice'
+  'send_legal_notice',
+  // Phase 13.4.2 — PM-KISAN scheme-status verbs. The four common
+  // blockers for missing PM-KISAN payouts are: incomplete eKYC,
+  // un-seeded bank/Aadhaar link, mismatched land records, and
+  // ineligibility. Each verb maps to the canonical resolution
+  // path. The CSC (Common Service Center) verb covers offline
+  // corrections for citizens without smartphones.
+  'complete_pm_kisan_ekyc',
+  'check_aadhaar_bank_seeding',
+  'verify_land_records',
+  'contact_pm_kisan_helpline',
+  'visit_csc_for_correction'
 ] as const);
 export type SkillActionVerb = (typeof SKILL_ACTION_VERBS)[number];
 const SKILL_ACTION_VERBS_SET = new Set<SkillActionVerb>(SKILL_ACTION_VERBS);
@@ -99,7 +110,17 @@ export const ACTION_LABEL: Record<SkillActionVerb, string> = {
   escalate_to_consumer_helpline:
     'Call the National Consumer Helpline at 1915 (or visit consumerhelpline.gov.in)',
   send_legal_notice:
-    'Send a formal legal notice to the opposite party before filing'
+    'Send a formal legal notice to the opposite party before filing',
+  complete_pm_kisan_ekyc:
+    'Complete your PM-KISAN eKYC at pmkisan.gov.in (Aadhaar OTP) or via biometric at your nearest CSC',
+  check_aadhaar_bank_seeding:
+    'Check that your bank account is seeded with your Aadhaar (visit your bank branch or use mAadhaar / NPCI mapper)',
+  verify_land_records:
+    'Verify your land records on Bhulekh / state portal match your PM-KISAN registration name and area',
+  contact_pm_kisan_helpline:
+    'Call the PM-KISAN helpline (155261 or 011-24300606) for installment-status queries',
+  visit_csc_for_correction:
+    'Visit your nearest Common Service Center (CSC) for offline correction / re-verification'
 };
 
 // Bounded caps on every count-only chip field. Mirrors the BE

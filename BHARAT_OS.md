@@ -2201,6 +2201,58 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 13.4.2 — SHIPPED 2026-06-02 (ADR 0158).** Third
+  concrete SLM-H skill: PM-KISAN status checker. Completes the
+  v1 SLM-H skill rollout (electricity bill + consumer complaint
+  + PM-KISAN). Same thin-sub-phase pattern as 13.4.1. NEW
+  `frontend/src/lib/skills/pm-kisan-status-checker.ts` (~225
+  lines) — `SkillDefinition<PmKisanInput, PmKisanFields>`.
+  Input: free-form `concernText` + required `currentDateIso`
+  (YYYY-MM-DD; validated by regex + `Date.parse` round-trip so
+  calendar-invalid shapes like `2026-13-99` reject at the
+  boundary). Output layered on SkillBaseFields: SCHEME_STATUS
+  (likely_active / likely_inactive / eligibility_uncertain /
+  unknown), LIKELY_BLOCKER (4 canonical reasons hardcoded in
+  prompt: ekyc_pending / bank_aadhaar_unseeded /
+  land_record_mismatch / ineligible_landholding + none +
+  unknown), NEXT_INSTALLMENT_WINDOW (≤ 120 chars; seeded by
+  prompt with the three PM-KISAN installment windows Apr-Jul /
+  Aug-Nov / Dec-Mar), KEY_CHECKS (1-5, deduped + capped).
+  Drift coerces to safest defaults (`unknown` for both
+  enums). EXTENDED `frontend/src/lib/skill-agent.ts` — 5 new
+  action verbs: `complete_pm_kisan_ekyc`,
+  `check_aadhaar_bank_seeding`, `verify_land_records`,
+  `contact_pm_kisan_helpline` (155261), `visit_csc_for_correction`.
+  ACTION_LABEL extended with canonical resolution paths
+  referencing pmkisan.gov.in, mAadhaar/NPCI mapper, Bhulekh,
+  CSC. Allowlist grew 13 → 18. EXTENDED
+  `src/phase1/skill-agent-seed.mjs` — third seed entry
+  (category=government_scheme_status, supportedDocKinds=
+  ['generic'], maxInputChars 4000, maxOutputChars 1400). NEW
+  `frontend/src/components/PmKisanStatusPanel.tsx` —
+  standalone panel mounted on /labs below
+  ConsumerComplaintPanel, keyed on `pmkisan-<identityId>`.
+  Same shape as ConsumerComplaintPanel: honest empty state on
+  no SLM, 30-char minimum gate, synchronous `runningRef`
+  guard, 2400-char input cap. EXTENDED Labs.tsx wiring.
+  **Adversarial review** (3 lenses): **0 fixes**. MF-1
+  spacer-preservation pattern applied from the start; date
+  validation rejects bad shapes at boundary; all drift
+  coerces to safe defaults; no ledger event in this phase so
+  the SF-2 PII-grep guard isn't load-bearing.
+  **§15 bindings**: pointer-only registry row; strict
+  allowlist; no fetch(); honest hide. **Why v1 is
+  informational (not adapter-backed)**: pmkisan.gov.in lacks
+  a documented JSON API; a v1 adapter would need scraping or
+  partner data-share. Wiring lands in a future 13.4.x.
+  **API_INTEGRATIONS.md impact**: ZERO new external API
+  (deferred). Last-updated header bumped. **FE-BE parity**:
+  BE delta = +1 seed entry; FE delta = new skill file + new
+  panel + 5 new ACTION verbs + Labs wiring + test files.
+  Tests: vitest 442 → **467** (+25
+  pm-kisan-status-checker.test); Node 1284 unchanged (the
+  Node skill-agent test was updated to expect 3 categories
+  in-place, not added). tsc clean.
 - **Phase 13.4.1 — SHIPPED 2026-06-02 (ADR 0157).** Second
   concrete SLM-H skill: consumer complaint drafter. Composes
   the 13.4 substrate; thin sub-phase (one new skill file + one

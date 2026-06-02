@@ -15,18 +15,18 @@ identical across all of them: env-configurable mode (stub|live),
 audit-ledger emission (meta only, NEVER bytes), polite
 User-Agent + rate-limit + cache.
 
-Last updated: 2026-06-02 (Phase 13.4.1 — SLM-H second concrete
-skill: consumer complaint drafter shipped. **Still zero new
-external-API dependencies.** The new skill runs on the existing
-Phase 9.0c wllama runtime via the Phase 13.4 substrate; no new
-service / env var / partner credential. The action-verb extension
-references consumerhelpline.gov.in and the Consumer Protection
-Act 2019 jurisdictional tiers as informational copy only — no
-adapter yet. The PM-KISAN status checker (Phase 13.4.2) WILL
-need an external adapter when it ships (CPC beneficiary lookup —
-will land here as a new §5.x entry). The parallel revenue-lines
-Phase 13.x items at §4.1 UPI rails and §4.2 IFSC lookup remain
-the other outstanding 13.x entries that will touch this doc.)
+Last updated: 2026-06-02 (Phase 13.4.2 — SLM-H third concrete
+skill: PM-KISAN status checker shipped. **Still zero new
+external-API dependencies.** v1 is intentionally informational
+— the pmkisan.gov.in beneficiary-status lookup is a candidate
+external API but lacks a documented JSON path, so it ships in
+a future 13.4.x once a partner / scraping decision is made.
+Action-verb extension references pmkisan.gov.in, the PM-KISAN
+helpline (155261), mAadhaar / NPCI mapper, Bhulekh land
+portals, and CSC outlets as informational copy only — no
+adapter. Outstanding 13.x entries that will eventually touch
+this doc: pmkisan.gov.in beneficiary status (future 13.4.x),
+§4.1 UPI rails, §4.2 IFSC lookup, citizen data labelling.)
 
 ## Legend
 

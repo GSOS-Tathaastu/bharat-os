@@ -1256,12 +1256,16 @@ picked "minimum onboarding load, maximum coverage"):
   **Phase 13.4 shipped 2026-06-02 (ADR 0156)** — SLM-H substrate
   + first concrete skill (electricity bill explainer).
   **Phase 13.4.1 shipped 2026-06-02 (ADR 0157)** — second
-  concrete skill (consumer complaint drafter); free-form input
-  panel; SKILL_ACTION_VERBS extended from 8 to 13 with
-  Consumer Protection Act 2019 forum-routing verbs. Generic
-  `SkillDefinition<TInput, TFields>` substrate, BE skill-agent
-  registry with content-derived skillId + soft-delete. The
-  PM-KISAN status checker is the next sub-phase (13.4.2).
+  concrete skill (consumer complaint drafter).
+  **Phase 13.4.2 shipped 2026-06-02 (ADR 0158)** — third v1
+  skill (PM-KISAN status checker) completes the rollout.
+  `SKILL_ACTION_VERBS` grew 8 → 13 → 18 across the sub-phases.
+  All three skills compose the generic
+  `SkillDefinition<TInput, TFields>` substrate; the BE
+  skill-agent registry now seeds all three categories
+  (utility_bill_explainer / consumer_complaint_drafter /
+  government_scheme_status). Phase 13.4.3 will wire action
+  verbs to real next-step launchers (URLs / tel: / mailto:).
 
 #### Phase 13.x — New revenue lines (~4 wks)
 - [ ] **Citizen data labelling + sponsor sale.** Citizens

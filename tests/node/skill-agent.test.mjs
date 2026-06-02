@@ -257,13 +257,17 @@ test('SKILL_AGENT_SEED_LIST contains at least one well-formed entry', () => {
   }
 });
 
-// Phase 13.4.1 — the seed list now ships TWO skills covering two
-// distinct categories. A future regression that drops one entry
-// (e.g. an over-eager dedupe) fails loudly here.
-test('Phase 13.4.1 — seed list covers both utility_bill_explainer + consumer_complaint_drafter', () => {
+// Phase 13.4.2 — the seed list now ships THREE skills covering all
+// three categories from the BE allowlist. A future regression that
+// drops one entry (e.g. an over-eager dedupe) fails loudly here.
+test('Phase 13.4.2 — seed list covers all three categories', () => {
   const categories = SKILL_AGENT_SEED_LIST.map((s) => s.category).sort();
-  assert.deepEqual(categories, ['consumer_complaint_drafter', 'utility_bill_explainer']);
-  // The two seeds must produce distinct content-derived skillIds.
+  assert.deepEqual(categories, [
+    'consumer_complaint_drafter',
+    'government_scheme_status',
+    'utility_bill_explainer'
+  ]);
+  // The three seeds must produce distinct content-derived skillIds.
   const skillIds = new Set(SKILL_AGENT_SEED_LIST.map((s) => buildSkillAgent(s).skillId));
   assert.equal(skillIds.size, SKILL_AGENT_SEED_LIST.length);
 });
@@ -291,7 +295,7 @@ test('GET /api/skill-agents — seed-populated catalog (first hit triggers seedi
     assert.equal(body.protocolVersion, SKILL_AGENT_PROTOCOL_VERSION);
     assert.deepEqual(body.supportedCategories, SKILL_AGENT_CATEGORIES);
     assert.deepEqual(body.supportedDocKinds, SKILL_AGENT_SUPPORTED_DOC_KINDS);
-    assert.ok(body.skillAgents.length >= 2, 'catalog should be seeded with both v1 skills');
+    assert.ok(body.skillAgents.length >= 3, 'catalog should be seeded with all three v1 skills');
     const billExplainer = body.skillAgents.find(
       (s) => s.category === 'utility_bill_explainer'
     );
@@ -305,6 +309,13 @@ test('GET /api/skill-agents — seed-populated catalog (first hit triggers seedi
     assert.ok(complaintDrafter, 'consumer complaint drafter should be seeded');
     assert.equal(complaintDrafter.status, 'registered');
     assert.deepEqual(complaintDrafter.supportedDocKinds, ['generic']);
+    // Phase 13.4.2 — PM-KISAN status checker is the third seed.
+    const pmKisan = body.skillAgents.find(
+      (s) => s.category === 'government_scheme_status'
+    );
+    assert.ok(pmKisan, 'PM-KISAN status checker should be seeded');
+    assert.equal(pmKisan.status, 'registered');
+    assert.deepEqual(pmKisan.supportedDocKinds, ['generic']);
   });
 });
 

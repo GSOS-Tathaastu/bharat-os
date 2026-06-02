@@ -59,5 +59,25 @@ export const SKILL_AGENT_SEED_LIST = Object.freeze([
     maxInputChars: 6000,
     maxOutputChars: 1600,
     registeredBy: SKILL_AGENT_SEED_REGISTERED_BY
+  }),
+  // Phase 13.4.2 — third concrete skill: PM-KISAN status checker.
+  // Free-form description of a farmer's PM-KISAN concern → SLM
+  // emits SCHEME_STATUS / LIKELY_BLOCKER (4 canonical causes:
+  // eKYC pending / bank-Aadhaar unseeded / land-record mismatch
+  // / ineligible landholding) / KEY_CHECKS + 1-5 typed next-step
+  // actions. v1 is informational; the pmkisan.gov.in adapter
+  // lands in a future 13.4.x.
+  Object.freeze({
+    category: 'government_scheme_status',
+    displayName: 'PM-KISAN status checker',
+    shortDescription:
+      'Reads your description of a PM-KISAN concern (missing payment, status check, eligibility doubt) and surfaces the likely blocker among the four common causes (eKYC, bank-Aadhaar seeding, land records, eligibility) + concrete next steps.',
+    supportedDocKinds: ['generic'],
+    requiredCapabilities: ['inference'],
+    compatibleModelPackFamilies: [],
+    license: 'apache-2.0',
+    maxInputChars: 4000,
+    maxOutputChars: 1400,
+    registeredBy: SKILL_AGENT_SEED_REGISTERED_BY
   })
 ]);
