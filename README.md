@@ -152,6 +152,49 @@ Implemented pieces:
 
 ---
 
+## 🔄 2026-06-03 — Phase 2a.1.6 shipped: Stale OPFS cleanup + "Clear stale install state" button
+
+Direct follow-up to Phase 2a.1.5. Founder retested on desktop Chrome
+and got `quota_exceeded` at "0 MB downloaded" — but
+`navigator.storage.estimate()` showed **10 GB quota with only 53 KB
+used**. Impossible-looking quota error with plenty of free space.
+
+Root cause: Chromium's `FileSystemWritableFileStream.createWritable()`
+creates an internal "swap file" for atomic-replace semantics. If a
+prior install was killed mid-write (browser tab closed, OOM,
+extension interfering), the swap file persists. It does NOT count
+toward `navigator.storage.estimate()` but DOES count toward
+`createWritable`'s allocation budget — so users see QuotaExceededError
+despite 10 GB free.
+
+**Fix:**
+- `opfs.ts:downloadAndPersist` — `dir.removeEntry()` BEFORE
+  `getFileHandle({create:true})` self-heals stale swap on retry.
+- `createWritable()` wrapped in its own try/catch so quota errors at
+  the open step are correctly classified.
+- `DownloadFailureError` refactored to options bag carrying real
+  `downloadedBytes` + `quotaSnapshot` through the error path.
+- NEW `clearAllInstalledPacks()` — wipes the SLM OPFS dir + the dir
+  itself (helps Chromium reclaim parent slot).
+- NEW `safeQuotaSnapshot()` — never-throws probe used to embed quota
+  numbers in failure errors.
+- `Labs.tsx` error copy now embeds progress + quota:
+  > "downloaded 800 MB of 1.0 GB before failing. Browser reports
+  > 10 GB quota, 53 KB used. If the browser shows plenty of quota
+  > free, you likely have stale install state — tap 'Clear stale
+  > install state' below and retry."
+- NEW **"Stuck install?"** warning card on `/app/labs` with a
+  **"Clear stale install state"** button. Visible when any install
+  record has `status='failed'`. One-tap unblock.
+
+**Tests:** 550 vitest (+1) + 1466 Node + tsc clean + vite build
+succeeds. Commit 01a69a2. No new dep.
+
+Founder's pickup: hard-refresh `/app/labs` → "Clear stale install
+state" button should appear (because of the prior failed record);
+tap it → retry Qwen install. New error copy will name the exact
+failure mode + quota numbers if anything still breaks.
+
 ## 🩹 2026-06-03 — Phase 2a.1.5 shipped: Mobile SLM install OOM fix (now actually installable on Android)
 
 User reported "SLM installation failed on my mobile" (Android Chrome).

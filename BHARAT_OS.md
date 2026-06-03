@@ -2201,6 +2201,37 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.1.6 — SHIPPED 2026-06-03 (commit 01a69a2; no ADR
+  — direct follow-up to ADR 0173).** Stale OPFS cleanup +
+  preserve `downloadedBytes` through error path + quota numbers
+  in error copy + "Clear stale install state" button. Founder
+  retested 2a.1.5 fix on desktop Chrome and got
+  `quota_exceeded` at "0 MB downloaded" despite
+  `navigator.storage.estimate()` returning 10 GB quota with
+  only 53 KB used. Root cause: Chromium's
+  `FileSystemWritableFileStream.createWritable()` creates an
+  internal "swap file" for atomic replace that does NOT count
+  toward storage.estimate() but DOES count toward
+  createWritable's allocation budget — so a prior killed
+  install can leave swap state that produces QuotaExceededError
+  with plenty of free space. Fix: opfs.ts `removeEntry()`
+  BEFORE every `getFileHandle({create:true})` (self-heals
+  stale swap on retry); `createWritable()` wrapped in its own
+  try/catch so quota errors at open are correctly classified;
+  `DownloadFailureError` constructor refactored to options bag
+  `{ cause, downloadedBytes, quotaSnapshot }` preserving real
+  progress + quota numbers; NEW `clearAllInstalledPacks()`
+  wipes the SLM OPFS dir + the dir itself; NEW
+  `safeQuotaSnapshot()` helper. Labs.tsx error copy embeds
+  progress + quota ("downloaded 800 MB of 1.0 GB before
+  failing. Browser reports 10 GB quota, 53 KB used"). NEW
+  "Stuck install?" warning card with "Clear stale install
+  state" button — visible when any install record has
+  `status='failed'`; calls clearAllInstalledPacks +
+  DELETEs every failed BE install record. Tests: 550 vitest
+  (+1: DownloadFailureError downloadedBytes + quotaSnapshot
+  pin) + 1466 Node + tsc clean + vite build succeeds. Pickup:
+  founder needs to retest install with the new button.
 - **Phase 2a.1.5 — SHIPPED 2026-06-03 (ADR 0173).** Mobile SLM install
   OOM fix. User reported "SLM installation failed on my mobile"
   (Android Chrome). A 9-agent Ultracode workflow (5 finders + 1 live
@@ -2236,6 +2267,69 @@ sequencing.
   DownloadFailureError shape) + 1466 Node unchanged + tsc clean +
   vite build succeeds (main bundle 1,291 → 1,299 KB, gzip 372 → 376
   KB; +8 KB matches @noble/hashes size). ADR 0173.
+- **Phase 2a.1.4 — SHIPPED 2026-06-03 (commit 875be64; no ADR
+  — operational + script + Caddy config delta).** Production
+  SLM model packs registered on the VM. Founder reported "i
+  didnt get any SLM installation message" after 2a.1.3 fixed
+  the persona picker. Diagnosis: empty model-pack catalog on
+  fresh deploy. Resolution: downloaded two GGUFs to
+  `/home/HP/models` on the VM (Qwen2.5-1.5B-Instruct Q4_K_M
+  ~1.0 GB Apache 2.0 sha256 `6a1a2eb6…`, Phi-3.5-mini-instruct
+  Q4_K_M ~2.3 GB MIT sha256 `3f68916e…`); generated
+  `BHARAT_OS_ADMIN_TOKEN` (mode-600 at
+  `/home/HP/.bharat-os-admin-token`); added admin token to
+  systemd unit; extended Caddyfile `handle_path /models/*` to
+  serve from the VM disk; NEW `scripts/seed-model-packs.mjs`
+  (idempotent admin POST seeder). Registered both packs;
+  duplicate Qwen registration (first-run script bug, fixed:
+  reading `data.packs` → `data.modelPacks`) was revoked via
+  admin DELETE. Final catalog: 2 active packs. Recommendation
+  framework: Qwen as default (Asian-language-native training
+  corpus, strong Hindi/Tamil/Bengali coverage); Phi as premium
+  for 8 GB+ phones (stronger reasoning + 128k context). Pack
+  swap is data-safe by construction — every citizen artifact
+  lives independently of the SLM bytes; releaseSharedSlmRuntime
+  + re-getSharedSlmRuntime swaps cleanly. No vitest / Node
+  delta (operational).
+- **Phase 2a.1.3 — SHIPPED 2026-06-03 (commit 4d7993c; no ADR
+  — operational + script delta).** Seed demo personas. Founder
+  reported "Demo is not working" after 2a.1.2 fixed the root
+  redirect. Diagnosis: a fresh production deploy has zero
+  identities in sqlite, but OnboardingPage copy promises "pick
+  a demo persona above to explore without signing up" → empty
+  state "No seeded personas for this path." NEW
+  `scripts/seed-demo-personas.mjs` — idempotent POST seeder
+  that creates 6 demo identities with displayNames chosen to
+  match the WORKER_HINTS regex in
+  `frontend/src/lib/identity-store.ts:34-41` (2 citizens + 4
+  workers: driver, freelance, contractor, mesh). Ran against
+  the production VM; total identities went 1 → 7. Follow-up
+  ideas: auto-seed on first request like skill-agents do, OR a
+  one-click "Create a demo identity (no signup)" button on the
+  OnboardingPage. No code change in this commit; pure script
+  delta.
+- **Phase 2a.1.2 — SHIPPED 2026-06-03 (commit 4a843b1; no ADR
+  — small correctness fix on top of ADR 0172).** Root `/`
+  lands on marketing AboutPage. Founder reported
+  "https://bharat-os.com/ should land on the homepage that we
+  build. however it is landing on https://bharat-os.com/shell/"
+  immediately after Phase 2a.1.1 made bharat-os.com canonical.
+  Root cause: legacy redirect at `src/phase0/api.mjs:4821` from
+  the Phase 1 vernacular shell era. Fix: `GET /` (and `HEAD /`)
+  now 302 redirects to `/app/about` (the marketing AboutPage
+  with brand mark + 3 pillars + "Try the demo" CTA);
+  `GET /shell` (without trailing slash) still redirects to
+  `/shell/` so legacy bookmarks resolve. The `/shell/*` static
+  handler is unchanged — shell retirement is its own future
+  phase (per [[app-grows-shell-retires]]). HEAD method support
+  was a separate bug discovered during diagnosis (HEAD probes
+  404'd while GET worked). `tests/node/api.test.mjs` regression
+  pin updated; all 16 cases pass. **Force-push acknowledged:**
+  original commit 9fca145 was amended + force-pushed to
+  4a843b1 30 seconds later for the HEAD-support addition.
+  Safer pattern would have been a fresh follow-up commit;
+  noted for future sessions. Blast radius negligible (solo
+  founder + private repo + additive change).
 - **Phase 2a.1.1 — SHIPPED 2026-06-03 (ADR 0172).** Real domain.
   Canonical URL now **https://bharat-os.com/app/**. Hostinger DNS
   A records (apex + www) repointed from `2.57.91.91` → `34.0.10.172`;

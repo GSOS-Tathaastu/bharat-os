@@ -56,6 +56,40 @@ plus the first half of the on-device-SLM arc.
   to 34.0.10.172. Caddyfile carries apex + www→apex 301 + nip.io→apex
   301. Auto Let's Encrypt certs for all 3 hostnames. bootstrap-vm.sh
   updated with BHARAT_OS_APEX_DOMAIN env var.
+- [x] **Phase 2a.1.2 shipped 2026-06-03 (commit 4a843b1)** — root
+  `/` redirects to `/app/about` (was the dead `/shell/` from the
+  Phase 1 era). HEAD method support added. `tests/node/api.test.mjs`
+  regression-pin updated. Force-push of the amendment acknowledged
+  for future-session record.
+- [x] **Phase 2a.1.3 shipped 2026-06-03 (commit 4d7993c)** —
+  `scripts/seed-demo-personas.mjs` seeds 6 demo identities (2
+  citizens + 4 workers matching WORKER_HINTS regex) so the
+  OnboardingPage persona picker has options on a fresh deploy.
+  Operational + script delta only.
+- [x] **Phase 2a.1.4 shipped 2026-06-03 (commit 875be64)** —
+  production SLM model packs registered on the VM:
+  Qwen2.5-1.5B-Instruct (default, 1.0 GB, Apache 2.0) +
+  Phi-3.5-mini-instruct (premium, 2.3 GB, MIT). GGUFs hosted on the
+  VM at `/home/HP/models`; Caddy `handle_path /models/*` serves
+  them. NEW `scripts/seed-model-packs.mjs` idempotent admin POST
+  seeder. BHARAT_OS_ADMIN_TOKEN persisted in systemd unit + mode-600
+  file. Pack upgrade is data-safe by construction
+  (releaseSharedSlmRuntime + re-getSharedSlmRuntime).
+- [x] **Phase 2a.1.5 shipped 2026-06-03 (ADR 0173)** — Mobile SLM
+  install OOM fix. Streaming SHA-256 via `@noble/hashes` (MIT, ~10
+  KB) drops peak JS heap from ~modelSize to ~chunkSize. NEW
+  `DownloadFailureError` discriminated codes; NEW
+  `estimateInstallFeasible` storage preflight; SW `/models/*`
+  bypass; Caddy `/models/*` Content-Type + CORP + Cache-Control
+  headers. Verified by 9-agent Ultracode workflow (5 finders + 1
+  live probe + 1 synthesis + 3 adversarial skeptics).
+- [x] **Phase 2a.1.6 shipped 2026-06-03 (commit 01a69a2)** — stale
+  OPFS cleanup + preserve `downloadedBytes` through error path +
+  quota numbers in error copy + "Clear stale install state" button.
+  Fixes Chromium-specific QuotaExceededError-with-plenty-of-free-
+  quota issue caused by `createWritable()` internal swap-file
+  state. `removeEntry()` before every install self-heals retries;
+  NEW `clearAllInstalledPacks()` + `safeQuotaSnapshot()` helpers.
 - [ ] **Phase 2a.2 next** — Daily disk snapshot cron + GitHub
   Actions CI/CD pipeline + real domain purchase + COOP/COEP
   headers for wllama multi-thread + PNG icon fallbacks for iOS
