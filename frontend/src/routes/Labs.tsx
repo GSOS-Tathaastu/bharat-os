@@ -18,6 +18,7 @@ import {
   opfsSupported,
   readSlmBlob,
   removeSlmBlob,
+  clearAllInstalledPacks,
   estimateInstallFeasible,
   DownloadFailureError
 } from '@/lib/opfs';
@@ -58,31 +59,50 @@ const INSTALL_STATUS_VARIANT: Record<InstalledSlm['status'], 'trust' | 'error'> 
 // user copy. The error code comes from DownloadFailureError in opfs.ts,
 // which classifies QuotaExceededError / RangeError / AbortError / network
 // loss / OPFS+crypto missing into stable codes the UI can branch on.
+// Phase 2a.1.6 — also accept actualDownloadedBytes + quotaSnapshot so
+// the message can quote real numbers ("downloaded 800 MB of 1.0 GB before
+// failing; browser quota 10 GB, used 53 KB") which helps the user
+// understand why a failure that LOOKS like quota exhaustion happens
+// even when their quota is plentiful (Chromium internal swap state).
+function formatGbCompact(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  if (bytes >= 1_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
+  return `${Math.round(bytes / 1_000)} KB`;
+}
+
 function mapFailureToUserMessage(
   code: string,
   err: Error,
-  pack: SlmModelPack
+  pack: SlmModelPack,
+  actualDownloadedBytes: number = 0,
+  quotaSnapshot?: { quotaBytes: number | null; usageBytes: number | null }
 ): string {
   const packName = `${pack.family}${pack.variant ? ' · ' + pack.variant : ''}`;
+  const progress = actualDownloadedBytes > 0
+    ? ` (downloaded ${formatGbCompact(actualDownloadedBytes)} of ${formatGbCompact(pack.diskBytes)} before failing)`
+    : '';
+  const quotaHint = quotaSnapshot?.quotaBytes != null
+    ? ` Browser reports ${formatGbCompact(quotaSnapshot.quotaBytes)} quota, ${formatGbCompact(quotaSnapshot.usageBytes ?? 0)} used.`
+    : '';
   switch (code) {
     case 'quota_exceeded':
-      return `Install of ${packName} failed: browser storage quota exceeded. Free up some space (Settings → Site settings → Storage) and try again, or pick a smaller pack.`;
+      return `Install of ${packName} failed: browser storage quota exceeded${progress}.${quotaHint} If the browser shows plenty of quota free, you likely have stale install state — tap "Clear stale install state" below and retry.`;
     case 'oom':
-      return `Install of ${packName} failed: your phone ran out of memory while hashing the download. Close other apps + tabs and retry, or pick a smaller pack.`;
+      return `Install of ${packName} failed: phone ran out of memory${progress}. Close other apps + tabs and retry, or pick a smaller pack.`;
     case 'network_aborted':
-      return `Install of ${packName} interrupted: network dropped mid-download. Reconnect to WiFi and try again — install is restart-safe.`;
+      return `Install of ${packName} interrupted${progress}: network dropped. Reconnect to WiFi and try again — install is restart-safe.`;
     case 'no_opfs':
-      return `Install of ${packName} failed: this browser does not support on-device storage. Use Chrome / Edge 102+ on Android, or Safari 17+ on iOS.`;
+      return `Install of ${packName} failed: browser does not support on-device storage. Use Chrome / Edge 102+ on Android, or Safari 17+ on iOS.`;
     case 'no_crypto':
-      return `Install of ${packName} failed: this browser does not support SHA-256 verification. Use a modern browser (any 2023+ release).`;
+      return `Install of ${packName} failed: browser does not support SHA-256 verification. Use any 2023+ browser release.`;
     case 'no_streaming_fetch':
-      return `Install of ${packName} failed: this browser cannot stream large downloads. Use Chrome / Edge / Firefox / Safari 17+.`;
+      return `Install of ${packName} failed: browser cannot stream large downloads. Use Chrome / Edge / Firefox / Safari 17+.`;
     case 'mirror_status':
-      return `Install of ${packName} failed: the model mirror returned an error. Try again in a moment.`;
+      return `Install of ${packName} failed: the model mirror returned an error${progress}. Try again in a moment.`;
     case 'no_opfs_dir':
-      return `Install of ${packName} failed: could not open the browser's private storage. Restart the browser and try again.`;
+      return `Install of ${packName} failed: could not open browser's private storage. Restart the browser and try again.`;
     default:
-      return `Install of ${packName} failed: ${err.message}`;
+      return `Install of ${packName} failed${progress}: ${err.message}`;
   }
 }
 
@@ -175,15 +195,28 @@ export function LabsPage() {
     } catch (err) {
       // Phase 2a.1.5 — discriminated error codes from DownloadFailureError
       // surface as actionable user copy instead of opaque DOMException text.
+      // Phase 2a.1.6 — preserve real downloadedBytes + quota snapshot
+      // through the error path so the BE install record + the user
+      // message both reflect actual progress.
       const failureCode =
         err instanceof DownloadFailureError ? err.failureCode : 'unknown';
-      const userMessage = mapFailureToUserMessage(failureCode, err as Error, pack);
+      const actualDownloadedBytes =
+        err instanceof DownloadFailureError ? err.downloadedBytes : 0;
+      const quotaSnapshot =
+        err instanceof DownloadFailureError ? err.quotaSnapshot : undefined;
+      const userMessage = mapFailureToUserMessage(
+        failureCode,
+        err as Error,
+        pack,
+        actualDownloadedBytes,
+        quotaSnapshot
+      );
       record.mutate(
         {
           identityId: identity.id,
           modelPackId: pack.modelPackId,
           runtimeBackend: 'llama_cpp_wasm',
-          downloadedBytes: 0,
+          downloadedBytes: actualDownloadedBytes,
           status: 'failed',
           failureReason: `${failureCode}: ${(err as Error).message}`
         },
@@ -263,6 +296,55 @@ export function LabsPage() {
               Firefox 111+, Safari 17+. Older browsers can still browse the
               catalogue.
             </p>
+          </Card>
+        )}
+
+        {/* Phase 2a.1.6 — "Clear stale install state" affordance. Visible
+            whenever there are failed install records OR a previous install
+            attempt left partial OPFS / swap-file state. Wipes every entry
+            under the SLM OPFS dir + DELETEs every failed BE install record
+            for this identity, so the user can re-attempt cleanly. */}
+        {installs.some((i) => i.status === 'failed') && (
+          <Card tone="warning" className="mb-4">
+            <p className="text-body font-semibold">Stuck install?</p>
+            <p className="mt-1 text-caption text-text-muted">
+              If a prior install failed mid-flight, the browser may keep a
+              stale internal swap file that makes future installs fail with
+              "QuotaExceededError" even when storage looks free. This wipes
+              all on-device pack state for this identity so you can retry
+              cleanly.
+            </p>
+            <div className="mt-3">
+              <Action
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  if (!identity) return;
+                  const ok = window.confirm(
+                    'Clear ALL on-device SLM state for this identity? You will need to re-download any installed packs.'
+                  );
+                  if (!ok) return;
+                  const removed = await clearAllInstalledPacks();
+                  // Best-effort: also delete every failed install record on the BE.
+                  for (const i of installs.filter((x) => x.status === 'failed')) {
+                    try {
+                      remove.mutate({
+                        identityId: identity.id,
+                        installId: i.installId
+                      });
+                    } catch {
+                      /* best-effort */
+                    }
+                  }
+                  show(
+                    `Cleared ${removed} OPFS entr${removed === 1 ? 'y' : 'ies'} + reset failed install records. Retry the install now.`,
+                    'success'
+                  );
+                }}
+              >
+                Clear stale install state
+              </Action>
+            </div>
           </Card>
         )}
 

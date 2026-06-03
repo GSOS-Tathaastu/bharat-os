@@ -92,11 +92,23 @@ describe('DownloadFailureError', () => {
     expect(err.message).toBe('tab killed');
     expect(err.name).toBe('DownloadFailureError');
     expect(err).toBeInstanceOf(Error);
+    expect(err.downloadedBytes).toBe(0);
+    expect(err.quotaSnapshot).toBeUndefined();
   });
 
   it('preserves the original cause for debugging', () => {
     const inner = new Error('inner');
-    const err = new DownloadFailureError('network_aborted', 'wrap', inner);
+    const err = new DownloadFailureError('network_aborted', 'wrap', { cause: inner });
     expect(err.cause).toBe(inner);
+  });
+
+  it('Phase 2a.1.6 — carries downloadedBytes + quotaSnapshot through the error path', () => {
+    const err = new DownloadFailureError('quota_exceeded', 'oof', {
+      downloadedBytes: 800_000_000,
+      quotaSnapshot: { quotaBytes: 10_000_000_000, usageBytes: 50_000 }
+    });
+    expect(err.downloadedBytes).toBe(800_000_000);
+    expect(err.quotaSnapshot?.quotaBytes).toBe(10_000_000_000);
+    expect(err.quotaSnapshot?.usageBytes).toBe(50_000);
   });
 });

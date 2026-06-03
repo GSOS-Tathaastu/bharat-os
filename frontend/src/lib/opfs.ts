@@ -83,11 +83,28 @@ export type DownloadFailureCode =
 export class DownloadFailureError extends Error {
   failureCode: DownloadFailureCode;
   cause?: unknown;
-  constructor(failureCode: DownloadFailureCode, message: string, cause?: unknown) {
+  // Phase 2a.1.6 — surface real download progress at failure time so
+  // the BE install record + the UI can show how far the install got.
+  downloadedBytes: number;
+  // Phase 2a.1.6 — best-effort quota snapshot at failure time. Helps
+  // the user understand whether the browser thought there was room
+  // when the write was attempted.
+  quotaSnapshot?: { quotaBytes: number | null; usageBytes: number | null };
+  constructor(
+    failureCode: DownloadFailureCode,
+    message: string,
+    options?: {
+      cause?: unknown;
+      downloadedBytes?: number;
+      quotaSnapshot?: { quotaBytes: number | null; usageBytes: number | null };
+    }
+  ) {
     super(message);
     this.name = 'DownloadFailureError';
     this.failureCode = failureCode;
-    this.cause = cause;
+    this.cause = options?.cause;
+    this.downloadedBytes = options?.downloadedBytes ?? 0;
+    this.quotaSnapshot = options?.quotaSnapshot;
   }
 }
 
@@ -143,8 +160,38 @@ export async function downloadAndPersist({
   if (!dir) {
     throw new DownloadFailureError('no_opfs_dir', 'Could not open OPFS directory.');
   }
+
+  // Phase 2a.1.6 — explicit clean-before-install. A previous install
+  // attempt that was killed mid-write (browser tab closed, OOM, etc.)
+  // may have left a partial OPFS entry AND a stale Chromium internal
+  // swap file. The swap file is NOT visible to navigator.storage.estimate()
+  // but DOES count toward the atomic-swap budget on createWritable(),
+  // so users see "QuotaExceededError" with 10 GB free in the quota
+  // probe. Removing the entry first lets Chromium reclaim the swap.
+  // Best-effort: a no-existing-entry NotFoundError is expected and OK.
+  try {
+    await dir.removeEntry(safeName(modelPackId));
+  } catch {
+    /* best-effort — usually NotFoundError, which is fine */
+  }
+
   const fileHandle = await dir.getFileHandle(safeName(modelPackId), { create: true });
-  const writable = await fileHandle.createWritable();
+  let writable: FileSystemWritableFileStream;
+  try {
+    writable = await fileHandle.createWritable();
+  } catch (err) {
+    // createWritable() throws QuotaExceededError when Chromium can't
+    // allocate the swap. Wrap with the quota snapshot so the UI can
+    // explain what the browser thought.
+    const code = classifyError(err);
+    const quotaSnapshot = await safeQuotaSnapshot();
+    if (err instanceof DownloadFailureError) throw err;
+    throw new DownloadFailureError(
+      code,
+      `Browser refused to open writable: ${(err as Error)?.message ?? String(err)}`,
+      { cause: err, downloadedBytes: 0, quotaSnapshot }
+    );
+  }
 
   // Streaming SHA-256 — every chunk is hashed-and-forgotten. The
   // accumulator is the 32-byte sha256 state, not the bytes themselves.
@@ -166,6 +213,7 @@ export async function downloadAndPersist({
   } catch (err) {
     // Map common error shapes to discriminated codes the UI can branch on.
     const code = classifyError(err);
+    const quotaSnapshot = await safeQuotaSnapshot();
     try {
       await writable.close();
       await dir.removeEntry(safeName(modelPackId));
@@ -173,7 +221,11 @@ export async function downloadAndPersist({
       /* best-effort rollback */
     }
     if (err instanceof DownloadFailureError) throw err;
-    throw new DownloadFailureError(code, (err as Error)?.message ?? String(err), err);
+    throw new DownloadFailureError(
+      code,
+      (err as Error)?.message ?? String(err),
+      { cause: err, downloadedBytes: downloaded, quotaSnapshot }
+    );
   }
 
   const digest = hasher.digest();
@@ -185,6 +237,25 @@ export async function downloadAndPersist({
 
   const blob = await fileHandle.getFile();
   return { observedHash, downloadedBytes: downloaded, blob };
+}
+
+/**
+ * Phase 2a.1.6 — best-effort quota snapshot for embedding in error
+ * reports. Never throws; returns nulls on any failure.
+ */
+async function safeQuotaSnapshot(): Promise<{
+  quotaBytes: number | null;
+  usageBytes: number | null;
+}> {
+  if (typeof navigator === 'undefined' || typeof navigator.storage?.estimate !== 'function') {
+    return { quotaBytes: null, usageBytes: null };
+  }
+  try {
+    const est = await navigator.storage.estimate();
+    return { quotaBytes: est.quota ?? null, usageBytes: est.usage ?? null };
+  } catch {
+    return { quotaBytes: null, usageBytes: null };
+  }
 }
 
 function classifyError(err: unknown): DownloadFailureCode {
@@ -211,6 +282,53 @@ export async function removeSlmBlob(modelPackId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Phase 2a.1.6 — wipe EVERY entry in the SLM directory + the dir itself.
+ *
+ * For one-click "Clear stale install state" when prior installs left
+ * partial files / Chromium swap state behind. Returns the number of
+ * entries removed. Safe to call when the dir is already empty.
+ *
+ * Callers should also clear the BE-side install records via the
+ * Phase 9.0b /installed-slms DELETE endpoint after this, otherwise the
+ * BE will show "installed" for packs that no longer have bytes on
+ * device.
+ */
+export async function clearAllInstalledPacks(): Promise<number> {
+  if (!opfsSupported()) return 0;
+  const dir = await getSlmDir(false);
+  if (!dir) return 0;
+  let removed = 0;
+  try {
+    // FileSystemDirectoryHandle is async-iterable in supporting
+    // browsers; collect names first so we don't iterate while
+    // mutating.
+    const names: string[] = [];
+    // @ts-expect-error — async iterator is in spec but TS lib may lag
+    for await (const [name] of dir.entries()) {
+      names.push(name);
+    }
+    for (const name of names) {
+      try {
+        await dir.removeEntry(name, { recursive: true });
+        removed += 1;
+      } catch {
+        /* best-effort per-entry */
+      }
+    }
+    // Drop the SLM dir itself so Chromium reclaims the parent slot.
+    try {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry(SLM_DIR, { recursive: true });
+    } catch {
+      /* if it has lingering refs, leave it — empty dir is fine */
+    }
+  } catch {
+    /* best-effort */
+  }
+  return removed;
 }
 
 /**
