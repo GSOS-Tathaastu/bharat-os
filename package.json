@@ -7,7 +7,9 @@
   "scripts": {
     "test": "node --test tests/node/*.test.mjs",
     "bos": "node bin/bos.mjs",
-    "api": "node bin/bos-api.mjs"
+    "api": "node bin/bos-api.mjs",
+    "build": "cd frontend && npm install && npm run build",
+    "start": "node bin/bos-api.mjs"
   },
   "engines": {
     "node": ">=24"

@@ -22,15 +22,23 @@ function parseArgs(argv) {
 }
 
 const options = parseArgs(process.argv.slice(2));
-const host = options.host ?? '127.0.0.1';
-const port = Number(options.port ?? 8787);
-const storePath = path.resolve(options.store ?? '.bharat-os');
+// Phase 2a.1 — env-var defaults so a systemd unit on a VM (GCP /
+// AWS / DO / Hetzner) OR a PaaS that injects $PORT (Railway /
+// Fly / Render) can configure the listener without CLI flag
+// plumbing. CLI flags still win when present (local-dev override).
+// Precedence: --flag > $PORT/$HOST > $BHARAT_OS_PORT/$BHARAT_OS_HOST
+// > built-in default (127.0.0.1:8787).
+const host = options.host ?? process.env.HOST ?? process.env.BHARAT_OS_HOST ?? '127.0.0.1';
+const port = Number(options.port ?? process.env.PORT ?? process.env.BHARAT_OS_PORT ?? 8787);
+const storePath = path.resolve(options.store ?? process.env.BHARAT_OS_STORE_PATH ?? '.bharat-os');
 // Phase 4.2: --kind file | sqlite. Falls back to env var
 // BHARAT_OS_STORE_KIND (default: file).
 const storeKind = options.kind ?? process.env.BHARAT_OS_STORE_KIND ?? 'file';
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error('--port must be an integer from 1 to 65535.');
+  throw new Error(
+    'port must be an integer from 1 to 65535. Pass via --port, $PORT, or $BHARAT_OS_PORT.'
+  );
 }
 
 const store = await createStore({ rootPath: storePath, kind: storeKind });

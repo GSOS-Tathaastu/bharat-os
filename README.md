@@ -152,6 +152,71 @@ Implemented pieces:
 
 ---
 
+## 🌏 2026-06-03 — Phase 2a.1 shipped: Bharat OS is LIVE at https://34-0-10-172.nip.io/app/
+
+First real public HTTPS endpoint. The §13.x revenue lines + SLM USP
++ marketplace + Phase 2a.0 PWA install are now demonstrable on any
+phone with internet, not just localhost.
+
+**Stack:**
+- New GCP project `bharat-os-prod` (independent of SIP infra per §0).
+- VM `bharat-os-vm` in `asia-south2-a` (Delhi) — e2-medium (2 vCPU /
+  4 GB RAM) on Debian 12, 20 GB pd-balanced disk.
+- Static external IP `34.0.10.172` reserved as `bharat-os-static`.
+- Firewall `allow-http-https` opens 80/443.
+- systemd unit `bharat-os-api.service` runs `node bin/bos-api.mjs`
+  with env vars: HOST=127.0.0.1 + PORT=8787 +
+  BHARAT_OS_STORE_KIND=sqlite + BHARAT_OS_STORE_PATH=~/bharat-os-data
+  (persistent — survives restarts) + BHARAT_OS_TRUST_PROXY=1 +
+  BHARAT_OS_HSTS=1. Restart=on-failure.
+- Caddy 2.11 reverse-proxies `34-0-10-172.nip.io` → `127.0.0.1:8787`
+  with auto Let's Encrypt cert + zstd/gzip + X-Forwarded headers.
+
+**App-layer code changes** (this commit):
+- `bin/bos-api.mjs` — env-var defaults so a systemd unit (or
+  Railway/Fly/Render) can configure without CLI flag plumbing.
+  Precedence: `--flag > $PORT/$HOST > $BHARAT_OS_PORT/$BHARAT_OS_HOST
+  > 127.0.0.1:8787`. CLI flags still win for local-dev.
+- `package.json` adds `build` + `start` scripts so a generic
+  `npm install && npm run build && npm start` flow works.
+- `.nvmrc` pins Node 24 for nvm-based VM provisioning.
+
+**Deploy substrate** (this commit):
+- `scripts/bootstrap-vm.sh` — idempotent bash. Installs Node 24,
+  configures GitHub deploy key, clones repo, installs npm deps +
+  builds Vite SPA, installs Caddy 2, writes systemd unit + Caddyfile,
+  enables + restarts both services.
+
+**Smoke test results:**
+- `https://34-0-10-172.nip.io/healthz` → 200 (39s uptime, valid JSON)
+- `https://34-0-10-172.nip.io/app/` → 200 (2.9 KB SPA index)
+- `https://34-0-10-172.nip.io/app/manifest.webmanifest` → 200
+  (`application/manifest+json`)
+- `https://34-0-10-172.nip.io/app/service-worker.js` → 200
+  (`text/javascript`)
+
+Adversarial review: ship_with_caveats. Privacy posture sound — BE
+binds 127.0.0.1 (Caddy proxies; never directly exposed); HSTS on
+now that TLS is real; X-Forwarded-For trusted only behind Caddy.
+Honest URL (no vanity-domain claim until one is purchased).
+**Caveats (deployment-level): MF-1 no automated backup of
+~/bharat-os-data (Phase 2a.2 daily snapshot cron); MF-2 no CI/CD
+(Phase 2a.3 GitHub Actions); MF-3 single-VM (acceptable for v1).**
+SF-1 real domain, SF-2 weekly disk snapshots, SF-3 fail2ban.
+
+Monthly cost: ~$28 (e2-medium 24×7 + static IP). Free tier credit
+($300) covers ~10 months on this footprint.
+
+GitHub repo `GSOS-Tathaastu/bharat-os` set as origin (private); the
+VM clones via a read-only deploy key.
+
+542 vitest + 1466 Node + tsc clean (unchanged from Phase 2a.0; no
+test delta in this phase). ADR 0171.
+
+**Phone-install test from user pending.** Open the URL on Android
+Chrome or iOS Safari 16+ → install banner → home-screen icon →
+app opens standalone.
+
 ## 📲 2026-06-03 — Phase 2a.0 shipped: PWA install + offline shell (Bharat OS is installable on Android + iOS)
 
 Opens the §2a distribution arc. The substrate is now installable as

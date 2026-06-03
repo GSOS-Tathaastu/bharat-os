@@ -45,11 +45,18 @@ plus the first half of the on-device-SLM arc.
 - [x] Service worker (network-first navigation; never cache /api/*)
 - [x] Offline shell (honest about online-only surfaces)
 - [x] Install banner (Chromium + iOS Safari branches)
-- [ ] **Phase 2a.1 next** — HTTPS hosting + COOP/COEP headers for
-  wllama multi-thread + Lighthouse PWA audit + PNG icon fallbacks
-  for iOS Safari pre-16.
-- [ ] **Phase 2a.2** — Android TWA wrapper (Bubblewrap) for Play Store.
-- [ ] **Phase 2a.3** — In-app "Update available · Reload" banner UI
+- [x] **Phase 2a.1 shipped 2026-06-03 (ADR 0171)** — GCP VM
+  deployment. Bharat OS LIVE at **https://34-0-10-172.nip.io/app/**.
+  GCP project `bharat-os-prod`, e2-medium VM in asia-south2-a,
+  static IP `34.0.10.172`, systemd unit + Caddy 2 reverse-proxy +
+  auto Let's Encrypt cert via nip.io. Persistent sqlite under
+  ~/bharat-os-data. Smoke test passed. ~$28/mo.
+- [ ] **Phase 2a.2 next** — Daily disk snapshot cron + GitHub
+  Actions CI/CD pipeline + real domain purchase + COOP/COEP
+  headers for wllama multi-thread + PNG icon fallbacks for iOS
+  Safari pre-16 + Lighthouse PWA audit.
+- [ ] **Phase 2a.3** — Android TWA wrapper (Bubblewrap) for Play Store.
+- [ ] **Phase 2a.4** — In-app "Update available · Reload" banner UI
   (SW supports SKIP_WAITING already).
 
 ### Phase 3 — Federated learning

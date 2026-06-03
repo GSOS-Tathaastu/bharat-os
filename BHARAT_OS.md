@@ -2201,6 +2201,52 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.1 — SHIPPED 2026-06-03 (ADR 0171).** GCP VM
+  deployment. Bharat OS is live on the public internet at
+  **https://34-0-10-172.nip.io/app/** — first real HTTPS endpoint.
+  This satisfies the PWA install precondition from Phase 2a.0
+  (TLS-only service worker registration) and gives the §13.x
+  features a real demo URL. New GCP project `bharat-os-prod`
+  (project number 425977408000) with billing linked; SIP infra
+  not used per §0 binding. VM `bharat-os-vm` (e2-medium, 2 vCPU
+  / 4 GB RAM, Debian 12) in zone `asia-south2-a` (Delhi). Static
+  external IP `34.0.10.172` reserved. Firewall rule
+  `allow-http-https` opens tcp:80 + tcp:443 on http-server +
+  https-server tags. App layer: EXTENDED `bin/bos-api.mjs` with
+  env-var defaults (precedence: --flag > $PORT/$HOST >
+  $BHARAT_OS_PORT/$BHARAT_OS_HOST > 127.0.0.1:8787); root
+  `package.json` adds `build` (runs `cd frontend && npm install
+  && npm run build`) + `start` (runs `node bin/bos-api.mjs`)
+  scripts. NEW `scripts/bootstrap-vm.sh` (~150 lines, idempotent
+  bash) — installs Node 24 via NodeSource + configures GitHub
+  deploy key + clones repo + builds frontend + installs Caddy
+  2.11 + writes systemd unit `bharat-os-api.service` + writes
+  Caddyfile for nip.io reverse-proxy + enables + restarts both
+  services. NEW `.nvmrc` (Node 24). systemd unit binds
+  127.0.0.1:8787 with `BHARAT_OS_STORE_KIND=sqlite` +
+  `BHARAT_OS_STORE_PATH=~/bharat-os-data` (persistent — survives
+  VM restarts) + `BHARAT_OS_TRUST_PROXY=1` (Caddy sets
+  X-Forwarded-For) + `BHARAT_OS_HSTS=1`. Caddy 2.11 reverse-
+  proxies `34-0-10-172.nip.io` → `127.0.0.1:8787` with auto Let's
+  Encrypt cert + zstd/gzip compression + X-Forwarded-Proto/For
+  headers. Smoke test passed: `/healthz` 200 (39s uptime),
+  `/app/` 200 (2.9 KB SPA index), `/app/manifest.webmanifest`
+  200 (application/manifest+json), `/app/service-worker.js`
+  200 (text/javascript). GitHub repo
+  `GSOS-Tathaastu/bharat-os` set as origin (private); read-only
+  deploy key 153392433 added for VM clone. Adversarial review:
+  ship_with_caveats — privacy posture sound (Caddy →
+  127.0.0.1; X-Forwarded-For trusted only behind Caddy; HSTS
+  on now that TLS is real); honest URL (IP-derived nip.io, no
+  vanity-domain claim); systemd Restart=on-failure + persistent
+  sqlite + Caddy auto-renew. **Caveats: MF-1** no automated
+  backup of ~/bharat-os-data (Phase 2a.2 adds daily snapshot
+  cron); **MF-2** no CI/CD (Phase 2a.3 adds GitHub Actions);
+  **MF-3** single VM (no redundancy — acceptable for v1).
+  SF-1 real domain, SF-2 weekly disk snapshots, SF-3 fail2ban.
+  Monthly cost: ~$28 (e2-medium 24×7 + static IP). Zero new
+  external API (deploy substrate only). No vitest / Node delta.
+  ADR 0171. **Phone-install test from user pending.**
 - **Phase 2a.0 — SHIPPED 2026-06-03 (ADR 0170).** PWA install
   + offline shell. Founder authorised the move 2026-06-03
   ("Lets do the PWA only as we need to test it first. From now
