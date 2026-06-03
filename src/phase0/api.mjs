@@ -4818,7 +4818,19 @@ export function createPhase0ApiServer({ store, startedAt = new Date().toISOStrin
         return;
       }
 
-      if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/shell')) {
+      // Phase 2a.1.2 — root `/` lands on the marketing AboutPage
+      // (the "what is Bharat OS" investor-facing landing). The
+      // legacy `/shell/` substrate is retiring per the
+      // app-grows-shell-retires binding; the bare `/shell` URL
+      // still redirects to `/shell/` so any bookmarked legacy
+      // links keep resolving until the shell handler is removed
+      // in a separate phase.
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/') {
+        response.writeHead(302, { location: '/app/about' });
+        response.end();
+        return;
+      }
+      if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/shell') {
         response.writeHead(302, { location: '/shell/' });
         response.end();
         return;

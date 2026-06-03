@@ -93,9 +93,17 @@ test('Phase 0 API exposes health and route catalog', async () => {
 test('Phase 0 API serves the shell and operator console assets', async () => {
   const { store } = await freshStore('api-console');
   await withApi(store, async (baseUrl) => {
+    // Phase 2a.1.2 — root `/` now lands on the marketing AboutPage
+    // (investor-facing landing) instead of the legacy `/shell/`
+    // (per app-grows-shell-retires binding). The bare `/shell`
+    // URL still redirects to `/shell/` so legacy bookmarks resolve.
     const redirected = await fetch(`${baseUrl}/`, { redirect: 'manual' });
     assert.equal(redirected.status, 302);
-    assert.equal(redirected.headers.get('location'), '/shell/');
+    assert.equal(redirected.headers.get('location'), '/app/about');
+
+    const shellRedirected = await fetch(`${baseUrl}/shell`, { redirect: 'manual' });
+    assert.equal(shellRedirected.status, 302);
+    assert.equal(shellRedirected.headers.get('location'), '/shell/');
 
     const shellHtml = await fetch(`${baseUrl}/shell/`);
     assert.equal(shellHtml.status, 200);
