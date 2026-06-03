@@ -70,7 +70,10 @@ function isNavigationRequest(request) {
 
 function isStaticAsset(url) {
   if (url.origin !== self.location.origin) return false;
-  return /\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2|wasm|gguf)(\?.*)?$/.test(
+  // Phase 2a.1.5 — drop 'gguf' from the static-asset cache regex
+  // as defence-in-depth alongside the explicit /models/* early-return
+  // in the fetch handler. A multi-GB GGUF must NEVER hit the cache.
+  return /\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2|wasm)(\?.*)?$/.test(
     url.pathname
   );
 }
@@ -87,6 +90,19 @@ self.addEventListener('fetch', (event) => {
 
   // §15 binding: never cache audit-bearing / live-state /api/*.
   if (isApiRequest(url)) {
+    return;
+  }
+
+  // Phase 2a.1.5 — never let the SW touch /models/*. The GGUF packs
+  // are multi-GB and already persisted to OPFS by the install flow.
+  // Letting the SW also write them to CacheStorage would:
+  //   • double the storage cost (~2 GB instead of 1 GB for Qwen,
+  //     ~4.6 GB instead of 2.3 GB for Phi-3.5)
+  //   • risk QuotaExceededError on devices near their cap
+  //   • OOM-kill the SW thread on mobile when copying the response
+  // Models are written-once + read-once + served from OPFS forever
+  // after; the SW has no role.
+  if (url.origin === self.location.origin && url.pathname.startsWith('/models/')) {
     return;
   }
 

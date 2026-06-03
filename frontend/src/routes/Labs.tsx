@@ -13,7 +13,14 @@ import {
   type InstalledSlm,
   type FederatedRound
 } from '@/lib/hooks';
-import { downloadAndPersist, opfsSupported, readSlmBlob, removeSlmBlob } from '@/lib/opfs';
+import {
+  downloadAndPersist,
+  opfsSupported,
+  readSlmBlob,
+  removeSlmBlob,
+  estimateInstallFeasible,
+  DownloadFailureError
+} from '@/lib/opfs';
 import { SlmTryPrompt } from '@/components/SlmTryPrompt';
 import { DocSummariserPanel } from '@/components/DocSummariserPanel';
 import { SkillAgentPanel } from '@/components/SkillAgentPanel';
@@ -47,6 +54,38 @@ const INSTALL_STATUS_VARIANT: Record<InstalledSlm['status'], 'trust' | 'error'> 
   failed: 'error'
 };
 
+// Phase 2a.1.5 — map discriminated install failure codes to actionable
+// user copy. The error code comes from DownloadFailureError in opfs.ts,
+// which classifies QuotaExceededError / RangeError / AbortError / network
+// loss / OPFS+crypto missing into stable codes the UI can branch on.
+function mapFailureToUserMessage(
+  code: string,
+  err: Error,
+  pack: SlmModelPack
+): string {
+  const packName = `${pack.family}${pack.variant ? ' · ' + pack.variant : ''}`;
+  switch (code) {
+    case 'quota_exceeded':
+      return `Install of ${packName} failed: browser storage quota exceeded. Free up some space (Settings → Site settings → Storage) and try again, or pick a smaller pack.`;
+    case 'oom':
+      return `Install of ${packName} failed: your phone ran out of memory while hashing the download. Close other apps + tabs and retry, or pick a smaller pack.`;
+    case 'network_aborted':
+      return `Install of ${packName} interrupted: network dropped mid-download. Reconnect to WiFi and try again — install is restart-safe.`;
+    case 'no_opfs':
+      return `Install of ${packName} failed: this browser does not support on-device storage. Use Chrome / Edge 102+ on Android, or Safari 17+ on iOS.`;
+    case 'no_crypto':
+      return `Install of ${packName} failed: this browser does not support SHA-256 verification. Use a modern browser (any 2023+ release).`;
+    case 'no_streaming_fetch':
+      return `Install of ${packName} failed: this browser cannot stream large downloads. Use Chrome / Edge / Firefox / Safari 17+.`;
+    case 'mirror_status':
+      return `Install of ${packName} failed: the model mirror returned an error. Try again in a moment.`;
+    case 'no_opfs_dir':
+      return `Install of ${packName} failed: could not open the browser's private storage. Restart the browser and try again.`;
+    default:
+      return `Install of ${packName} failed: ${err.message}`;
+  }
+}
+
 export function LabsPage() {
   const identity = useActiveIdentity();
   const { data: catalog } = useSlmCatalog();
@@ -69,6 +108,22 @@ export function LabsPage() {
       show('Browser lacks OPFS — install requires Chrome / Edge / Firefox 111+ / Safari 17+.', 'error');
       return;
     }
+
+    // Phase 2a.1.5 — quota preflight. Catches "not enough free space"
+    // BEFORE wasting the user's data on a download that can't land.
+    // Returns ok=true on browsers that don't expose estimate() — the
+    // actual install surfaces the real error.
+    const feasibility = await estimateInstallFeasible(pack.diskBytes);
+    if (!feasibility.ok) {
+      const freeGb = (feasibility.freeBytes / 1_000_000_000).toFixed(1);
+      const needGb = (pack.diskBytes / 1_000_000_000).toFixed(1);
+      show(
+        `Not enough free storage. Need ~${needGb} GB (×1.3 safety margin); your browser has ${freeGb} GB available. Free up some space and try again, or pick the smaller pack.`,
+        'error'
+      );
+      return;
+    }
+
     const ok = window.confirm(
       `Install ${pack.family}${pack.variant ? ' · ' + pack.variant : ''}? ` +
         `Downloads ${formatGb(pack.diskBytes)} from the operator's mirror, ` +
@@ -118,6 +173,11 @@ export function LabsPage() {
         }
       );
     } catch (err) {
+      // Phase 2a.1.5 — discriminated error codes from DownloadFailureError
+      // surface as actionable user copy instead of opaque DOMException text.
+      const failureCode =
+        err instanceof DownloadFailureError ? err.failureCode : 'unknown';
+      const userMessage = mapFailureToUserMessage(failureCode, err as Error, pack);
       record.mutate(
         {
           identityId: identity.id,
@@ -125,10 +185,10 @@ export function LabsPage() {
           runtimeBackend: 'llama_cpp_wasm',
           downloadedBytes: 0,
           status: 'failed',
-          failureReason: (err as Error).message
+          failureReason: `${failureCode}: ${(err as Error).message}`
         },
         {
-          onSuccess: () => show(`Install failed: ${(err as Error).message}`, 'info')
+          onSuccess: () => show(userMessage, 'error')
         }
       );
     } finally {

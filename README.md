@@ -152,6 +152,59 @@ Implemented pieces:
 
 ---
 
+## 🩹 2026-06-03 — Phase 2a.1.5 shipped: Mobile SLM install OOM fix (now actually installable on Android)
+
+User reported "SLM installation failed on my mobile" (Android Chrome).
+A 9-agent Ultracode workflow (5 finders + 1 live HTTP probe + 1 synthesis +
+3 adversarial skeptics) found the root cause:
+
+**`frontend/src/lib/opfs.ts:downloadAndPersist` was allocating ~2.1 GB of
+JS heap during the 1.0 GB Qwen install.** It buffered every downloaded
+chunk in a `chunks: Uint8Array[]` accumulator AND allocated a contiguous
+`new Uint8Array(downloaded)` to feed `subtle.digest('SHA-256')`. Android
+Chrome's per-tab heap budget is ~1 GB → OOM tab kill → user sees "install
+failed" with no actionable hint. The 2.3 GB Phi-3.5 pack would fail
+deterministically.
+
+**Fix — stream the SHA-256:**
+- Drop the in-memory `chunks` accumulator. Each chunk is hashed via
+  `@noble/hashes` (MIT, ~10 KB, pure-JS streaming SHA-256) immediately
+  after writing to OPFS, then released to GC.
+- Peak JS heap drops from ~modelSize to ~chunkSize (≈64 KB).
+- The 2.3 GB Phi pack becomes installable on devices that have the disk
+  space.
+
+**Defense-in-depth + UX improvements (same commit):**
+- NEW `DownloadFailureError` subclass with discriminated `failureCode`
+  (`quota_exceeded | oom | network_aborted | no_opfs | ...`). `Labs.tsx`
+  branches on it via `mapFailureToUserMessage` for actionable copy
+  instead of opaque DOMException text.
+- NEW `estimateInstallFeasible(pack.diskBytes)` preflight via
+  `navigator.storage.estimate()` — refuses installs where free space <
+  1.3× expected; tells the user the exact GB free / needed.
+- Service worker hardened: explicit early-return for `/models/*` + drop
+  `gguf` from `isStaticAsset` regex. Multi-GB GGUFs never enter
+  CacheStorage.
+- Caddy `/models/*` now emits explicit `Content-Type`,
+  `Cross-Origin-Resource-Policy: same-origin`, and
+  `Cache-Control: public, max-age=31536000, immutable` headers.
+  `scripts/bootstrap-vm.sh` synced for reproducibility.
+
+**Adversarial review: ship_with_no_must_fix.** The Ultracode workflow's
+synthesizer's first guess (SPA bundle 404 — based on HEAD-method probes
+which the BE doesn't accept) was correctly refuted by all 3 independent
+skeptics on methodology grounds. Their convergent alternative is what
+landed here.
+
+Notes for follow-up: SF-1 robust `opfsSupported` (createWritable test),
+SF-2 device-tier pack recommendation, SF-3 resumable downloads via
+Range, SF-4 self-host wllama WASM.
+
+**Tests:** 549 vitest (+7 opfs.test.ts) + 1466 Node unchanged + tsc
+clean + `vite build` succeeds. Main bundle 1,291 → 1,299 KB
+(gzip 372 → 376 KB; +8 KB matches @noble/hashes). New dep:
+`@noble/hashes ^1.5.0`. ADR 0173.
+
 ## 🇮🇳 2026-06-03 — Phase 2a.1.1 shipped: bharat-os.com is the canonical URL
 
 **Canonical: https://bharat-os.com/app/**

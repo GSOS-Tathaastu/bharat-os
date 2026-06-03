@@ -2201,6 +2201,41 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.1.5 — SHIPPED 2026-06-03 (ADR 0173).** Mobile SLM install
+  OOM fix. User reported "SLM installation failed on my mobile"
+  (Android Chrome). A 9-agent Ultracode workflow (5 finders + 1 live
+  probe + 1 synthesis + 3 adversarial skeptics) identified the root
+  cause: `frontend/src/lib/opfs.ts:downloadAndPersist` accumulated
+  every downloaded chunk in a `chunks: Uint8Array[]` array AND
+  allocated a contiguous `new Uint8Array(downloaded)` to feed
+  `subtle.digest('SHA-256')` — peak JS heap ~2.1 GB for the 1.0 GB
+  Qwen pack, OOM-killing the Android Chrome tab (per-tab budget
+  ~1 GB). The fix REFACTORED downloadAndPersist to drop the
+  accumulator and stream the hash incrementally via @noble/hashes
+  (MIT, ~10 KB, pure-JS, peak heap drops to ~chunkSize ≈ 64 KB).
+  Also: new `DownloadFailureError` subclass with discriminated
+  `failureCode` (`no_opfs | quota_exceeded | oom | network_aborted | ...`)
+  + `mapFailureToUserMessage` in `Labs.tsx` for actionable copy;
+  pre-install `estimateInstallFeasible` probe via
+  `navigator.storage.estimate()` (1.3× safety margin). Service
+  worker hardened — explicit early-return for /models/* + dropped
+  `gguf` from isStaticAsset regex (defence-in-depth; multi-GB GGUFs
+  never enter CacheStorage). Caddy /models/* now emits explicit
+  Content-Type application/octet-stream + Cross-Origin-Resource-Policy
+  same-origin + Cache-Control public, max-age=31536000, immutable
+  headers (verified live; `scripts/bootstrap-vm.sh` synced for
+  reproducibility). Adversarial review: ship_with_no_must_fix —
+  synthesizer's first guess (SPA bundle 404) was correctly refuted
+  by all 3 skeptics on methodology grounds (HEAD vs GET) and the
+  TRUE cause emerged from the convergent skeptic alternatives.
+  Notes for follow-up: SF-1 robust opfsSupported (createWritable
+  test), SF-2 device-tier pack recommendation, SF-3 resumable
+  downloads via Range, SF-4 self-host wllama WASM. New dep:
+  @noble/hashes ^1.5.0 (MIT, ~10 KB, no native deps). Tests: 549
+  vitest (+7 opfs.test.ts: estimateInstallFeasible behaviour +
+  DownloadFailureError shape) + 1466 Node unchanged + tsc clean +
+  vite build succeeds (main bundle 1,291 → 1,299 KB, gzip 372 → 376
+  KB; +8 KB matches @noble/hashes size). ADR 0173.
 - **Phase 2a.1.1 — SHIPPED 2026-06-03 (ADR 0172).** Real domain.
   Canonical URL now **https://bharat-os.com/app/**. Hostinger DNS
   A records (apex + www) repointed from `2.57.91.91` → `34.0.10.172`;

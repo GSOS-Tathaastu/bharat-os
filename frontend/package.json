@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@noble/hashes": "^1.5.0",
     "@tanstack/react-query": "^5.62.0",
     "@wllama/wllama": "^3.4.1",
     "pdfjs-dist": "^6.0.227",

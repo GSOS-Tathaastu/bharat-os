@@ -133,8 +133,18 @@ ${APEX_DOMAIN} {
 
   # SLM model packs hosted on the VM disk. Caddy ranges + zstd/gzip
   # handle the multi-GB downloads + browser resume-on-interrupt.
+  # Phase 2a.1.5 — explicit headers:
+  #   - Content-Type: some mobile browsers refuse to materialise
+  #     unknown-type responses into a Blob/OPFS write.
+  #   - Cross-Origin-Resource-Policy: defence-in-depth for any
+  #     future COEP-isolated wllama worker context.
+  #   - Cache-Control: prevents redundant re-downloads on flaky
+  #     mobile networks (immutable per content-addressed sha256).
   handle_path /models/* {
     root * ${MODELS_DIR}
+    header Content-Type application/octet-stream
+    header Cross-Origin-Resource-Policy same-origin
+    header Cache-Control "public, max-age=31536000, immutable"
     file_server
   }
 
