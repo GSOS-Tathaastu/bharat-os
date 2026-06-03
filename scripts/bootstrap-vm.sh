@@ -114,11 +114,18 @@ UNIT
 VM_IP=$(curl -fsSL -H 'Metadata-Flavor: Google' \
   http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
 NIP_DOMAIN="${VM_IP//./-}.nip.io"
-log "VM external IP: ${VM_IP}, nip.io domain: ${NIP_DOMAIN}"
+log "VM external IP: ${VM_IP}, nip.io fallback: ${NIP_DOMAIN}"
 
-log 'writing Caddyfile (TLS via nip.io + reverse-proxy to :8787)'
+# Phase 2a.1.1 — apex domain + www redirect to apex + nip.io
+# fallback. The apex (bharat-os.com) is the canonical user-facing
+# URL; www and nip.io both 301 → apex so links never break + SEO
+# stays clean. Override BHARAT_OS_APEX_DOMAIN to point at a
+# different domain when re-running on a new deploy target.
+APEX_DOMAIN="${BHARAT_OS_APEX_DOMAIN:-bharat-os.com}"
+log "writing Caddyfile (apex=${APEX_DOMAIN}, www→apex 301, nip.io→apex 301)"
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDYFILE
-${NIP_DOMAIN} {
+# Phase 2a.1.1 — canonical apex domain + www/nip.io 301 redirects.
+${APEX_DOMAIN} {
   encode zstd gzip
   reverse_proxy 127.0.0.1:8787 {
     header_up X-Forwarded-Proto {scheme}
@@ -128,6 +135,15 @@ ${NIP_DOMAIN} {
     output stdout
     format console
   }
+}
+
+www.${APEX_DOMAIN} {
+  redir https://${APEX_DOMAIN}{uri} permanent
+}
+
+# Fallback — keeps the Phase 2a.1 nip.io URL valid as a redirect.
+${NIP_DOMAIN} {
+  redir https://${APEX_DOMAIN}{uri} permanent
 }
 CADDYFILE
 

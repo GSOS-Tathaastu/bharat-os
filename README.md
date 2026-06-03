@@ -152,6 +152,44 @@ Implemented pieces:
 
 ---
 
+## 🇮🇳 2026-06-03 — Phase 2a.1.1 shipped: bharat-os.com is the canonical URL
+
+**Canonical: https://bharat-os.com/app/**
+
+Hostinger DNS A records (apex + www) repointed from `2.57.91.91`
+(parked Hostinger CDN) → `34.0.10.172` (the GCP VM). Caddy now
+serves three vhost blocks:
+
+- `bharat-os.com` → reverse-proxies `127.0.0.1:8787` (canonical)
+- `www.bharat-os.com` → 301 redirect to apex
+- `34-0-10-172.nip.io` → 301 redirect to apex (preserves the prior
+  Phase 2a.1 link so old shares don't break)
+
+All three have valid Let's Encrypt certs (Caddy auto-fetched on
+first request). `scripts/bootstrap-vm.sh` updated with
+`BHARAT_OS_APEX_DOMAIN` env-var default `bharat-os.com` so re-runs
+reproduce the current Caddyfile state.
+
+No FE code change — the PWA manifest `start_url` and SW scope are
+both path-only (`/app/`), so the apex vs www vs nip.io choice is
+transparent at the manifest level.
+
+Smoke test:
+- `https://bharat-os.com/healthz` → 200 (valid TLS)
+- `https://bharat-os.com/app/` → 200 (valid TLS, 2.9 KB SPA index)
+- `https://www.bharat-os.com/app/` → 301 → apex
+- `https://34-0-10-172.nip.io/app/` → 301 → apex
+
+Adversarial review: ship_with_no_must_fix. Honest URL (domain
+owned by founder); privacy posture unchanged from 2a.1. Notes:
+SF-1 HSTS preload submission once domain is stable for a month,
+SF-2 manifest `related_applications` for TWA wrapper (Phase 2a.3),
+SF-3 Cloudflare in front when traffic justifies.
+
+542 vitest + 1466 Node + tsc clean (no code delta). ADR 0172.
+
+**Phone-install test now uses https://bharat-os.com/app/.**
+
 ## 🌏 2026-06-03 — Phase 2a.1 shipped: Bharat OS is LIVE at https://34-0-10-172.nip.io/app/
 
 First real public HTTPS endpoint. The §13.x revenue lines + SLM USP

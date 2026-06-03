@@ -2201,6 +2201,21 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.1.1 — SHIPPED 2026-06-03 (ADR 0172).** Real domain.
+  Canonical URL now **https://bharat-os.com/app/**. Hostinger DNS
+  A records (apex + www) repointed from `2.57.91.91` → `34.0.10.172`;
+  Caddyfile extended with 3 vhost blocks: `bharat-os.com` (reverse-
+  proxy to 127.0.0.1:8787), `www.bharat-os.com` (301 → apex),
+  `34-0-10-172.nip.io` (301 → apex — preserves the prior Phase
+  2a.1 link). Caddy auto-fetched Let's Encrypt certs for all three
+  on first request. `scripts/bootstrap-vm.sh` updated with
+  `BHARAT_OS_APEX_DOMAIN` env-var default `bharat-os.com` so re-runs
+  reproduce the state. Smoke: apex 200, www 301, nip.io 301, valid
+  TLS on all three. Adversarial review: ship_with_no_must_fix.
+  No code FE change (manifest `start_url` is path-only). 542 vitest
+  + 1466 Node + tsc clean unchanged. ADR 0172. SF-1 HSTS preload
+  submission once stable, SF-2 manifest `related_applications` at
+  TWA ship, SF-3 Cloudflare in front when traffic justifies.
 - **Phase 2a.1 — SHIPPED 2026-06-03 (ADR 0171).** GCP VM
   deployment. Bharat OS is live on the public internet at
   **https://34-0-10-172.nip.io/app/** — first real HTTPS endpoint.

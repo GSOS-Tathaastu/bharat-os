@@ -51,6 +51,11 @@ plus the first half of the on-device-SLM arc.
   static IP `34.0.10.172`, systemd unit + Caddy 2 reverse-proxy +
   auto Let's Encrypt cert via nip.io. Persistent sqlite under
   ~/bharat-os-data. Smoke test passed. ~$28/mo.
+- [x] **Phase 2a.1.1 shipped 2026-06-03 (ADR 0172)** — Real domain
+  **https://bharat-os.com/app/**. Hostinger DNS A records repointed
+  to 34.0.10.172. Caddyfile carries apex + www→apex 301 + nip.io→apex
+  301. Auto Let's Encrypt certs for all 3 hostnames. bootstrap-vm.sh
+  updated with BHARAT_OS_APEX_DOMAIN env var.
 - [ ] **Phase 2a.2 next** — Daily disk snapshot cron + GitHub
   Actions CI/CD pipeline + real domain purchase + COOP/COEP
   headers for wllama multi-thread + PNG icon fallbacks for iOS
