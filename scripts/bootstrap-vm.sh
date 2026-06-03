@@ -122,15 +122,23 @@ log "VM external IP: ${VM_IP}, nip.io fallback: ${NIP_DOMAIN}"
 # stays clean. Override BHARAT_OS_APEX_DOMAIN to point at a
 # different domain when re-running on a new deploy target.
 APEX_DOMAIN="${BHARAT_OS_APEX_DOMAIN:-bharat-os.com}"
-log "writing Caddyfile (apex=${APEX_DOMAIN}, www→apex 301, nip.io→apex 301)"
+MODELS_DIR="${BHARAT_OS_MODELS_DIR:-${HOME}/models}"
+mkdir -p "${MODELS_DIR}"
+log "writing Caddyfile (apex=${APEX_DOMAIN}, /models/ root=${MODELS_DIR}, www→apex 301, nip.io→apex 301)"
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDYFILE
-# Phase 2a.1.1 — canonical apex domain + www/nip.io 301 redirects.
+# Phase 2a.1.4 — canonical apex domain + /models/ static + www/nip.io
+# 301 redirects.
 ${APEX_DOMAIN} {
   encode zstd gzip
-  reverse_proxy 127.0.0.1:8787 {
-    header_up X-Forwarded-Proto {scheme}
-    header_up X-Forwarded-For {remote_host}
+
+  # SLM model packs hosted on the VM disk. Caddy ranges + zstd/gzip
+  # handle the multi-GB downloads + browser resume-on-interrupt.
+  handle_path /models/* {
+    root * ${MODELS_DIR}
+    file_server
   }
+
+  reverse_proxy 127.0.0.1:8787
   log {
     output stdout
     format console
