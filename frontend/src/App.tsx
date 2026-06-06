@@ -156,3 +156,5 @@ export default function App() {
     </>
   );
 }
+
+// SIP live-demo: harmless comment to exercise the deterministic PR-risk verdict.
