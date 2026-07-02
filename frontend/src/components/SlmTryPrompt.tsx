@@ -80,9 +80,15 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
     setPaisePaid(null);
     const startedAt = performance.now();
     try {
+      // Phase 2a.1.7 — pass systemPrompt + userPrompt so the runtime
+      // applies the correct chat template + stop tokens based on the
+      // loaded model's family. Without this, chat-tuned models like
+      // Qwen2.5-Instruct produce garbage (they try to continue the
+      // raw text instead of answering + never see their end-of-turn
+      // token so they keep generating past the natural response).
       const text = await runtime.generate({
-        prompt: prompt.trim(),
-        maxTokens: 128,
+        userPrompt: prompt.trim(),
+        maxTokens: 256,
         onToken: (_token, partial) => setOutput(partial)
       });
       setOutput(text);

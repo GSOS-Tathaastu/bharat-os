@@ -58,13 +58,88 @@ export interface GradientResult {
   stub?: boolean;
 }
 
+/**
+ * Phase 2a.1.7 — chat template + stop tokens.
+ *
+ * `prompt` is a RAW text completion (no wrapping applied). Use it when
+ * the caller has already applied the correct chat template.
+ *
+ * `systemPrompt` + `userPrompt` (or `messages`) opt into automatic
+ * chat-template wrapping based on the loaded model's family
+ * (metadata.family). The runtime detects Qwen / Phi / Llama shape and
+ * applies the correct wrapper + stop tokens. Without this, chat-tuned
+ * models like Qwen2.5-Instruct produce garbage: the model tries to
+ * continue the raw text instead of answering, then keeps generating
+ * past the end-of-turn token into gibberish.
+ *
+ * At most one of `prompt` / `systemPrompt+userPrompt` / `messages`
+ * should be provided; the runtime picks the first non-empty one.
+ */
 export interface GenerateOptions {
-  prompt: string;
+  prompt?: string;
+  systemPrompt?: string;
+  userPrompt?: string;
+  messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   maxTokens?: number;
   temperature?: number;
   /** Called for each generated token. Return false to stop. */
   onToken?: (token: string, partial: string) => void | boolean;
 }
+
+/**
+ * Phase 2a.1.7 — chat-template registry. Detects model family from
+ * metadata.family and returns (prompt-wrapper, stop-tokens).
+ *
+ * Adding a new family: match on the family substring returned by the
+ * GGUF's `general.name` metadata, then apply the model's canonical
+ * ChatML-style template. Stop tokens are CRITICAL — without them, the
+ * model keeps generating past its end-of-turn marker.
+ */
+export type ChatTemplateApplier = (
+  systemPrompt: string,
+  userPrompt: string
+) => { prompt: string; stopPrompts: string[] };
+
+const QWEN_TEMPLATE: ChatTemplateApplier = (systemPrompt, userPrompt) => ({
+  prompt:
+    `<|im_start|>system\n${systemPrompt}<|im_end|>\n` +
+    `<|im_start|>user\n${userPrompt}<|im_end|>\n` +
+    `<|im_start|>assistant\n`,
+  stopPrompts: ['<|im_end|>', '<|endoftext|>']
+});
+
+const PHI_TEMPLATE: ChatTemplateApplier = (systemPrompt, userPrompt) => ({
+  prompt:
+    `<|system|>\n${systemPrompt}<|end|>\n` +
+    `<|user|>\n${userPrompt}<|end|>\n` +
+    `<|assistant|>\n`,
+  stopPrompts: ['<|end|>', '<|endoftext|>']
+});
+
+const LLAMA3_TEMPLATE: ChatTemplateApplier = (systemPrompt, userPrompt) => ({
+  prompt:
+    `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${systemPrompt}<|eot_id|>` +
+    `<|start_header_id|>user<|end_header_id|>\n\n${userPrompt}<|eot_id|>` +
+    `<|start_header_id|>assistant<|end_header_id|>\n\n`,
+  stopPrompts: ['<|eot_id|>', '<|end_of_text|>']
+});
+
+/** Family fallback: naive completion + no stop tokens. Chat-tuned
+ *  models will produce garbage; only use for base models. */
+const RAW_TEMPLATE: ChatTemplateApplier = (systemPrompt, userPrompt) => ({
+  prompt: systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt,
+  stopPrompts: []
+});
+
+export function pickChatTemplateForFamily(family: string): ChatTemplateApplier {
+  const f = family.toLowerCase();
+  if (f.includes('qwen')) return QWEN_TEMPLATE;
+  if (f.includes('phi-3') || f.includes('phi3') || f.includes('phi 3')) return PHI_TEMPLATE;
+  if (f.includes('llama-3') || f.includes('llama3') || f.includes('llama 3')) return LLAMA3_TEMPLATE;
+  return RAW_TEMPLATE;
+}
+
+const DEFAULT_SYSTEM_PROMPT = 'You are Bharat OS, a helpful India-first assistant. Answer clearly and briefly.';
 
 export interface SlmRuntimeMetadata {
   family: string;
@@ -158,15 +233,81 @@ export async function loadSlmRuntime(opts: LoadOptions): Promise<SlmRuntime> {
       contextSize: meta.hparams.nCtxTrain,
       vocabSize: meta.hparams.nVocab
     },
-    async generate({ prompt, maxTokens = 128, temperature = 0.7, onToken }) {
+    async generate({
+      prompt,
+      systemPrompt,
+      userPrompt,
+      messages,
+      maxTokens = 128,
+      temperature,
+      onToken
+    }) {
+      // Phase 2a.1.7 — build the final prompt + stop tokens based on
+      // which input shape the caller used.
+      //
+      // Precedence (first non-empty wins): messages → systemPrompt+userPrompt
+      // → prompt (raw). Chat inputs get automatic templating + stop
+      // tokens based on model family; raw prompts get neither.
+      const modelFamily = String(meta.meta?.['general.name'] ?? 'unknown');
+      const applyTemplate = pickChatTemplateForFamily(modelFamily);
+
+      let finalPrompt: string;
+      let stopPrompts: string[];
+      let effectiveTemperature = temperature;
+
+      if (messages && messages.length > 0) {
+        // Multi-turn conversation: fold system messages into a single
+        // system prompt, concatenate user/assistant turns per family
+        // template. For v1 we only wrap the FIRST user turn — proper
+        // multi-turn folding lands in a future phase when we need it.
+        const systemFromMessages =
+          messages.find((m) => m.role === 'system')?.content ?? DEFAULT_SYSTEM_PROMPT;
+        const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+        const userText = lastUserMessage?.content ?? '';
+        const applied = applyTemplate(systemFromMessages, userText);
+        finalPrompt = applied.prompt;
+        stopPrompts = applied.stopPrompts;
+        if (effectiveTemperature === undefined) effectiveTemperature = 0.3;
+      } else if (userPrompt) {
+        const applied = applyTemplate(systemPrompt ?? DEFAULT_SYSTEM_PROMPT, userPrompt);
+        finalPrompt = applied.prompt;
+        stopPrompts = applied.stopPrompts;
+        if (effectiveTemperature === undefined) effectiveTemperature = 0.3;
+      } else {
+        // Raw completion. Backwards-compat for callers that build their
+        // own prompt (existing hooks + skill agents). No stop tokens, no
+        // template — the caller is responsible for both.
+        finalPrompt = prompt ?? '';
+        stopPrompts = [];
+        if (effectiveTemperature === undefined) effectiveTemperature = 0.7;
+      }
+
+      if (!finalPrompt) {
+        throw new Error(
+          'generate() requires one of: prompt, systemPrompt+userPrompt, or messages.'
+        );
+      }
+
       let partial = '';
       let stop = false;
-      const stream = (await wllama.createCompletion({
-        prompt,
+      const completionArgs: {
+        prompt: string;
+        nPredict: number;
+        sampling: { temp: number };
+        stream: boolean;
+        stopPrompts?: string[];
+      } = {
+        prompt: finalPrompt,
         nPredict: maxTokens,
-        sampling: { temp: temperature },
+        sampling: { temp: effectiveTemperature },
         stream: true
-      } as Parameters<typeof wllama.createCompletion>[0])) as AsyncIterable<{
+      };
+      if (stopPrompts.length > 0) {
+        completionArgs.stopPrompts = stopPrompts;
+      }
+      const stream = (await wllama.createCompletion(
+        completionArgs as Parameters<typeof wllama.createCompletion>[0]
+      )) as AsyncIterable<{
         currentText?: string;
         token?: number | { text?: string };
       }>;
@@ -177,6 +318,18 @@ export async function loadSlmRuntime(opts: LoadOptions): Promise<SlmRuntime> {
             ? chunk.token.text
             : (chunk.currentText ?? '').slice(partial.length);
         partial += token;
+        // Phase 2a.1.7 — defence-in-depth stop-token check on the
+        // rolling partial. Some wllama versions don't honour
+        // stopPrompts perfectly; slice off any leaked end-of-turn
+        // marker so it never reaches the UI.
+        for (const s of stopPrompts) {
+          const idx = partial.indexOf(s);
+          if (idx !== -1) {
+            partial = partial.slice(0, idx);
+            stop = true;
+            break;
+          }
+        }
         if (onToken) {
           const result = onToken(token, partial);
           if (result === false) stop = true;
