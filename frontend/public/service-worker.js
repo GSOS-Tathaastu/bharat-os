@@ -16,7 +16,12 @@
 // Versioning: bump SW_VERSION on any cache-strategy change. The
 // activate handler wipes any caches whose names don't match.
 
-const SW_VERSION = 'bharat-os-pwa-v1';
+// Phase 2a.1.8 — SW_VERSION bumped to force old asset caches to be wiped
+// on next activation. The prior wllama pathConfig referenced a 404'ing
+// jsdelivr sub-path; any browser that visited the site pre-2a.1.8 might
+// still have the broken JS bundle in its stale-while-revalidate cache.
+// Bumping the version makes activate() drop those caches.
+const SW_VERSION = 'bharat-os-pwa-v2';
 const PRECACHE = `${SW_VERSION}-precache`;
 const RUNTIME = `${SW_VERSION}-runtime`;
 
