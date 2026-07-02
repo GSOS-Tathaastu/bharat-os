@@ -470,6 +470,11 @@ function contentTypeFor(filePath) {
   if (ext === '.webmanifest' || ext === '.json') return 'application/manifest+json; charset=utf-8';
   if (ext === '.png') return 'image/png';
   if (ext === '.ico') return 'image/x-icon';
+  // Phase 2a.1.8 — WebAssembly binary. application/wasm is the correct
+  // MIME + it enables WebAssembly.instantiateStreaming's fast path
+  // (which validates types + starts compilation while bytes are still
+  // arriving). Wllama's WASM loader uses this path when available.
+  if (ext === '.wasm') return 'application/wasm';
   return 'application/octet-stream';
 }
 
@@ -479,7 +484,13 @@ async function staticResponse(response, filePath) {
   // PWA app-shell assets need to be cacheable so the service worker can
   // store them for offline use. Everything else stays no-store so dev
   // iteration on the console doesn't fight the cache.
-  const cacheable = ['manifest.webmanifest', 'icon.svg', 'service-worker.js'].includes(base);
+  // Phase 2a.1.8 — wllama.wasm is content-addressed by version (URL
+  // includes /app/wllama/) and rarely changes; caching it aggressively
+  // saves ~5-15 MB re-downloads on every page load.
+  const ext = path.extname(filePath).toLowerCase();
+  const cacheable =
+    ['manifest.webmanifest', 'icon.svg', 'service-worker.js'].includes(base) ||
+    ext === '.wasm';
   response.writeHead(200, {
     'content-type': contentTypeFor(filePath),
     'cache-control': cacheable ? 'public, max-age=3600' : 'no-store'

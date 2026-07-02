@@ -183,11 +183,29 @@ export async function loadSlmRuntime(opts: LoadOptions): Promise<SlmRuntime> {
   // wllama 3.x exposes WLLAMA_CONFIG_PATHS via the npm package's
   // /esm/wasm directory — but those local files are dev-only. The
   // public jsDelivr CDN serves the same bytes for browser use.
-  const WLLAMA_CDN_BASE = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.4.1/esm/wasm/';
+  //
+  // Phase 2a.1.8 — SELF-HOSTED. The previous pathConfig referenced
+  // `single-thread/wllama.wasm` and `multi-thread/wllama.wasm`
+  // sub-paths that DO NOT EXIST in wllama 3.4.1 (verified: jsdelivr
+  // returns 404 for those paths, only the flat `wllama.wasm` at the
+  // base exists). This caused wllama.loadModel to hang at "Loading
+  // runtime… 0%" on any mobile browser without a cached WASM binary.
+  // Fixed by:
+  //   1. Bundling wllama.wasm into public/wllama/ at build time via
+  //      the prebuild copy-wllama-wasm.mjs script.
+  //   2. Pointing pathConfig at same-origin /app/wllama/ (Vite copies
+  //      frontend/public/wllama/ verbatim to public/app/build/wllama/
+  //      which the BE serves at /app/wllama/*).
+  //   3. Correcting the flat path — no `single-thread/` sub-dir.
+  //
+  // Benefit: no third-party CDN dependency for the runtime WASM,
+  // survives cdn.jsdelivr.net outages / captive portals / corporate
+  // firewalls, faster on mobile networks in India where cross-border
+  // CDN latency was material.
+  const WLLAMA_BASE = '/app/wllama/';
   const pathConfig = {
-    default: WLLAMA_CDN_BASE,
-    'single-thread/wllama.wasm': `${WLLAMA_CDN_BASE}single-thread/wllama.wasm`,
-    'multi-thread/wllama.wasm': `${WLLAMA_CDN_BASE}multi-thread/wllama.wasm`
+    default: WLLAMA_BASE,
+    'wllama.wasm': `${WLLAMA_BASE}wllama.wasm`
   };
 
   const wllama = new Wllama(pathConfig, {

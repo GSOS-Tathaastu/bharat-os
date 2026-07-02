@@ -6,6 +6,7 @@
   "description": "Bharat OS frontend — the /app/ surface (Phase 11 rebuild, ADR 0115).",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/copy-wllama-wasm.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",

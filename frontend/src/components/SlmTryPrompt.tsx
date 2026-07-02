@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Action, Card, Evidence, useToast } from '@/components/ui';
 import { readSlmBlob } from '@/lib/opfs';
 import { getSharedSlmRuntime, type SlmRuntime } from '@/lib/slm-runtime';
@@ -29,9 +29,29 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
   const [output, setOutput] = useState('');
   const [busy, setBusy] = useState<'idle' | 'loading' | 'generating'>('idle');
   const [loadProgress, setLoadProgress] = useState(0);
+  const [loadElapsedSec, setLoadElapsedSec] = useState(0);
   const [generationMs, setGenerationMs] = useState<number | null>(null);
   const [paisePaid, setPaisePaid] = useState<number | null>(null);
   const runtimeRef = useRef<SlmRuntime | null>(null);
+
+  // Phase 2a.1.8 — elapsed-time heartbeat during runtime load. The
+  // wllama loadModel callback doesn't fire progress ticks until AFTER
+  // the WASM binary is fetched + compiled + weights start streaming
+  // in; if the WASM fetch is slow the UI would sit at "Loading
+  // runtime… 0%" with no feedback. This ticks a seconds counter so
+  // the user can see something is happening + we surface a "network
+  // slow, still loading" hint after 30 seconds.
+  useEffect(() => {
+    if (busy !== 'loading') {
+      setLoadElapsedSec(0);
+      return;
+    }
+    const startedAt = performance.now();
+    const id = setInterval(() => {
+      setLoadElapsedSec(Math.round((performance.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [busy]);
   const show = useToast((s) => s.show);
   const identity = useActiveIdentity();
   const recordEvent = useRecordMeshEvent();
@@ -164,11 +184,19 @@ export function SlmTryPrompt({ modelPackId, family, onClose }: SlmTryPromptProps
       <div className="mt-3 flex flex-wrap gap-2">
         <Action onClick={handleGenerate} disabled={busy !== 'idle'}>
           {busy === 'loading'
-            ? `Loading runtime… ${loadProgress}%`
+            ? loadProgress > 0
+              ? `Loading model… ${loadProgress}% (${loadElapsedSec}s)`
+              : `Fetching runtime WASM… ${loadElapsedSec}s`
             : busy === 'generating'
               ? 'Generating…'
               : 'Generate'}
         </Action>
+        {busy === 'loading' && loadProgress === 0 && loadElapsedSec > 30 && (
+          <span className="text-caption text-text-muted">
+            Runtime is taking longer than usual. On a slow connection this can be
+            up to a minute for the first load; the WASM binary is cached after.
+          </span>
+        )}
       </div>
       {output && (
         <div className="mt-4 rounded-sm border border-trust-100 bg-white p-3">
