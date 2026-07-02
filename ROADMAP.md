@@ -90,6 +90,47 @@ plus the first half of the on-device-SLM arc.
   quota issue caused by `createWritable()` internal swap-file
   state. `removeEntry()` before every install self-heals retries;
   NEW `clearAllInstalledPacks()` + `safeQuotaSnapshot()` helpers.
+- [x] **Phase 2a.1.7 shipped 2026-07-02 (commit 306e836)** — chat
+  template + stop tokens in `slm-runtime.ts`. Family-detected
+  (Qwen ChatML / Phi-3 / Llama-3 / raw fallback) via
+  `metadata.family` from the GGUF. `GenerateOptions` accepts
+  `{userPrompt, systemPrompt}` OR `{messages}` OR raw `{prompt}`
+  (backwards compat). Defence-in-depth trim at stop-token
+  substrings. `SlmTryPrompt` passes `userPrompt`. 7 new vitest
+  cases pin family detection + template shape + stop tokens.
+  Fixes the garbage-output symptom on chat-tuned models but
+  exposed the next bug (2a.1.8).
+- [x] **Phase 2a.1.8 shipped 2026-07-02 (commit c6c7d57)** —
+  self-host `wllama.wasm` + fix broken pathConfig. The prior
+  config referenced 404'ing `single-thread/wllama.wasm` sub-path
+  under jsdelivr → runtime loader hung at "Loading runtime… 0%".
+  NEW `frontend/scripts/copy-wllama-wasm.mjs` prebuild step
+  copies wllama.wasm (7.3 MB) into `frontend/public/wllama/`
+  which Vite ships at `/app/wllama/*`. pathConfig now correctly
+  points at flat same-origin path. Removes jsdelivr dependency
+  entirely. BE adds `.wasm` → `application/wasm` MIME + joins
+  cacheable list. `SlmTryPrompt` gets elapsed-time heartbeat
+  so future hangs are visible instead of stuck-at-0% guessing.
+  Verified live via curl (HTTP 200 application/wasm 7,308,965
+  bytes).
+- [x] **Phase 2a.1.8.1 shipped 2026-07-02 (commit 607724b)** —
+  bump SW_VERSION v1 → v2 to wipe stale asset caches after
+  2a.1.8 deploy. Founder still saw pre-2a.1.8 JS bundle after
+  clearing site data → **root cause moved to next session**
+  (likely PWA-standalone SW / Chrome Data Saver / carrier
+  proxy). Class-of-bug fix flagged: SF-3 in-app "Update
+  available · Reload" banner to make SW-cache staleness
+  self-heal for every user.
+- [ ] **Next session — priority order:**
+  1. Ship the SF-3 "Update available · Reload" in-app banner
+     (make SW cache staleness self-heal permanently)
+  2. Restart the VM
+     (`gcloud compute instances start bharat-os-vm
+     --zone=asia-south2-a --project=bharat-os-prod`)
+  3. Test SLM chat on a device with fresh cache to verify
+     2a.1.7 + 2a.1.8 fixes actually work end-to-end
+  4. Then debug founder's specific-device cache layer with
+     `chrome://inspect` if still broken
 - [ ] **Phase 2a.2 next** — Daily disk snapshot cron + GitHub
   Actions CI/CD pipeline + real domain purchase + COOP/COEP
   headers for wllama multi-thread + PNG icon fallbacks for iOS

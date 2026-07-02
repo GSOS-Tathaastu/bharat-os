@@ -152,6 +152,102 @@ Implemented pieces:
 
 ---
 
+## 🧠 2026-07-02 — Phase 2a.1.7 + 2a.1.8 + 2a.1.8.1 shipped: SLM chat activation debug arc
+
+Founder came back to test the SLM chat surface (`SlmTryPrompt` at
+`/app/labs`) after successfully installing Qwen2.5-1.5B on Android
+Chrome. Hit **three distinct bugs** across the runtime chain — the
+first two were fixed cleanly; the third (service-worker cache
+staleness) is still blocking on the founder's specific device and
+moves to the next session.
+
+### 2a.1.7 — Chat template + stop tokens (commit 306e836)
+
+Founder's "Try a prompt" → coherent-first-token → then descent into
+garbage. Root cause: Qwen2.5-Instruct is chat-fine-tuned but
+`runtime.generate({prompt})` was sending the raw prompt directly to
+`wllama.createCompletion` — no ChatML wrapper, no stop tokens. Model
+tried to continue the raw text instead of chatting, then never saw
+`<|im_end|>` so kept generating past its end-of-turn marker into
+gibberish.
+
+Fix: NEW `pickChatTemplateForFamily(family)` in `slm-runtime.ts`
+that detects Qwen / Phi-3 / Llama-3 from `metadata.family` and
+applies the family-specific ChatML wrapper + stop tokens. NEW
+`GenerateOptions` shape accepts `{userPrompt, systemPrompt}` or
+`{messages}` for auto-templated chat OR raw `{prompt}` for
+backwards compat. Default temp drops 0.7 → 0.3 for chat inputs.
+Defence-in-depth: rolling partial is sliced at any stop-token
+substring in case wllama misbehaves. `SlmTryPrompt` passes
+`userPrompt`. `maxTokens` raised 128 → 256.
+
+Tests: 7 new vitest cases pinning family detection + template shape
++ stop tokens.
+
+### 2a.1.8 — Self-host wllama WASM (commit c6c7d57)
+
+Retested → got NEW failure: "Loading Runtime… 0%" stuck forever.
+Root cause: `pathConfig` referenced `single-thread/wllama.wasm` +
+`multi-thread/wllama.wasm` under `cdn.jsdelivr.net`. Verified via
+`curl -I`: those sub-paths return HTTP 404 for wllama 3.4.1 — only
+the flat `wllama.wasm` exists at the base. Wllama silently retried
+against dead URLs; `onProgress` never fired.
+
+Fix: NEW `frontend/scripts/copy-wllama-wasm.mjs` prebuild step
+copies `node_modules/@wllama/wllama/esm/wasm/wllama.wasm` (7.3 MB)
+→ `frontend/public/wllama/`. Vite copies verbatim to
+`public/app/build/wllama/` which BE serves at `/app/wllama/*`.
+pathConfig now `{default: '/app/wllama/', 'wllama.wasm':
+'/app/wllama/wllama.wasm'}` — same-origin, correct flat path.
+Removes `cdn.jsdelivr.net` dependency entirely (helps on Indian
+mobile networks + captive portals).
+
+Also: BE `contentTypeFor` adds `.wasm` → `application/wasm`
+(enables `WebAssembly.instantiateStreaming` fast path). wllama.wasm
+joins the cacheable list (7 MB × every page load was wasteful).
+`SlmTryPrompt` gets elapsed-time heartbeat: "Fetching runtime WASM…
+Xs" (before progress ticks) → "Loading model… Y% (Xs)" (after).
+Above 30s at 0% surface a hint so future hangs are visible.
+
+Verified live: `curl -sS -o /dev/null -w '%{http_code} %{content_type}
+%{size_download}\n' https://bharat-os.com/app/wllama/wllama.wasm` →
+`HTTP 200 application/wasm 7308965`.
+
+### 2a.1.8.1 — Bump SW_VERSION v1 → v2 (commit 607724b)
+
+Retested → founder STILL saw pre-2a.1.8 button text ("Loading
+runtime… 0%" with `%` symbol, not the new seconds format).
+Confirms service-worker was serving the OLD JS bundle from cache.
+Bumped `SW_VERSION` so the activate handler wipes stale caches on
+next SW activation.
+
+Limitation: SW activation only happens after all tabs using the
+old SW close. Founder cleared site data + reloaded and still saw
+old bundle → **root cause moved to next session.**
+
+**Three hypotheses to test next session:**
+1. PWA-standalone SW is separate from the browser tab's SW (if
+   founder added to home screen). Long-press home icon → App info
+   → Storage → Clear cache. Or uninstall + reinstall the PWA.
+2. Chrome Data Saver / Preload pages caching HTML at a Google
+   proxy layer above our SW.
+3. ISP or mobile-carrier transparent proxy caching the JS bundle
+   independent of our SW.
+
+**Class-of-bug fix (prioritise next session):** Ship SF-3
+"Update available · Reload" in-app banner that catches the SW's
+`updatefound` event and prompts the user to reload immediately.
+This makes SW-cache staleness self-heal for every user + prevents
+this scenario from being a debugging obstacle in every future
+deploy.
+
+**VM STOPPED at close** — persistent disk + IP preserved.
+Restart: `gcloud compute instances start bharat-os-vm
+--zone=asia-south2-a --project=bharat-os-prod`. All sqlite state
++ installed model packs + demo personas persist through the stop.
+
+Tests: 557 vitest + tsc clean + `vite build` succeeds.
+
 ## 🔄 2026-06-03 — Phase 2a.1.6 shipped: Stale OPFS cleanup + "Clear stale install state" button
 
 Direct follow-up to Phase 2a.1.5. Founder retested on desktop Chrome

@@ -2201,6 +2201,93 @@ sequencing.
   verifier check authenticity. Settings page gains transparency
   strip showing the audit signer id + Ed25519 public key. Node
   854 → 865. Bundle 362 → 363 KB / 111 KB gzipped (+1 KB).
+- **Phase 2a.1.8.1 — SHIPPED 2026-07-02 (commit 607724b; no
+  ADR — 1-line fix on top of 2a.1.8).** Bump SW_VERSION v1 →
+  v2 so the activate handler wipes stale asset caches after the
+  2a.1.8 deploy. Direct follow-up to 2a.1.8: founder retested
+  and STILL saw the pre-2a.1.8 button text ("Loading runtime…
+  0%" with % symbol) — confirming service-worker was serving
+  cached OLD JS bundle. SW activation only triggers after all
+  tabs using the old SW close; refreshing an open tab is not
+  enough. **Founder still saw old bundle after clearing site
+  data + reload; root cause moved to next session** (likely
+  PWA-standalone SW separate from browser tab, or Chrome
+  Data Saver / mobile-carrier transparent proxy). See
+  [[phase-2a-1-8-1-sw-version-bump-shipped]] for full three-
+  hypothesis pickup. Next-session priority: ship SF-3 in-app
+  "Update available · Reload" banner so this class of SW-cache
+  staleness self-heals for every user.
+- **Phase 2a.1.8 — SHIPPED 2026-07-02 (commit c6c7d57; no ADR
+  — direct follow-up to 2a.1.7).** Self-host wllama.wasm +
+  fix broken pathConfig. Founder retested 2a.1.7 chat template
+  fix, hit NEW failure — stuck at "Loading Runtime… 0%"
+  forever, no ticks. Root cause: two coupled bugs. (1) WRONG
+  SUB-PATH: pathConfig in slm-runtime.ts referenced
+  `single-thread/wllama.wasm` + `multi-thread/wllama.wasm`
+  under cdn.jsdelivr.net; verified via curl -I those sub-paths
+  return HTTP 404 on wllama 3.4.1 (only flat `wllama.wasm` at
+  the base exists). Wllama's WASM loader silently retried
+  against the dead URLs; onProgress never fired because
+  loadModel never got past WASM instantiation. (2) THIRD-PARTY
+  CDN DEPENDENCY on cdn.jsdelivr.net (prior workflow flagged
+  as SF-4 self-host wllama WASM). Fix: NEW
+  `frontend/scripts/copy-wllama-wasm.mjs` — prebuild step that
+  copies node_modules/@wllama/wllama/esm/wasm/wllama.wasm
+  (7.3 MB) → frontend/public/wllama/. Vite copies verbatim to
+  public/app/build/wllama/wllama.wasm which BE serves at
+  /app/wllama/*. package.json `prebuild` hook wires it into
+  every build. .gitignore excludes the build artefact.
+  slm-runtime.ts pathConfig now `{default: '/app/wllama/',
+  'wllama.wasm': '/app/wllama/wllama.wasm'}` — same-origin,
+  correct flat path. api.mjs contentTypeFor adds `.wasm` →
+  `application/wasm` (enables WebAssembly.instantiateStreaming
+  fast path). wllama.wasm joins the cacheable list
+  (max-age=3600). SlmTryPrompt gets elapsed-time heartbeat —
+  "Fetching runtime WASM… Xs" (before progress ticks) →
+  "Loading model… Y% (Xs)" (after); above 30s at 0% surface
+  "Runtime is taking longer than usual" hint so future hangs
+  are visible instead of stuck-at-0% guessing. Verified live:
+  curl to `https://bharat-os.com/app/wllama/wllama.wasm`
+  returns 200 application/wasm 7,308,965 bytes both from VM
+  localhost and public URL. 557 vitest + tsc clean + vite
+  build succeeds. Follow-up 2a.1.8.1 shipped when the founder
+  still saw old JS after this deploy.
+- **Phase 2a.1.7 — SHIPPED 2026-07-02 (commit 306e836; no ADR
+  — targeted fix, tested).** Chat template + stop tokens.
+  Founder installed Qwen2.5-1.5B on Android Chrome
+  successfully (2a.1.5 + 2a.1.6 fixes worked) but "Try a
+  prompt" produced garbage output. Root cause: two coupled
+  bugs. (1) NO CHAT TEMPLATE — runtime.generate({prompt})
+  passed raw user prompt directly to wllama.createCompletion.
+  Qwen2.5-Instruct (Phi-3.5-mini-instruct, Llama-3.2-Instruct)
+  are chat-fine-tuned — they expect their family-specific
+  ChatML-style wrapper. Without it the model treats input as
+  text-completion and produces confused continuations.
+  (2) NO STOP TOKENS — even when the model responded well, it
+  never saw <|im_end|> / <|end|> / <|eot_id|> in stopPrompts,
+  so it kept generating past its own end-of-turn marker into
+  gibberish. Fix (slm-runtime.ts): NEW
+  pickChatTemplateForFamily(family) — case-insensitive
+  substring match on metadata.family; NEW ChatTemplateApplier
+  type; NEW QWEN_TEMPLATE / PHI_TEMPLATE / LLAMA3_TEMPLATE /
+  RAW_TEMPLATE (unknown-family fallback). GenerateOptions
+  interface extended to accept EITHER raw `prompt` OR
+  `systemPrompt+userPrompt` OR `messages`. First non-empty
+  wins. Chat inputs get automatic templating + stop tokens;
+  raw prompts get neither (backwards compat). Default
+  temperature drops 0.7 → 0.3 for chat inputs; stays 0.7 for
+  raw. Defence-in-depth: after every token the rolling partial
+  is sliced at any stop-token substring in case wllama doesn't
+  honour stopPrompts. SlmTryPrompt passes `userPrompt` (was
+  `prompt`); maxTokens raised 128 → 256. NEW
+  slm-runtime.chat-template.test.ts — 7 cases pinning family
+  detection + template shape + stop tokens. 557 vitest (+7)
+  + tsc clean. Migration for existing SLM consumers (doc-
+  summariser, PII redactor, skill agents, compute-auto-serve):
+  still work via raw `prompt` (backwards compat); migrating
+  them to `userPrompt` for full chat-template benefits is a
+  follow-up polish phase per-consumer. Exposed the NEXT bug
+  (2a.1.8 wllama load hang).
 - **Phase 2a.1.6 — SHIPPED 2026-06-03 (commit 01a69a2; no ADR
   — direct follow-up to ADR 0173).** Stale OPFS cleanup +
   preserve `downloadedBytes` through error path + quota numbers
